@@ -35,4 +35,18 @@ pub enum ParseError {
 
     #[error("unknown extinfo message type {0}")]
     InvalidExtInfoType(i32),
+
+    #[error("while parsing packet `{packet}`: {source}")]
+    InPacket {
+        packet: &'static str,
+        #[source]
+        source: Box<ParseError>,
+    },
+
+    #[error("while parsing field `{field}`: {source}")]
+    InField {
+        field: &'static str,
+        #[source]
+        source: Box<ParseError>,
+    },
 }
