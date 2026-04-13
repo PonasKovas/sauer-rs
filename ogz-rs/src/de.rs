@@ -343,8 +343,9 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         }
     }
 
-    let mut pvs_data = vec![0u8; numpvs as usize];
+    let mut pvs_data = Vec::new();
     if version >= 25 && numpvs > 0 {
+        pvs_data = vec![0u8; numpvs as usize];
         cursor.read_exact(&mut pvs_data)?;
     }
 
