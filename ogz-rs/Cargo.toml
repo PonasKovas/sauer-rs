@@ -1,14 +1,11 @@
 [package]
 name = "ogz-rs"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "A parser and serializer for the Cube 2: Sauerbraten .ogz map format."
 
 [dependencies]
+cube-string.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
-mint.workspace = true
-
-[dev-dependencies]
 flate2.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
+
