@@ -60,7 +60,7 @@ fn test_chan0_client_roundtrip() {
         Chan0Client::Position {
             pos: PlayerPosition {
                 client_num: 123,
-                phys_state: 1,
+                phys_state: PhysState::Fall,
                 flags: 0x7F, // Enable all bitflags (tests the maximum payload size & sign extensions)
                 pos: Vector3 {
                     x: -10.0,
@@ -104,7 +104,7 @@ fn test_chan1_client_roundtrip() {
         R,
         Chan1Client::Connect {
             name: cstr("SauerPlayer"),
-            player_model: 2,
+            player_model: PlayerModel::Ogro2,
             password_hash: cstr("hash_123"),
             auth_desc: cstr("local"),
             auth_name: cstr("admin"),
@@ -228,7 +228,7 @@ fn test_chan1_client_roundtrip() {
             name: cstr("NewName"),
         }
     );
-    assert_roundtrip!(R, Chan1Client::SwitchModel { model: 1 });
+    assert_roundtrip!(R, Chan1Client::SwitchModel { model: PlayerModel::Snoutx10k });
     assert_roundtrip!(R, Chan1Client::SwitchTeam { team: cstr("evil") });
 
     // Items
@@ -254,11 +254,11 @@ fn test_chan1_client_roundtrip() {
         R,
         Chan1Client::MapVote {
             map_name: cstr("forge"),
-            mode: 2,
+            mode: GameMode::TeamPlay,
         }
     );
     assert_roundtrip!(R, Chan1Client::ForceIntermission);
-    assert_roundtrip!(R, Chan1Client::RecordDemo { val: 1 });
+    assert_roundtrip!(R, Chan1Client::RecordDemo { val: true });
     assert_roundtrip!(R, Chan1Client::StopDemo);
     assert_roundtrip!(R, Chan1Client::ClearDemos { demo_id: 2 });
     assert_roundtrip!(R, Chan1Client::ListDemos);
@@ -272,14 +272,14 @@ fn test_chan1_client_roundtrip() {
     assert_roundtrip!(R, Chan1Client::AddBot { skill: 85 });
     assert_roundtrip!(R, Chan1Client::DelBot);
     assert_roundtrip!(R, Chan1Client::BotLimit { limit: 10 });
-    assert_roundtrip!(R, Chan1Client::BotBalance { balance: 1 });
-    assert_roundtrip!(R, Chan1Client::PauseGame { val: 1 });
+    assert_roundtrip!(R, Chan1Client::BotBalance { balance: true });
+    assert_roundtrip!(R, Chan1Client::PauseGame { val: true });
     assert_roundtrip!(R, Chan1Client::GameSpeed { speed: 150 });
     assert_roundtrip!(
         R,
         Chan1Client::Spectator {
             spectator_cn: 2,
-            val: 1,
+            val: true,
         }
     );
 
@@ -309,7 +309,7 @@ fn test_chan1_client_roundtrip() {
         R,
         Chan1Client::SetMaster {
             client_num: 1,
-            val: 1,
+            val: true,
             hash: cstr("password_hash"),
         }
     );
@@ -323,7 +323,7 @@ fn test_chan1_client_roundtrip() {
     // Coop Edit Map Events
     assert_roundtrip!(R, Chan1Client::GetMap);
     assert_roundtrip!(R, Chan1Client::NewMap { size: 12 });
-    assert_roundtrip!(R, Chan1Client::EditMode { val: 1 });
+    assert_roundtrip!(R, Chan1Client::EditMode { val: true });
     assert_roundtrip!(R, Chan1Client::Remip);
     assert_roundtrip!(R, Chan1Client::Copy);
     assert_roundtrip!(R, Chan1Client::Paste);
@@ -356,7 +356,7 @@ fn test_chan1_client_roundtrip() {
         o: Vector3 { x: 0, y: 0, z: 0 },
         s: Vector3 { x: 1, y: 1, z: 1 },
         grid: 2,
-        orient: 3,
+        orient: Orient::Front,
         cx: 4,
         cxs: 5,
         cy: 6,
@@ -368,7 +368,7 @@ fn test_chan1_client_roundtrip() {
         Chan1Client::EditFace {
             sel: sel.clone(),
             dir: 1,
-            mode: 2,
+            mode: EditFaceMode::Corner,
         }
     );
     assert_roundtrip!(
@@ -376,7 +376,7 @@ fn test_chan1_client_roundtrip() {
         Chan1Client::EditTex {
             sel: sel.clone(),
             tex: 1,
-            all_faces: 2,
+            all_faces: true,
             extra_data: vec![1, 2],
         }
     );
@@ -412,7 +412,7 @@ fn test_chan1_client_roundtrip() {
         Chan1Client::EditVSlot {
             sel: sel.clone(),
             delta: 1,
-            all_faces: 2,
+            all_faces: true,
             extra_data: vec![5, 6],
         }
     );
@@ -423,7 +423,7 @@ fn test_chan1_client_roundtrip() {
             x: 2,
             y: 3,
             z: 4,
-            type_: 5,
+            type_: EntityType::Particles,
             attr1: 6,
             attr2: 7,
             attr3: 8,
@@ -436,7 +436,6 @@ fn test_chan1_client_roundtrip() {
     assert_roundtrip!(
         R,
         Chan1Client::EditVar {
-            var_type: 0,
             name: cstr("fog"),
             val: EditVarValue::Int(100),
         }
@@ -444,7 +443,6 @@ fn test_chan1_client_roundtrip() {
     assert_roundtrip!(
         R,
         Chan1Client::EditVar {
-            var_type: 1,
             name: cstr("waterfallenv"),
             val: EditVarValue::Float(0.5),
         }
@@ -452,7 +450,6 @@ fn test_chan1_client_roundtrip() {
     assert_roundtrip!(
         R,
         Chan1Client::EditVar {
-            var_type: 2,
             name: cstr("maptitle"),
             val: EditVarValue::String(cstr("My Map")),
         }
@@ -486,7 +483,7 @@ fn test_chan1_client_roundtrip() {
         R,
         Chan1Client::Bases {
             bases: vec![BaseSpawn {
-                ammotype: 1,
+                ammotype: Some(ItemType::Shells),
                 pos: Vector3 {
                     x: 1.0,
                     y: 2.0,
@@ -526,7 +523,7 @@ fn test_chan0_server_roundtrip() {
         Chan0Server::Position {
             pos: PlayerPosition {
                 client_num: 123,
-                phys_state: 1,
+                phys_state: PhysState::Fall,
                 flags: 0x7F, // Enable all bitflags (so we test the maximum payload size & sign extension)
                 pos: Vector3 {
                     x: -10.0,
@@ -619,8 +616,8 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::MapChange {
             map_name: cstr("complex"),
-            mode: 2,
-            has_items: 1,
+            mode: GameMode::TeamPlay,
+            has_items: true,
         }
     );
 
@@ -670,7 +667,7 @@ fn test_chan1_server_roundtrip() {
             client_num: 5,
             name: cstr("SauerPlayer"),
             team: cstr("good"),
-            player_model: 3,
+            player_model: PlayerModel::Inky,
         }
     );
     assert_roundtrip!(
@@ -684,7 +681,7 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::SwitchModel {
             client_num: 7,
-            model: 4,
+            model: PlayerModel::CaptainCannon,
         }
     );
     assert_roundtrip!(R, Chan1Server::ClientDisconnected { client_num: 8 });
@@ -695,7 +692,7 @@ fn test_chan1_server_roundtrip() {
         health: 100,
         max_health: 100,
         armour: 50,
-        armour_type: 1,
+        armour_type: ArmourType::Green,
         gun_select: Gun::Rl,
         ammo: vec![10, 20, 30, 40, 50, 60], // Must be exactly 6 elements (SG to Pistol)
     };
@@ -854,7 +851,7 @@ fn test_chan1_server_roundtrip() {
         o: Vector3 { x: 0, y: 0, z: 0 },
         s: Vector3 { x: 1, y: 1, z: 1 },
         grid: 2,
-        orient: 3,
+        orient: Orient::Front,
         cx: 4,
         cxs: 5,
         cy: 6,
@@ -867,7 +864,7 @@ fn test_chan1_server_roundtrip() {
             client_num: 1,
             sel: sel.clone(),
             dir: 1,
-            mode: 2,
+            mode: EditFaceMode::Corner,
         }
     );
     assert_roundtrip!(
@@ -876,7 +873,7 @@ fn test_chan1_server_roundtrip() {
             client_num: 1,
             sel: sel.clone(),
             tex: 1,
-            all_faces: 0,
+            all_faces: false,
             extra_data: vec![1, 2],
         }
     );
@@ -942,7 +939,7 @@ fn test_chan1_server_roundtrip() {
             client_num: 1,
             sel: sel.clone(),
             delta: 1,
-            all_faces: 0,
+            all_faces: false,
             extra_data: vec![5, 6],
         }
     );
@@ -958,7 +955,7 @@ fn test_chan1_server_roundtrip() {
                 y: 2.0,
                 z: 3.0,
             },
-            type_: 3,
+            type_: EntityType::PlayerStart,
             attr1: 4,
             attr2: 5,
             attr3: 6,
@@ -972,7 +969,6 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::EditVar {
             client_num: 1,
-            var_type: 0,
             name: cstr("test_int"),
             val: EditVarValue::Int(42),
         }
@@ -981,7 +977,6 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::EditVar {
             client_num: 1,
-            var_type: 1,
             name: cstr("test_float"),
             val: EditVarValue::Float(3.14),
         }
@@ -990,7 +985,6 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::EditVar {
             client_num: 1,
-            var_type: 2,
             name: cstr("test_str"),
             val: EditVarValue::String(cstr("foo")),
         }
@@ -1107,9 +1101,9 @@ fn test_chan1_server_roundtrip() {
         Chan1Server::InitAi {
             bot_cn: 1,
             owner_cn: 2,
-            ai_type: 3,
+            ai_type: AiType::Bot,
             skill: 85,
-            player_model: 4,
+            player_model: PlayerModel::CaptainCannon,
             name: cstr("Bot"),
             team: cstr("good"),
         }
@@ -1121,10 +1115,10 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::Bases {
             bases: vec![BaseInfo {
-                ammotype: 1,
+                ammotype: Some(ItemType::Shells),
                 owner: cstr("good"),
                 enemy: cstr("evil"),
-                converted: 0,
+                converted: false,
                 ammo: 10,
             }],
         }
@@ -1135,7 +1129,7 @@ fn test_chan1_server_roundtrip() {
             base: 1,
             owner: cstr("good"),
             enemy: cstr(""),
-            converted: 0,
+            converted: false,
             ammo: 5,
         }
     );
@@ -1151,7 +1145,7 @@ fn test_chan1_server_roundtrip() {
         R,
         Chan1Server::RepAmmo {
             client_num: 1,
-            ammotype: 1,
+            ammotype: ItemType::Shells,
         }
     );
     assert_roundtrip!(
@@ -1160,7 +1154,7 @@ fn test_chan1_server_roundtrip() {
             client_num: 1,
             health: 100,
             armour: 50,
-            ammotype: 1,
+            ammotype: ItemType::Shells,
             ammo: 10,
         }
     );
@@ -1174,7 +1168,7 @@ fn test_chan1_server_roundtrip() {
                 version: 1,
                 spawn_index: 2,
                 owner: FlagStateOwner::Owned { owner: 1 },
-                invis: 0,
+                invis: false,
                 hold: Some(FlagStateHoldTeam::None),
             }],
         }
@@ -1232,7 +1226,7 @@ fn test_chan1_server_roundtrip() {
             score: 5,
         }
     );
-    assert_roundtrip!(R, Chan1Server::InvisFlag { flag: 1, invis: 1 });
+    assert_roundtrip!(R, Chan1Server::InvisFlag { flag: 1, invis: true });
 
     // Collect / Tokens Mode
     assert_roundtrip!(

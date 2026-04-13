@@ -1,9 +1,10 @@
 use crate::{
     Chan1Server, ParseError,
     data::{
-        BaseInfo, ClientResumeState, ClientState, ClientTokenState, DroppedToken, EditVarValue,
-        FlagState, FlagStateHoldTeam, FlagStateOwner, Gun, ItemSpawn, ItemType, MasterClient,
-        MasterMode, PlayerState, Privilege, SelInfo, StolenToken, TeamInfo, TokenState, Vector3,
+        AiType, BaseInfo, ClientResumeState, ClientState, ClientTokenState, DroppedToken,
+        EditFaceMode, EditVarValue, EntityType, FlagState, FlagStateHoldTeam, FlagStateOwner,
+        GameMode, Gun, ItemSpawn, ItemType, MasterClient, MasterMode, PlayerModel, PlayerState,
+        Privilege, SelInfo, StolenToken, TeamInfo, TokenState, Vector3,
     },
     internal::{Decode, ReaderCore, constants::*},
 };
@@ -49,11 +50,20 @@ impl Decode for Chan1Server {
                 text: r.get_string()?,
             }),
 
-            N_MAPCHANGE => Ok(Chan1Server::MapChange {
-                map_name: r.get_string()?,
-                mode: r.get_int()?,
-                has_items: r.get_int()?,
-            }),
+            N_MAPCHANGE => {
+                let map_name = r.get_string()?;
+                let mode_val = r.get_int()?;
+                let mode =
+                    GameMode::try_from(mode_val).map_err(|_| ParseError::InvalidEnumValue {
+                        value: mode_val,
+                        enum_name: "GameMode",
+                    })?;
+                Ok(Chan1Server::MapChange {
+                    map_name,
+                    mode,
+                    has_items: r.get_int()? != 0,
+                })
+            }
 
             N_FORCEDEATH => Ok(Chan1Server::ForceDeath {
                 client_num: r.get_int()?,
@@ -84,8 +94,12 @@ impl Decode for Chan1Server {
                 let client_num = r.get_int()?;
                 let name = r.get_string()?;
                 let team = r.get_string()?;
-                let player_model = r.get_int()?;
-
+                let pm_val = r.get_int()?;
+                let player_model =
+                    PlayerModel::try_from(pm_val).map_err(|_| ParseError::InvalidEnumValue {
+                        value: pm_val,
+                        enum_name: "PlayerModel",
+                    })?;
                 Ok(Chan1Server::InitClient {
                     client_num,
                     name,
@@ -99,10 +113,18 @@ impl Decode for Chan1Server {
                 name: r.get_string()?,
             }),
 
-            N_SWITCHMODEL => Ok(Chan1Server::SwitchModel {
-                client_num: r.active_client_num("SwitchModel")?,
-                model: r.get_int()?,
-            }),
+            N_SWITCHMODEL => {
+                let model_val = r.get_int()?;
+                Ok(Chan1Server::SwitchModel {
+                    client_num: r.active_client_num("SwitchModel")?,
+                    model: PlayerModel::try_from(model_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: model_val,
+                            enum_name: "PlayerModel",
+                        }
+                    })?,
+                })
+            }
 
             N_CDIS => Ok(Chan1Server::ClientDisconnected {
                 client_num: r.get_int()?,
@@ -283,17 +305,27 @@ impl Decode for Chan1Server {
                 })
             }
 
-            N_EDITF => Ok(Chan1Server::EditFace {
-                client_num: r.active_client_num("EditFace")?,
-                sel: SelInfo::decode(r)?,
-                dir: r.get_int()?,
-                mode: r.get_int()?,
-            }),
+            N_EDITF => {
+                let sel = SelInfo::decode(r)?;
+                let dir = r.get_int()?;
+                let mode_val = r.get_int()?;
+                Ok(Chan1Server::EditFace {
+                    client_num: r.active_client_num("EditFace")?,
+                    sel,
+                    dir,
+                    mode: EditFaceMode::try_from(mode_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: mode_val,
+                            enum_name: "EditFaceMode",
+                        }
+                    })?,
+                })
+            }
 
             N_EDITT => {
                 let sel = SelInfo::decode(r)?;
                 let tex = r.get_int()?;
-                let all_faces = r.get_int()?;
+                let all_faces = r.get_int()? != 0;
                 let extra_lo = r.get_byte()? as u16;
                 let extra_hi = r.get_byte()? as u16;
                 let extra = extra_lo | (extra_hi << 8);
@@ -360,7 +392,7 @@ impl Decode for Chan1Server {
             N_EDITVSLOT => {
                 let sel = SelInfo::decode(r)?;
                 let delta = r.get_int()?;
-                let all_faces = r.get_int()?;
+                let all_faces = r.get_int()? != 0;
                 let extra_lo = r.get_byte()? as u16;
                 let extra_hi = r.get_byte()? as u16;
                 let extra = extra_lo | (extra_hi << 8);
@@ -378,21 +410,31 @@ impl Decode for Chan1Server {
                 client_num: r.active_client_num("Remip")?,
             }),
 
-            N_EDITENT => Ok(Chan1Server::EditEnt {
-                client_num: r.active_client_num("EditEnt")?,
-                ent_id: r.get_int()?,
-                pos: Vector3 {
+            N_EDITENT => {
+                let ent_id = r.get_int()?;
+                let pos = Vector3 {
                     x: r.get_int()? as f32 / DMF,
                     y: r.get_int()? as f32 / DMF,
                     z: r.get_int()? as f32 / DMF,
-                },
-                type_: r.get_int()?,
-                attr1: r.get_int()?,
-                attr2: r.get_int()?,
-                attr3: r.get_int()?,
-                attr4: r.get_int()?,
-                attr5: r.get_int()?,
-            }),
+                };
+                let type_val = r.get_int()?;
+                Ok(Chan1Server::EditEnt {
+                    client_num: r.active_client_num("EditEnt")?,
+                    ent_id,
+                    pos,
+                    type_: EntityType::try_from(type_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: type_val,
+                            enum_name: "EntityType",
+                        }
+                    })?,
+                    attr1: r.get_int()?,
+                    attr2: r.get_int()?,
+                    attr3: r.get_int()?,
+                    attr4: r.get_int()?,
+                    attr5: r.get_int()?,
+                })
+            }
 
             N_EDITVAR => {
                 let var_type = r.get_int()?;
@@ -410,7 +452,6 @@ impl Decode for Chan1Server {
                 };
                 Ok(Chan1Server::EditVar {
                     client_num: r.active_client_num("EditVar")?,
-                    var_type,
                     name,
                     val,
                 })
@@ -529,15 +570,32 @@ impl Decode for Chan1Server {
                 challenge: r.get_string()?,
             }),
 
-            N_INITAI => Ok(Chan1Server::InitAi {
-                bot_cn: r.get_int()?,
-                owner_cn: r.get_int()?,
-                ai_type: r.get_int()?,
-                skill: r.get_int()?,
-                player_model: r.get_int()?,
-                name: r.get_string()?,
-                team: r.get_string()?,
-            }),
+            N_INITAI => {
+                let bot_cn = r.get_int()?;
+                let owner_cn = r.get_int()?;
+                let ai_type_val = r.get_int()?;
+                let skill = r.get_int()?;
+                let pm_val = r.get_int()?;
+                Ok(Chan1Server::InitAi {
+                    bot_cn,
+                    owner_cn,
+                    ai_type: AiType::try_from(ai_type_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: ai_type_val,
+                            enum_name: "AiType",
+                        }
+                    })?,
+                    skill,
+                    player_model: PlayerModel::try_from(pm_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: pm_val,
+                            enum_name: "PlayerModel",
+                        }
+                    })?,
+                    name: r.get_string()?,
+                    team: r.get_string()?,
+                })
+            }
 
             N_SERVCMD => Ok(Chan1Server::ServCmd {
                 cmd: r.get_string()?,
@@ -560,7 +618,7 @@ impl Decode for Chan1Server {
                     let version = r.get_int()?;
                     let spawn_index = r.get_int()?;
                     let owner_id = r.get_int()?;
-                    let invis = r.get_int()?;
+                    let invis = r.get_int()? != 0;
 
                     let owner = if owner_id < 0 {
                         FlagStateOwner::Dropped {
@@ -647,7 +705,7 @@ impl Decode for Chan1Server {
 
             N_INVISFLAG => Ok(Chan1Server::InvisFlag {
                 flag: r.get_int()?,
-                invis: r.get_int()?,
+                invis: r.get_int()? != 0,
             }),
 
             N_BASES => {
@@ -661,24 +719,42 @@ impl Decode for Chan1Server {
                 }
                 let mut bases = Vec::with_capacity(num_bases as usize);
                 for _ in 0..num_bases {
+                    let ammotype_val = r.get_int()?;
+                    let ammotype = if ammotype_val == 0 {
+                        None
+                    } else {
+                        Some(ItemType::try_from(ammotype_val).map_err(|_| {
+                            ParseError::InvalidEnumValue {
+                                value: ammotype_val,
+                                enum_name: "ItemType",
+                            }
+                        })?)
+                    };
                     bases.push(BaseInfo {
-                        ammotype: r.get_int()?,
+                        ammotype,
                         owner: r.get_string()?,
                         enemy: r.get_string()?,
-                        converted: r.get_int()?,
+                        converted: r.get_int()? != 0,
                         ammo: r.get_int()?,
                     });
                 }
                 Ok(Chan1Server::Bases { bases })
             }
 
-            N_BASEINFO => Ok(Chan1Server::BaseInfo {
-                base: r.get_int()?,
-                owner: r.get_string()?,
-                enemy: r.get_string()?,
-                converted: r.get_int()?,
-                ammo: r.get_int()?,
-            }),
+            N_BASEINFO => {
+                let base = r.get_int()?;
+                let owner = r.get_string()?;
+                let enemy = r.get_string()?;
+                let converted = r.get_int()? != 0;
+                let ammo = r.get_int()?;
+                Ok(Chan1Server::BaseInfo {
+                    base,
+                    owner,
+                    enemy,
+                    converted,
+                    ammo,
+                })
+            }
 
             N_BASESCORE => Ok(Chan1Server::BaseScore {
                 base: r.get_int()?,
@@ -686,18 +762,38 @@ impl Decode for Chan1Server {
                 total: r.get_int()?,
             }),
 
-            N_REPAMMO => Ok(Chan1Server::RepAmmo {
-                client_num: r.get_int()?,
-                ammotype: r.get_int()?,
-            }),
+            N_REPAMMO => {
+                let client_num = r.get_int()?;
+                let ammotype_val = r.get_int()?;
+                Ok(Chan1Server::RepAmmo {
+                    client_num,
+                    ammotype: ItemType::try_from(ammotype_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: ammotype_val,
+                            enum_name: "ItemType",
+                        }
+                    })?,
+                })
+            }
 
-            N_BASEREGEN => Ok(Chan1Server::BaseRegen {
-                client_num: r.get_int()?,
-                health: r.get_int()?,
-                armour: r.get_int()?,
-                ammotype: r.get_int()?,
-                ammo: r.get_int()?,
-            }),
+            N_BASEREGEN => {
+                let client_num = r.get_int()?;
+                let health = r.get_int()?;
+                let armour = r.get_int()?;
+                let ammotype_val = r.get_int()?;
+                Ok(Chan1Server::BaseRegen {
+                    client_num,
+                    health,
+                    armour,
+                    ammotype: ItemType::try_from(ammotype_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: ammotype_val,
+                            enum_name: "ItemType",
+                        }
+                    })?,
+                    ammo: r.get_int()?,
+                })
+            }
 
             N_INITTOKENS => {
                 let scores = [r.get_int()?, r.get_int()?];

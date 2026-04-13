@@ -1,10 +1,16 @@
 use cube_string::{Color, CubeString};
 use enet_rs::{Host, HostConfig, Peer, SendMode};
+use ogz_rs::OgzMap;
+use sauer_map::World;
 use sauer_proto::{
-    Chan1Client, Chan1Server, Reader, Writer,
-    data::{Gun, PlayerState},
-    protocol_route::{C2S, Chan1, S2C},
+    Chan0Client, Chan1Client, Chan1Server, Reader, Writer,
+    data::{ArmourType, GameMode, Gun, PlayerState},
+    protocol_route::{C2S, Chan0, Chan1, S2C},
 };
+
+const MAP: &str = "face-capture";
+const MAP_DATA: &[u8] =
+    include_bytes!("/home/mykolas/Projects/c++/sauerbraten/packages/base/face-capture.ogz");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,6 +38,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn handle_client(mut peer: Peer) -> anyhow::Result<()> {
+    let ogz = OgzMap::parse(MAP_DATA)?;
+
+    let map = World::from_ogz(&ogz);
+
     send_chan1(
         &mut peer,
         &Chan1Server::ServInfo {
@@ -74,9 +84,9 @@ async fn handle_client(mut peer: Peer) -> anyhow::Result<()> {
     send_chan1(
         &mut peer,
         &Chan1Server::MapChange {
-            map_name: "face-capture".into(),
-            mode: 0,
-            has_items: 0,
+            map_name: MAP.into(),
+            mode: GameMode::CoopEdit,
+            has_items: true,
         },
     )
     .await?;
@@ -97,9 +107,9 @@ async fn handle_client(mut peer: Peer) -> anyhow::Result<()> {
                                         health: 100,
                                         max_health: 100,
                                         armour: 0,
-                                        armour_type: 0,
+                                        armour_type: ArmourType::Yellow,
                                         gun_select: Gun::Fist,
-                                        ammo: vec![],
+                                        ammo: vec![0, 0, 0],
                                     },
                                 },
                             )
@@ -108,6 +118,30 @@ async fn handle_client(mut peer: Peer) -> anyhow::Result<()> {
                         other => {
                             println!("rcv: {other:?}");
                         }
+                    }
+                }
+            }
+            sauer_proto::CHANNEL_POSITIONS => {
+                for pkt in Reader::<C2S<Chan0>>::new(&pkt.data) {
+                    match pkt? {
+                        Chan0Client::Position { pos } => {
+                            let cube = map.get_cube(pos.pos.x, pos.pos.y, pos.pos.z - 15.);
+
+                            let text = CubeString::builder()
+                                .color(Color::Orange)
+                                .push_str(&format!("{cube:?}"))
+                                .build();
+
+                            send_chan1(
+                                &mut peer,
+                                &Chan1Server::Text {
+                                    client_num: 0,
+                                    text,
+                                },
+                            )
+                            .await?;
+                        }
+                        _ => {}
                     }
                 }
             }

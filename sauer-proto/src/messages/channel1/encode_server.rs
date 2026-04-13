@@ -104,8 +104,8 @@ impl Encode for Chan1Server {
             } => {
                 w.put_int(N_MAPCHANGE);
                 w.put_string(map_name);
-                w.put_int(*mode);
-                w.put_int(*has_items);
+                w.put_int(*mode as i32);
+                w.put_int(if *has_items { 1 } else { 0 });
             }
 
             Chan1Server::ForceDeath { client_num } => {
@@ -132,7 +132,7 @@ impl Encode for Chan1Server {
                 w.put_int(*client_num);
                 w.put_string(name);
                 w.put_string(team);
-                w.put_int(*player_model);
+                w.put_int(*player_model as i32);
             }
 
             Chan1Server::SwitchName {
@@ -148,7 +148,7 @@ impl Encode for Chan1Server {
                 model,
             } => {
                 w.put_int(N_SWITCHMODEL);
-                w.put_int(*model);
+                w.put_int(*model as i32);
             }
 
             Chan1Server::ClientDisconnected { client_num } => {
@@ -337,7 +337,7 @@ impl Encode for Chan1Server {
                 w.put_int(N_EDITF);
                 sel.encode(w);
                 w.put_int(*dir);
-                w.put_int(*mode);
+                w.put_int(*mode as i32);
             }
 
             Chan1Server::EditTex {
@@ -350,7 +350,7 @@ impl Encode for Chan1Server {
                 w.put_int(N_EDITT);
                 sel.encode(w);
                 w.put_int(*tex);
-                w.put_int(*all_faces);
+                w.put_int(if *all_faces { 1 } else { 0 });
                 let extra = extra_data.len() as u16;
                 w.put_byte((extra & 0xFF) as u8);
                 w.put_byte((extra >> 8) as u8);
@@ -428,7 +428,7 @@ impl Encode for Chan1Server {
                 w.put_int(N_EDITVSLOT);
                 sel.encode(w);
                 w.put_int(*delta);
-                w.put_int(*all_faces);
+                w.put_int(if *all_faces { 1 } else { 0 });
                 let extra = extra_data.len() as u16;
                 w.put_byte((extra & 0xFF) as u8);
                 w.put_byte((extra >> 8) as u8);
@@ -455,7 +455,7 @@ impl Encode for Chan1Server {
                 w.put_int((pos.x * DMF) as i32);
                 w.put_int((pos.y * DMF) as i32);
                 w.put_int((pos.z * DMF) as i32);
-                w.put_int(*type_);
+                w.put_int(*type_ as i32);
                 w.put_int(*attr1);
                 w.put_int(*attr2);
                 w.put_int(*attr3);
@@ -465,17 +465,26 @@ impl Encode for Chan1Server {
 
             Chan1Server::EditVar {
                 client_num: _,
-                var_type,
                 name,
                 val,
             } => {
                 w.put_int(N_EDITVAR);
-                w.put_int(*var_type);
-                w.put_string(name);
                 match val {
-                    EditVarValue::Int(i) => w.put_int(*i),
-                    EditVarValue::Float(f) => w.put_float(*f),
-                    EditVarValue::String(s) => w.put_string(s),
+                    EditVarValue::Int(i) => {
+                        w.put_int(0);
+                        w.put_string(name);
+                        w.put_int(*i);
+                    }
+                    EditVarValue::Float(f) => {
+                        w.put_int(1);
+                        w.put_string(name);
+                        w.put_float(*f);
+                    }
+                    EditVarValue::String(s) => {
+                        w.put_int(2);
+                        w.put_string(name);
+                        w.put_string(s);
+                    }
                 }
             }
 
@@ -603,9 +612,9 @@ impl Encode for Chan1Server {
                 w.put_int(N_INITAI);
                 w.put_int(*bot_cn);
                 w.put_int(*owner_cn);
-                w.put_int(*ai_type);
+                w.put_int(*ai_type as i32);
                 w.put_int(*skill);
-                w.put_int(*player_model);
+                w.put_int(*player_model as i32);
                 w.put_string(name);
                 w.put_string(team);
             }
@@ -629,7 +638,7 @@ impl Encode for Chan1Server {
                     } else {
                         w.put_int(-1);
                     }
-                    w.put_int(f.invis);
+                    w.put_int(if f.invis { 1 } else { 0 });
 
                     if let Some(hold) = &f.hold {
                         match hold {
@@ -723,17 +732,17 @@ impl Encode for Chan1Server {
             Chan1Server::InvisFlag { flag, invis } => {
                 w.put_int(N_INVISFLAG);
                 w.put_int(*flag);
-                w.put_int(*invis);
+                w.put_int(if *invis { 1 } else { 0 });
             }
 
             Chan1Server::Bases { bases } => {
                 w.put_int(N_BASES);
                 w.put_int(bases.len() as i32);
                 for b in bases {
-                    w.put_int(b.ammotype);
+                    w.put_int(b.ammotype.map_or(0, |t| t as i32));
                     w.put_string(&b.owner);
                     w.put_string(&b.enemy);
-                    w.put_int(b.converted);
+                    w.put_int(if b.converted { 1 } else { 0 });
                     w.put_int(b.ammo);
                 }
             }
@@ -748,7 +757,7 @@ impl Encode for Chan1Server {
                 w.put_int(*base);
                 w.put_string(owner);
                 w.put_string(enemy);
-                w.put_int(*converted);
+                w.put_int(if *converted { 1 } else { 0 });
                 w.put_int(*ammo);
             }
             Chan1Server::BaseScore { base, team, total } => {
@@ -763,7 +772,7 @@ impl Encode for Chan1Server {
             } => {
                 w.put_int(N_REPAMMO);
                 w.put_int(*client_num);
-                w.put_int(*ammotype);
+                w.put_int(*ammotype as i32);
             }
             Chan1Server::BaseRegen {
                 client_num,
@@ -776,7 +785,7 @@ impl Encode for Chan1Server {
                 w.put_int(*client_num);
                 w.put_int(*health);
                 w.put_int(*armour);
-                w.put_int(*ammotype);
+                w.put_int(*ammotype as i32);
                 w.put_int(*ammo);
             }
             Chan1Server::InitTokens {

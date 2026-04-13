@@ -1,8 +1,8 @@
 use crate::{
     Chan1Client, ParseError,
     data::{
-        BaseSpawn, EditVarValue, FlagSpawn, Gun, HitInfo, ItemSpawn, ItemType, MasterMode, SelInfo,
-        TokenBaseSpawn, Vector3,
+        BaseSpawn, EditFaceMode, EditVarValue, EntityType, FlagSpawn, GameMode, Gun, HitInfo,
+        ItemSpawn, ItemType, MasterMode, PlayerModel, SelInfo, TokenBaseSpawn, Vector3,
     },
     internal::{Decode, ReaderCore, constants::*},
 };
@@ -12,7 +12,12 @@ impl Decode for Chan1Client {
         match msg_type {
             N_CONNECT => {
                 let name = r.get_string()?;
-                let player_model = r.get_int()?;
+                let pm_val = r.get_int()?;
+                let player_model =
+                    PlayerModel::try_from(pm_val).map_err(|_| ParseError::InvalidEnumValue {
+                        value: pm_val,
+                        enum_name: "PlayerModel",
+                    })?;
                 let password_hash = r.get_string()?;
                 let auth_desc = r.get_string()?;
                 let auth_name = r.get_string()?;
@@ -38,10 +43,9 @@ impl Decode for Chan1Client {
                 let qcn = r.get_int()?;
                 Ok(Chan1Client::FromAi { qcn })
             }
-            N_EDITMODE => {
-                let val = r.get_int()?;
-                Ok(Chan1Client::EditMode { val })
-            }
+            N_EDITMODE => Ok(Chan1Client::EditMode {
+                val: r.get_int()? != 0,
+            }),
             N_MAPCRC => {
                 let map_name = r.get_string()?;
                 let crc = r.get_int()?;
@@ -157,8 +161,15 @@ impl Decode for Chan1Client {
                 Ok(Chan1Client::SwitchName { name })
             }
             N_SWITCHMODEL => {
-                let model = r.get_int()?;
-                Ok(Chan1Client::SwitchModel { model })
+                let model_val = r.get_int()?;
+                Ok(Chan1Client::SwitchModel {
+                    model: PlayerModel::try_from(model_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: model_val,
+                            enum_name: "PlayerModel",
+                        }
+                    })?,
+                })
             }
             N_SWITCHTEAM => {
                 let team = r.get_string()?;
@@ -166,8 +177,16 @@ impl Decode for Chan1Client {
             }
             N_MAPVOTE => {
                 let map_name = r.get_string()?;
-                let mode = r.get_int()?;
-                Ok(Chan1Client::MapVote { map_name, mode })
+                let mode_val = r.get_int()?;
+                Ok(Chan1Client::MapVote {
+                    map_name,
+                    mode: GameMode::try_from(mode_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: mode_val,
+                            enum_name: "GameMode",
+                        }
+                    })?,
+                })
             }
             N_ITEMLIST => {
                 let mut items = Vec::new();
@@ -195,7 +214,7 @@ impl Decode for Chan1Client {
                 let x = r.get_int()?;
                 let y = r.get_int()?;
                 let z = r.get_int()?;
-                let type_ = r.get_int()?;
+                let type_val = r.get_int()?;
                 let attr1 = r.get_int()?;
                 let attr2 = r.get_int()?;
                 let attr3 = r.get_int()?;
@@ -206,7 +225,12 @@ impl Decode for Chan1Client {
                     x,
                     y,
                     z,
-                    type_,
+                    type_: EntityType::try_from(type_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: type_val,
+                            enum_name: "EntityType",
+                        }
+                    })?,
                     attr1,
                     attr2,
                     attr3,
@@ -228,11 +252,7 @@ impl Decode for Chan1Client {
                         });
                     }
                 };
-                Ok(Chan1Client::EditVar {
-                    var_type,
-                    name,
-                    val,
-                })
+                Ok(Chan1Client::EditVar { name, val })
             }
             N_CLIENTPING => {
                 let ping = r.get_int()?;
@@ -255,7 +275,7 @@ impl Decode for Chan1Client {
             }
             N_SPECTATOR => {
                 let spectator_cn = r.get_int()?;
-                let val = r.get_int()?;
+                let val = r.get_int()? != 0;
                 Ok(Chan1Client::Spectator { spectator_cn, val })
             }
             N_SETTEAM => {
@@ -264,10 +284,9 @@ impl Decode for Chan1Client {
                 Ok(Chan1Client::SetTeam { client_num, team })
             }
             N_FORCEINTERMISSION => Ok(Chan1Client::ForceIntermission),
-            N_RECORDDEMO => {
-                let val = r.get_int()?;
-                Ok(Chan1Client::RecordDemo { val })
-            }
+            N_RECORDDEMO => Ok(Chan1Client::RecordDemo {
+                val: r.get_int()? != 0,
+            }),
             N_STOPDEMO => Ok(Chan1Client::StopDemo),
             N_CLEARDEMOS => {
                 let demo_id = r.get_int()?;
@@ -286,7 +305,7 @@ impl Decode for Chan1Client {
             }
             N_SETMASTER => {
                 let client_num = r.get_int()?;
-                let val = r.get_int()?;
+                let val = r.get_int()? != 0;
                 let hash = r.get_string()?;
                 Ok(Chan1Client::SetMaster {
                     client_num,
@@ -303,10 +322,9 @@ impl Decode for Chan1Client {
                 let limit = r.get_int()?;
                 Ok(Chan1Client::BotLimit { limit })
             }
-            N_BOTBALANCE => {
-                let balance = r.get_int()?;
-                Ok(Chan1Client::BotBalance { balance })
-            }
+            N_BOTBALANCE => Ok(Chan1Client::BotBalance {
+                balance: r.get_int()? != 0,
+            }),
             N_AUTHTRY => {
                 let desc = r.get_string()?;
                 let name = r.get_string()?;
@@ -324,10 +342,9 @@ impl Decode for Chan1Client {
                     reason,
                 })
             }
-            N_PAUSEGAME => {
-                let val = r.get_int()?;
-                Ok(Chan1Client::PauseGame { val })
-            }
+            N_PAUSEGAME => Ok(Chan1Client::PauseGame {
+                val: r.get_int()? != 0,
+            }),
             N_GAMESPEED => {
                 let speed = r.get_int()?;
                 Ok(Chan1Client::GameSpeed { speed })
@@ -367,13 +384,22 @@ impl Decode for Chan1Client {
             N_EDITF => {
                 let sel = SelInfo::decode(r)?;
                 let dir = r.get_int()?;
-                let mode = r.get_int()?;
-                Ok(Chan1Client::EditFace { sel, dir, mode })
+                let mode_val = r.get_int()?;
+                Ok(Chan1Client::EditFace {
+                    sel,
+                    dir,
+                    mode: EditFaceMode::try_from(mode_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: mode_val,
+                            enum_name: "EditFaceMode",
+                        }
+                    })?,
+                })
             }
             N_EDITT => {
                 let sel = SelInfo::decode(r)?;
                 let tex = r.get_int()?;
-                let all_faces = r.get_int()?;
+                let all_faces = r.get_int()? != 0;
 
                 let len_lower = r.get_byte()? as u16;
                 let len_upper = r.get_byte()? as u16;
@@ -428,7 +454,7 @@ impl Decode for Chan1Client {
             N_EDITVSLOT => {
                 let sel = SelInfo::decode(r)?;
                 let delta = r.get_int()?;
-                let all_faces = r.get_int()?;
+                let all_faces = r.get_int()? != 0;
 
                 let len_lower = r.get_byte()? as u16;
                 let len_upper = r.get_byte()? as u16;
@@ -488,8 +514,19 @@ impl Decode for Chan1Client {
                 }
                 let mut bases = Vec::with_capacity(num_bases as usize);
                 for _ in 0..num_bases {
+                    let ammotype_val = r.get_int()?;
+                    let ammotype = if ammotype_val == 0 {
+                        None
+                    } else {
+                        Some(ItemType::try_from(ammotype_val).map_err(|_| {
+                            ParseError::InvalidEnumValue {
+                                value: ammotype_val,
+                                enum_name: "ItemType",
+                            }
+                        })?)
+                    };
                     bases.push(BaseSpawn {
-                        ammotype: r.get_int()?,
+                        ammotype,
                         pos: Vector3 {
                             x: r.get_int()? as f32 / DMF,
                             y: r.get_int()? as f32 / DMF,

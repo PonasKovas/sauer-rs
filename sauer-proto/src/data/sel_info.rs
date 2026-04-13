@@ -1,6 +1,6 @@
 use crate::{
     ParseError,
-    data::Vector3,
+    data::{Orient, Vector3},
     internal::{ReaderCore, WriterCore},
 };
 
@@ -10,7 +10,7 @@ pub struct SelInfo {
     pub o: Vector3<i32>,
     pub s: Vector3<i32>,
     pub grid: i32,
-    pub orient: i32,
+    pub orient: Orient,
     pub cx: i32,
     pub cxs: i32,
     pub cy: i32,
@@ -20,19 +20,28 @@ pub struct SelInfo {
 
 impl SelInfo {
     pub(crate) fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
+        let o = Vector3 {
+            x: r.get_int()?,
+            y: r.get_int()?,
+            z: r.get_int()?,
+        };
+        let s = Vector3 {
+            x: r.get_int()?,
+            y: r.get_int()?,
+            z: r.get_int()?,
+        };
+        let grid = r.get_int()?;
+        let orient_val = r.get_int()?;
+        let orient =
+            Orient::try_from(orient_val).map_err(|_| ParseError::InvalidEnumValue {
+                value: orient_val,
+                enum_name: "Orient",
+            })?;
         Ok(SelInfo {
-            o: Vector3 {
-                x: r.get_int()?,
-                y: r.get_int()?,
-                z: r.get_int()?,
-            },
-            s: Vector3 {
-                x: r.get_int()?,
-                y: r.get_int()?,
-                z: r.get_int()?,
-            },
-            grid: r.get_int()?,
-            orient: r.get_int()?,
+            o,
+            s,
+            grid,
+            orient,
             cx: r.get_int()?,
             cxs: r.get_int()?,
             cy: r.get_int()?,
@@ -49,7 +58,7 @@ impl SelInfo {
         w.put_int(self.s.y);
         w.put_int(self.s.z);
         w.put_int(self.grid);
-        w.put_int(self.orient);
+        w.put_int(self.orient as i32);
         w.put_int(self.cx);
         w.put_int(self.cxs);
         w.put_int(self.cy);

@@ -440,6 +440,7 @@ dependencies = [
  "cube-string",
  "enet-rs",
  "ogz-rs",
+ "sauer-map",
  "sauer-proto",
  "tokio",
 ]

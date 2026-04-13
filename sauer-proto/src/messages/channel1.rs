@@ -62,8 +62,8 @@ pub enum Chan1Server {
     /// Notifies clients to change the current map and gamemode.
     MapChange {
         map_name: CubeString,
-        mode: i32,
-        has_items: i32,
+        mode: GameMode,
+        has_items: bool,
     },
 
     /// Forces a client to die instantly.
@@ -81,7 +81,7 @@ pub enum Chan1Server {
         client_num: i32,
         name: CubeString,
         team: CubeString,
-        player_model: i32,
+        player_model: PlayerModel,
     },
 
     /// Informs the client that someone changed their name. (Implicitly wrapped).
@@ -93,7 +93,7 @@ pub enum Chan1Server {
     /// Informs the client that someone changed their playermodel. (Implicitly wrapped).
     SwitchModel {
         client_num: i32,
-        model: i32,
+        model: PlayerModel,
     },
 
     /// A client has fully disconnected.
@@ -215,7 +215,7 @@ pub enum Chan1Server {
         client_num: i32,
         sel: SelInfo,
         dir: i32,
-        mode: i32,
+        mode: EditFaceMode,
     },
 
     /// Coop Edit: Texture Modification.
@@ -223,7 +223,7 @@ pub enum Chan1Server {
         client_num: i32,
         sel: SelInfo,
         tex: i32,
-        all_faces: i32,
+        all_faces: bool,
         extra_data: Vec<u8>,
     },
 
@@ -281,7 +281,7 @@ pub enum Chan1Server {
         client_num: i32,
         sel: SelInfo,
         delta: i32,
-        all_faces: i32,
+        all_faces: bool,
         extra_data: Vec<u8>,
     },
 
@@ -295,7 +295,7 @@ pub enum Chan1Server {
         client_num: i32,
         ent_id: i32,
         pos: Vector3<f32>,
-        type_: i32,
+        type_: EntityType,
         attr1: i32,
         attr2: i32,
         attr3: i32,
@@ -306,7 +306,6 @@ pub enum Chan1Server {
     /// Coop Edit: A map variable was overridden. (Implicitly wrapped).
     EditVar {
         client_num: i32,
-        var_type: i32,
         name: CubeString,
         val: EditVarValue,
     },
@@ -400,9 +399,9 @@ pub enum Chan1Server {
     InitAi {
         bot_cn: i32,
         owner_cn: i32,
-        ai_type: i32,
+        ai_type: AiType,
         skill: i32,
-        player_model: i32,
+        player_model: PlayerModel,
         name: CubeString,
         team: CubeString,
     },
@@ -420,7 +419,7 @@ pub enum Chan1Server {
         base: i32,
         owner: CubeString,
         enemy: CubeString,
-        converted: i32,
+        converted: bool,
         ammo: i32,
     },
 
@@ -432,14 +431,14 @@ pub enum Chan1Server {
 
     RepAmmo {
         client_num: i32,
-        ammotype: i32,
+        ammotype: ItemType,
     },
 
     BaseRegen {
         client_num: i32,
         health: i32,
         armour: i32,
-        ammotype: i32,
+        ammotype: ItemType,
         ammo: i32,
     },
 
@@ -489,7 +488,7 @@ pub enum Chan1Server {
 
     InvisFlag {
         flag: i32,
-        invis: i32,
+        invis: bool,
     },
 
     InitTokens {
@@ -540,7 +539,7 @@ pub enum Chan1Client {
     /// Attempts to connect to the server with user details and passwords.
     Connect {
         name: CubeString,
-        player_model: i32,
+        player_model: PlayerModel,
         password_hash: CubeString,
         auth_desc: CubeString,
         auth_name: CubeString,
@@ -570,7 +569,7 @@ pub enum Chan1Client {
 
     /// The client toggled cooperative edit mode locally.
     EditMode {
-        val: i32,
+        val: bool,
     },
 
     /// The client verifies the CRC of the map they currently have loaded.
@@ -638,7 +637,7 @@ pub enum Chan1Client {
 
     /// The client changes their display model.
     SwitchModel {
-        model: i32,
+        model: PlayerModel,
     },
 
     /// The client requests to switch teams.
@@ -649,7 +648,7 @@ pub enum Chan1Client {
     /// The client votes to change the map and mode.
     MapVote {
         map_name: CubeString,
-        mode: i32,
+        mode: GameMode,
     },
 
     /// Bulk sends the items available on the client's map to the server (synchronization).
@@ -663,7 +662,7 @@ pub enum Chan1Client {
         x: i32,
         y: i32,
         z: i32,
-        type_: i32,
+        type_: EntityType,
         attr1: i32,
         attr2: i32,
         attr3: i32,
@@ -673,7 +672,6 @@ pub enum Chan1Client {
 
     /// Coop Edit: A map variable was modified locally.
     EditVar {
-        var_type: i32,
         name: CubeString,
         val: EditVarValue,
     },
@@ -700,7 +698,7 @@ pub enum Chan1Client {
     /// Requests to move someone (or self) to/from the spectator team.
     Spectator {
         spectator_cn: i32,
-        val: i32,
+        val: bool,
     },
 
     /// Requests to force someone to a specific team.
@@ -714,7 +712,7 @@ pub enum Chan1Client {
 
     /// Toggles automatic demo recording for the next match.
     RecordDemo {
-        val: i32,
+        val: bool,
     },
 
     /// Stops the current demo recording.
@@ -745,7 +743,7 @@ pub enum Chan1Client {
     /// Requests to set master privileges using a password hash.
     SetMaster {
         client_num: i32,
-        val: i32,
+        val: bool,
         hash: CubeString,
     },
 
@@ -764,7 +762,7 @@ pub enum Chan1Client {
 
     /// Modifies the global bot auto-balance flag.
     BotBalance {
-        balance: i32,
+        balance: bool,
     },
 
     /// Submits a request to authenticate and claim privileges via cryptographic keys.
@@ -783,7 +781,7 @@ pub enum Chan1Client {
 
     /// Toggles game paused state.
     PauseGame {
-        val: i32,
+        val: bool,
     },
 
     /// Changes global game speed.
@@ -822,14 +820,14 @@ pub enum Chan1Client {
     EditFace {
         sel: SelInfo,
         dir: i32,
-        mode: i32,
+        mode: EditFaceMode,
     },
 
     /// Coop Edit: Texture Modification.
     EditTex {
         sel: SelInfo,
         tex: i32,
-        all_faces: i32,
+        all_faces: bool,
         extra_data: Vec<u8>,
     },
 
@@ -869,7 +867,7 @@ pub enum Chan1Client {
     EditVSlot {
         sel: SelInfo,
         delta: i32,
-        all_faces: i32,
+        all_faces: bool,
         extra_data: Vec<u8>,
     },
 

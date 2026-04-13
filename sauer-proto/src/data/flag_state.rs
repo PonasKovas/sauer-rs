@@ -5,7 +5,7 @@ pub struct FlagState {
     pub version: i32,
     pub spawn_index: i32,
     pub owner: FlagStateOwner,
-    pub invis: i32,
+    pub invis: bool,
     pub hold: Option<FlagStateHoldTeam>,
 }
 

@@ -5,6 +5,7 @@
 
 use crate::{
     ParseError,
+    data::{ClientState, Gun, Privilege},
     internal::{ReaderCore, WriterCore},
 };
 use constants::*;
@@ -91,9 +92,9 @@ pub enum ExtInfoResponse {
         damage: i32,
         health: i32,
         armour: i32,
-        gunselect: i32,
-        privilege: i32,
-        state: i32,
+        gunselect: Gun,
+        privilege: Privilege,
+        state: ClientState,
         ip: Option<[u8; 3]>,
     },
     TeamScore {
@@ -162,9 +163,9 @@ impl ExtInfoResponse {
                 w.put_int(*damage);
                 w.put_int(*health);
                 w.put_int(*armour);
-                w.put_int(*gunselect);
-                w.put_int(*privilege);
-                w.put_int(*state);
+                w.put_int(*gunselect as i32);
+                w.put_int(*privilege as i32);
+                w.put_int(*state as i32);
                 if let Some(ip) = ip {
                     w.put_bytes(ip);
                 }
@@ -258,9 +259,9 @@ impl ExtInfoResponse {
                 let damage = r.get_int()?;
                 let health = r.get_int()?;
                 let armour = r.get_int()?;
-                let gunselect = r.get_int()?;
-                let privilege = r.get_int()?;
-                let state = r.get_int()?;
+                let gunselect_val = r.get_int()?;
+                let privilege_val = r.get_int()?;
+                let state_val = r.get_int()?;
 
                 let ip = if r.remaining() > 0 {
                     Some([r.get_byte()?, r.get_byte()?, r.get_byte()?])
@@ -280,9 +281,24 @@ impl ExtInfoResponse {
                     damage,
                     health,
                     armour,
-                    gunselect,
-                    privilege,
-                    state,
+                    gunselect: Gun::try_from(gunselect_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: gunselect_val,
+                            enum_name: "Gun",
+                        }
+                    })?,
+                    privilege: Privilege::try_from(privilege_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: privilege_val,
+                            enum_name: "Privilege",
+                        }
+                    })?,
+                    state: ClientState::try_from(state_val).map_err(|_| {
+                        ParseError::InvalidEnumValue {
+                            value: state_val,
+                            enum_name: "ClientState",
+                        }
+                    })?,
                     ip,
                 }
             }

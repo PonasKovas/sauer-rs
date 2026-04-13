@@ -1,6 +1,6 @@
 use crate::{
     ParseError,
-    data::Vector3,
+    data::{PhysState, Vector3},
     internal::{ReaderCore, WriterCore, constants::*},
 };
 
@@ -9,7 +9,7 @@ use crate::{
 pub struct PlayerPosition {
     pub client_num: u32,
     /// Used by the client to determine movement and animation states. The server typically skips reading this byte but it is present on the wire.
-    pub phys_state: u8,
+    pub phys_state: PhysState,
     pub flags: u32,
     pub pos: Vector3<f32>,
     pub dir: u16,
@@ -23,7 +23,12 @@ pub struct PlayerPosition {
 impl PlayerPosition {
     pub(crate) fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
         let client_num = r.get_uint()?;
-        let phys_state = r.get_byte()?;
+        let phys_state_byte = r.get_byte()?;
+        let phys_state =
+            PhysState::try_from(phys_state_byte).map_err(|_| ParseError::InvalidEnumValue {
+                value: phys_state_byte as i32,
+                enum_name: "PhysState",
+            })?;
         let flags = r.get_uint()?;
 
         let mut coords = [0.0; 3];
@@ -80,7 +85,7 @@ impl PlayerPosition {
 
     pub(crate) fn encode(&self, w: &mut WriterCore) {
         w.put_uint(self.client_num);
-        w.put_byte(self.phys_state);
+        w.put_byte(self.phys_state as u8);
         w.put_uint(self.flags);
 
         let coords = [self.pos.x, self.pos.y, self.pos.z];

@@ -16,7 +16,7 @@ impl Encode for Chan1Client {
             } => {
                 w.put_int(N_CONNECT);
                 w.put_string(name);
-                w.put_int(*player_model);
+                w.put_int(*player_model as i32);
                 w.put_string(password_hash);
                 w.put_string(auth_desc);
                 w.put_string(auth_name);
@@ -37,7 +37,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::EditMode { val } => {
                 w.put_int(N_EDITMODE);
-                w.put_int(*val);
+                w.put_int(if *val { 1 } else { 0 });
             }
             Chan1Client::MapCrc { map_name, crc } => {
                 w.put_int(N_MAPCRC);
@@ -123,7 +123,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::SwitchModel { model } => {
                 w.put_int(N_SWITCHMODEL);
-                w.put_int(*model);
+                w.put_int(*model as i32);
             }
             Chan1Client::SwitchTeam { team } => {
                 w.put_int(N_SWITCHTEAM);
@@ -132,7 +132,7 @@ impl Encode for Chan1Client {
             Chan1Client::MapVote { map_name, mode } => {
                 w.put_int(N_MAPVOTE);
                 w.put_string(map_name);
-                w.put_int(*mode);
+                w.put_int(*mode as i32);
             }
             Chan1Client::ItemList { items } => {
                 w.put_int(N_ITEMLIST);
@@ -159,25 +159,31 @@ impl Encode for Chan1Client {
                 w.put_int(*x);
                 w.put_int(*y);
                 w.put_int(*z);
-                w.put_int(*type_);
+                w.put_int(*type_ as i32);
                 w.put_int(*attr1);
                 w.put_int(*attr2);
                 w.put_int(*attr3);
                 w.put_int(*attr4);
                 w.put_int(*attr5);
             }
-            Chan1Client::EditVar {
-                var_type,
-                name,
-                val,
-            } => {
+            Chan1Client::EditVar { name, val } => {
                 w.put_int(N_EDITVAR);
-                w.put_int(*var_type);
-                w.put_string(name);
                 match val {
-                    EditVarValue::Int(i) => w.put_int(*i),
-                    EditVarValue::Float(f) => w.put_float(*f),
-                    EditVarValue::String(s) => w.put_string(s),
+                    EditVarValue::Int(i) => {
+                        w.put_int(0);
+                        w.put_string(name);
+                        w.put_int(*i);
+                    }
+                    EditVarValue::Float(f) => {
+                        w.put_int(1);
+                        w.put_string(name);
+                        w.put_float(*f);
+                    }
+                    EditVarValue::String(s) => {
+                        w.put_int(2);
+                        w.put_string(name);
+                        w.put_string(s);
+                    }
                 }
             }
             Chan1Client::ClientPing { ping } => {
@@ -199,7 +205,7 @@ impl Encode for Chan1Client {
             Chan1Client::Spectator { spectator_cn, val } => {
                 w.put_int(N_SPECTATOR);
                 w.put_int(*spectator_cn);
-                w.put_int(*val);
+                w.put_int(if *val { 1 } else { 0 });
             }
             Chan1Client::SetTeam { client_num, team } => {
                 w.put_int(N_SETTEAM);
@@ -211,7 +217,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::RecordDemo { val } => {
                 w.put_int(N_RECORDDEMO);
-                w.put_int(*val);
+                w.put_int(if *val { 1 } else { 0 });
             }
             Chan1Client::StopDemo => {
                 w.put_int(N_STOPDEMO);
@@ -242,7 +248,7 @@ impl Encode for Chan1Client {
             } => {
                 w.put_int(N_SETMASTER);
                 w.put_int(*client_num);
-                w.put_int(*val);
+                w.put_int(if *val { 1 } else { 0 });
                 w.put_string(hash);
             }
             Chan1Client::AddBot { skill } => {
@@ -258,7 +264,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::BotBalance { balance } => {
                 w.put_int(N_BOTBALANCE);
-                w.put_int(*balance);
+                w.put_int(if *balance { 1 } else { 0 });
             }
             Chan1Client::AuthTry { desc, name } => {
                 w.put_int(N_AUTHTRY);
@@ -279,7 +285,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::PauseGame { val } => {
                 w.put_int(N_PAUSEGAME);
-                w.put_int(*val);
+                w.put_int(if *val { 1 } else { 0 });
             }
             Chan1Client::GameSpeed { speed } => {
                 w.put_int(N_GAMESPEED);
@@ -325,7 +331,7 @@ impl Encode for Chan1Client {
                 w.put_int(N_EDITF);
                 sel.encode(w);
                 w.put_int(*dir);
-                w.put_int(*mode);
+                w.put_int(*mode as i32);
             }
             Chan1Client::EditTex {
                 sel,
@@ -336,7 +342,7 @@ impl Encode for Chan1Client {
                 w.put_int(N_EDITT);
                 sel.encode(w);
                 w.put_int(*tex);
-                w.put_int(*all_faces);
+                w.put_int(if *all_faces { 1 } else { 0 });
 
                 let extra_len = extra_data.len() as u16;
                 w.put_byte((extra_len & 0xFF) as u8);
@@ -389,7 +395,7 @@ impl Encode for Chan1Client {
                 w.put_int(N_EDITVSLOT);
                 sel.encode(w);
                 w.put_int(*delta);
-                w.put_int(*all_faces);
+                w.put_int(if *all_faces { 1 } else { 0 });
 
                 let extra_len = extra_data.len() as u16;
                 w.put_byte((extra_len & 0xFF) as u8);
@@ -427,7 +433,7 @@ impl Encode for Chan1Client {
                 w.put_int(N_BASES);
                 w.put_int(bases.len() as i32);
                 for b in bases {
-                    w.put_int(b.ammotype);
+                    w.put_int(b.ammotype.map_or(0, |t| t as i32));
                     w.put_int((b.pos.x * DMF) as i32);
                     w.put_int((b.pos.y * DMF) as i32);
                     w.put_int((b.pos.z * DMF) as i32);

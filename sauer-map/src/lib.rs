@@ -55,17 +55,17 @@ impl World {
             OctreeNode::Empty(info) => Node::Leaf(Cube {
                 edges: [0x00; 12], // F_EMPTY translates to all 0s
                 textures: info.textures,
-                material: Material(info.surfaces.material_id().unwrap_or(0)),
+                material: info.surfaces.material_id(),
             }),
             OctreeNode::Solid(info) => Node::Leaf(Cube {
                 edges: [0x80; 12], // F_SOLID is 0x80808080 (low=0, high=8)
                 textures: info.textures,
-                material: Material(info.surfaces.material_id().unwrap_or(0)),
+                material: info.surfaces.material_id(),
             }),
             OctreeNode::Normal { info, edges } => Node::Leaf(Cube {
                 edges: *edges,
                 textures: info.textures,
-                material: Material(info.surfaces.material_id().unwrap_or(0)),
+                material: info.surfaces.material_id(),
             }),
         }
     }
@@ -130,11 +130,12 @@ trait SurfaceMaterialExt {
 }
 
 impl SurfaceMaterialExt for ogz_rs::data::Surfaces {
-    fn material_id(&self) -> Option<u16> {
+    fn material_id(&self) -> Material {
         match self {
             ogz_rs::data::Surfaces::Modern(m) => m.material,
-            ogz_rs::data::Surfaces::Legacy(l) => l.material.map(|m| m as u16),
+            ogz_rs::data::Surfaces::Legacy(l) => l.material,
             ogz_rs::data::Surfaces::None => None,
         }
+        .unwrap_or_default()
     }
 }

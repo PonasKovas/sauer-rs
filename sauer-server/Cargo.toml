@@ -8,7 +8,7 @@ enet-rs.workspace = true
 sauer-proto.workspace = true
 ogz-rs.workspace = true
 cube-string.workspace = true
-# sauer-map.workspace = true
+sauer-map.workspace = true
 
 tokio.workspace = true
 tokio.features = ["full"]
