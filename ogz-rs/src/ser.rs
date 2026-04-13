@@ -184,7 +184,16 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         }
     }
 
-    write_cube(&map.octree, &mut encoder)?;
+    // C++ writes the 8 worldroot cubes directly (no wrapper byte).
+    // Our OctreeNode wraps them in a Children node, so unwrap it here.
+    match &map.octree {
+        OctreeNode::Children(children) => {
+            for child in children.as_ref() {
+                write_cube(child, &mut encoder)?;
+            }
+        }
+        _ => write_cube(&map.octree, &mut encoder)?,
+    }
 
     for lm in &map.lightmaps {
         encoder.write_u8(lm.map_type)?;

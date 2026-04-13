@@ -311,7 +311,15 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         }
     }
 
-    let octree = read_cube(&mut cursor, version)?;
+    // C++ loadchildren reads 8 worldroot cubes directly (no wrapper byte).
+    // We wrap them in a Children node to fit the recursive OctreeNode type.
+    let octree = {
+        let mut children = Vec::with_capacity(8);
+        for _ in 0..8 {
+            children.push(read_cube(&mut cursor, version)?);
+        }
+        OctreeNode::Children(Box::new(children.try_into().unwrap()))
+    };
 
     let mut lm_vec = Vec::new();
     if version >= 7 {
