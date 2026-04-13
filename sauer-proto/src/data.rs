@@ -31,7 +31,7 @@ pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
 pub use hit_info::HitInfo;
 pub use item_spawn::ItemSpawn;
 pub use master_client::{MasterClient, Privilege};
-pub use player_position::PlayerPosition;
+pub use player_position::{PlayerPosition, PositionPhysState};
 pub use player_state::PlayerState;
 pub use sel_info::SelInfo;
 pub use stolen_token::StolenToken;
@@ -143,9 +143,10 @@ pub enum ArmourType {
 }
 
 /// Physical movement/contact state of an entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive, Default)]
 #[repr(u8)]
 pub enum PhysState {
+    #[default]
     Float = 0,
     Fall = 1,
     Slide = 2,

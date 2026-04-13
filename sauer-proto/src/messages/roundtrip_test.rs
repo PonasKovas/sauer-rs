@@ -60,7 +60,7 @@ fn test_chan0_client_roundtrip() {
         Chan0Client::Position {
             pos: PlayerPosition {
                 client_num: 123,
-                phys_state: PhysState::Fall,
+                phys_state: PositionPhysState { phys_state: PhysState::Fall, life_sequence: true, move_dir: -1, strafe: 1 },
                 flags: 0x7F, // Enable all bitflags (tests the maximum payload size & sign extensions)
                 pos: Vector3 {
                     x: -10.0,
@@ -523,7 +523,7 @@ fn test_chan0_server_roundtrip() {
         Chan0Server::Position {
             pos: PlayerPosition {
                 client_num: 123,
-                phys_state: PhysState::Fall,
+                phys_state: PositionPhysState { phys_state: PhysState::Fall, life_sequence: true, move_dir: -1, strafe: 1 },
                 flags: 0x7F, // Enable all bitflags (so we test the maximum payload size & sign extension)
                 pos: Vector3 {
                     x: -10.0,
