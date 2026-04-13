@@ -132,7 +132,7 @@ async fn handle_client(mut peer: Peer, ogz: Arc<OgzMap>) -> anyhow::Result<()> {
 
                             let text = CubeString::builder()
                                 .color(Color::Orange)
-                                .push_str(&format!("{cube:?}"))
+                                .push_str(&format!("{:?}", cube.map(|c| c.0.material)))
                                 .build();
 
                             send_chan1(
