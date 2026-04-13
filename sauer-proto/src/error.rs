@@ -19,4 +19,20 @@ pub enum ParseError {
 
     #[error("Illegal double client wrapper")]
     DoubleClientWrapper,
+
+    #[error("Value {value} out of range for {field} (max {max})")]
+    ValueOutOfRange {
+        field: &'static str,
+        value: i32,
+        max: i32,
+    },
+
+    #[error("extinfo packet invalid")]
+    InvalidExtInfo,
+
+    #[error("extinfo packet version mismatch: {0}")]
+    ExtInfoVersionMismatch(i32),
+
+    #[error("unknown extinfo message type {0}")]
+    InvalidExtInfoType(i32),
 }

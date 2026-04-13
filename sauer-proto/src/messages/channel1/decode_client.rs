@@ -91,7 +91,14 @@ impl Decode for Chan1Client {
                 };
 
                 let hits_count = r.get_int()?;
-                let mut hits = Vec::with_capacity(hits_count.max(0) as usize);
+                if hits_count < 0 || hits_count > 128 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "hits_count",
+                        value: hits_count,
+                        max: 128,
+                    });
+                }
+                let mut hits = Vec::with_capacity(hits_count as usize);
                 for _ in 0..hits_count {
                     hits.push(HitInfo::decode(r)?);
                 }
@@ -114,7 +121,14 @@ impl Decode for Chan1Client {
                 let id = r.get_int()?;
 
                 let hits_count = r.get_int()?;
-                let mut hits = Vec::with_capacity(hits_count.max(0) as usize);
+                if hits_count < 0 || hits_count > 128 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "hits_count",
+                        value: hits_count,
+                        max: 128,
+                    });
+                }
+                let mut hits = Vec::with_capacity(hits_count as usize);
                 for _ in 0..hits_count {
                     hits.push(HitInfo::decode(r)?);
                 }
@@ -440,10 +454,17 @@ impl Decode for Chan1Client {
             }),
             N_INITFLAGS => {
                 let num_flags = r.get_int()?;
+                if num_flags < 0 || num_flags > 256 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "num_flags",
+                        value: num_flags,
+                        max: 256,
+                    });
+                }
 
                 let mut flags = Vec::with_capacity(num_flags as usize);
 
-                for _ in 0..num_flags as usize {
+                for _ in 0..num_flags {
                     let team = r.get_int()?;
                     let pos = Vector3 {
                         x: r.get_int()? as f32 / DMF,
@@ -458,7 +479,14 @@ impl Decode for Chan1Client {
             }
             N_BASES => {
                 let num_bases = r.get_int()?;
-                let mut bases = Vec::with_capacity(num_bases.max(0) as usize);
+                if num_bases < 0 || num_bases > 256 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "num_bases",
+                        value: num_bases,
+                        max: 256,
+                    });
+                }
+                let mut bases = Vec::with_capacity(num_bases as usize);
                 for _ in 0..num_bases {
                     bases.push(BaseSpawn {
                         ammotype: r.get_int()?,
@@ -474,7 +502,14 @@ impl Decode for Chan1Client {
             N_REPAMMO => Ok(Chan1Client::RepAmmo),
             N_INITTOKENS => {
                 let num_bases = r.get_int()?;
-                let mut bases = Vec::with_capacity(num_bases.max(0) as usize);
+                if num_bases < 0 || num_bases > 256 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "num_bases",
+                        value: num_bases,
+                        max: 256,
+                    });
+                }
+                let mut bases = Vec::with_capacity(num_bases as usize);
                 for _ in 0..num_bases {
                     bases.push(TokenBaseSpawn {
                         team: r.get_int()?,

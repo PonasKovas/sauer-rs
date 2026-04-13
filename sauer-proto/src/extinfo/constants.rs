@@ -1,0 +1,9 @@
+pub const EXT_ACK: i32 = -1;
+pub const EXT_VERSION: i32 = 105;
+pub const EXT_NO_ERROR: i32 = 0;
+pub const EXT_ERROR: i32 = 1;
+pub const EXT_PLAYERSTATS_RESP_IDS: i32 = -10;
+pub const EXT_PLAYERSTATS_RESP_STATS: i32 = -11;
+pub const EXT_UPTIME: i32 = 0;
+pub const EXT_PLAYERSTATS: i32 = 1;
+pub const EXT_TEAMSCORE: i32 = 2;

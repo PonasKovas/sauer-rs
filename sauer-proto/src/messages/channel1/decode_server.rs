@@ -546,10 +546,17 @@ impl Decode for Chan1Server {
             N_INITFLAGS => {
                 let scores = [r.get_int()?, r.get_int()?];
                 let num_flags = r.get_int()?;
+                if num_flags < 0 || num_flags > 256 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "num_flags",
+                        value: num_flags,
+                        max: 256,
+                    });
+                }
 
                 let mut flags = Vec::with_capacity(num_flags as usize);
 
-                for _ in 0..num_flags as usize {
+                for _ in 0..num_flags {
                     let version = r.get_int()?;
                     let spawn_index = r.get_int()?;
                     let owner_id = r.get_int()?;
@@ -645,7 +652,14 @@ impl Decode for Chan1Server {
 
             N_BASES => {
                 let num_bases = r.get_int()?;
-                let mut bases = Vec::with_capacity(num_bases.max(0) as usize);
+                if num_bases < 0 || num_bases > 256 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "num_bases",
+                        value: num_bases,
+                        max: 256,
+                    });
+                }
+                let mut bases = Vec::with_capacity(num_bases as usize);
                 for _ in 0..num_bases {
                     bases.push(BaseInfo {
                         ammotype: r.get_int()?,
@@ -688,7 +702,14 @@ impl Decode for Chan1Server {
             N_INITTOKENS => {
                 let scores = [r.get_int()?, r.get_int()?];
                 let num_tokens = r.get_int()?;
-                let mut tokens = Vec::with_capacity(num_tokens.max(0) as usize);
+                if num_tokens < 0 || num_tokens > 256 {
+                    return Err(ParseError::ValueOutOfRange {
+                        field: "num_tokens",
+                        value: num_tokens,
+                        max: 256,
+                    });
+                }
+                let mut tokens = Vec::with_capacity(num_tokens as usize);
                 for _ in 0..num_tokens {
                     tokens.push(TokenState {
                         id: r.get_int()?,
