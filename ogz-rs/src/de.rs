@@ -181,7 +181,6 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
     let mut mru_textures = Vec::new();
     if version < 14 {
-        cursor.read_exact(&mut [0u8; 256])?; // Skip legacy ent padding
         for _ in 0..256 {
             mru_textures.push(cursor.read_u8()? as u16);
         }
