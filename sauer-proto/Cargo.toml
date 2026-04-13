@@ -1,0 +1,10 @@
+[package]
+name = "sauer-proto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num_enum.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+cube-string.workspace = true

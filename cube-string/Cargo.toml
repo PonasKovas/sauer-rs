@@ -1,0 +1,12 @@
+[package]
+name = "cube-string"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zerocopy = { workspace = true, features = ["derive"] }
+serde = { workspace = true, optional = true }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
