@@ -16,7 +16,7 @@
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 use core::fmt;
-use core::hash::{Hash, Hasher};
+use core::hash::Hash;
 use core::ops::{
     Deref, Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
@@ -57,16 +57,9 @@ fn cube_str_from_bytes(bytes: &[u8]) -> &CubeStr {
 /// s.push_color(Color::Red);
 /// s.push(b' ');
 /// ```
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct CubeString {
     pub(crate) buf: Vec<u8>,
-}
-
-impl Clone for CubeString {
-    fn clone(&self) -> Self {
-        Self {
-            buf: self.buf.clone(),
-        }
-    }
 }
 
 #[cfg(feature = "serde")]
@@ -220,12 +213,6 @@ impl CubeString {
     }
 }
 
-impl Default for CubeString {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Deref for CubeString {
     type Target = CubeStr;
     fn deref(&self) -> &CubeStr {
@@ -268,12 +255,6 @@ impl From<&CubeStr> for CubeString {
 impl From<&str> for CubeString {
     fn from(s: &str) -> Self {
         Self::from_str_lossy(s)
-    }
-}
-
-impl PartialEq for CubeString {
-    fn eq(&self, other: &CubeString) -> bool {
-        self.buf == other.buf
     }
 }
 
@@ -334,14 +315,6 @@ impl PartialEq<&CubeString> for str {
 impl PartialEq<CubeString> for &&str {
     fn eq(&self, other: &CubeString) -> bool {
         *self == other
-    }
-}
-
-impl Eq for CubeString {}
-
-impl Hash for CubeString {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.buf.hash(state);
     }
 }
 

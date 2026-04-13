@@ -8,4 +8,4 @@ description = "A parser and serializer for the Cube 2: Sauerbraten .ogz map form
 cube-string.workspace = true
 thiserror.workspace = true
 flate2.workspace = true
-
+num_enum.workspace = true

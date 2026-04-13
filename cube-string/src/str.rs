@@ -17,7 +17,7 @@
 use alloc::borrow::ToOwned;
 use alloc::string::String;
 use core::fmt;
-use core::hash::{Hash, Hasher};
+use core::hash::Hash;
 use core::ops::{
     Deref, Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
@@ -49,7 +49,16 @@ use crate::{ColorSegment, ColorSegments, CubeString};
 /// let cube_str: &CubeStr = &s[..];
 /// assert_eq!(cube_str.len(), 5);
 /// ```
-#[derive(zerocopy::FromBytes, zerocopy::KnownLayout, zerocopy::Immutable)]
+#[derive(
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    zerocopy::FromBytes,
+    zerocopy::KnownLayout,
+    zerocopy::Immutable,
+)]
 #[repr(C)]
 pub struct CubeStr([u8]);
 
@@ -86,7 +95,7 @@ mod serde_impl {
 
 impl CubeStr {
     pub fn as_bytes(&self) -> &[u8] {
-        &**self
+        self
     }
 
     /// Creates a `CubeStr` from a byte slice.
@@ -245,12 +254,6 @@ impl fmt::Debug for CubeStr {
     }
 }
 
-impl PartialEq for CubeStr {
-    fn eq(&self, other: &CubeStr) -> bool {
-        self.0 == other.0
-    }
-}
-
 impl PartialEq<[u8]> for CubeStr {
     fn eq(&self, other: &[u8]) -> bool {
         self.0 == *other
@@ -289,14 +292,6 @@ impl PartialEq<CubeStr> for str {
 impl PartialEq<&CubeStr> for str {
     fn eq(&self, other: &&CubeStr) -> bool {
         *other == self
-    }
-}
-
-impl Eq for CubeStr {}
-
-impl Hash for CubeStr {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
     }
 }
 

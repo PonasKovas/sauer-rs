@@ -1,5 +1,6 @@
 use crate::data::*;
 use crate::error::OgzError;
+use cube_string::CubeString;
 use flate2::read::MultiGzDecoder;
 use std::io::{Cursor, Read};
 
@@ -147,7 +148,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             skylight,
             lavacolour,
             waterfallcolour,
-            maptitle: CubeString::from_bytes(&maptitle_buf[..title_len]),
+            maptitle: CubeString::from_bytes(maptitle_buf[..title_len].to_vec()),
         }
     } else {
         blendmap_res = cursor.read_i32_le()?;
@@ -169,7 +170,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             let namelen = cursor.read_u16_le()?;
             let mut name_buf = vec![0u8; namelen as usize];
             cursor.read_exact(&mut name_buf)?;
-            let name = CubeString(name_buf);
+            let name = CubeString::from_bytes(name_buf);
 
             let var = match v_type {
                 0 => Variable::Int {
@@ -186,7 +187,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                     cursor.read_exact(&mut sbuf)?;
                     Variable::String {
                         name,
-                        value: CubeString(sbuf),
+                        value: CubeString::from_bytes(sbuf),
                     }
                 }
                 _ => Variable::Int { name, value: 0 },
@@ -204,7 +205,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         let mut g_buf = vec![0u8; g_len as usize + 1];
         cursor.read_exact(&mut g_buf)?;
         g_buf.pop(); // Remove null terminator
-        game_type = Some(CubeString(g_buf));
+        game_type = Some(CubeString::from_bytes(g_buf));
 
         eif = cursor.read_u16_le()?;
         let extrasize = cursor.read_u16_le()?;
@@ -275,7 +276,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         entities.push(Entity {
             position,
             attrs,
-            ent_type,
+            ent_type: EntityType::from(ent_type),
             extra_data,
         });
     }
@@ -316,7 +317,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                         *v = cursor.read_f32_le()?;
                     }
                     slot.params.push(VSlotParam {
-                        name: CubeString(nbuf),
+                        name: CubeString::from_bytes(nbuf),
                         values: vals,
                     });
                 }

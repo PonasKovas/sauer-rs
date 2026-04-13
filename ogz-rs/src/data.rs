@@ -1,23 +1,102 @@
+use cube_string::CubeString;
+use num_enum::{FromPrimitive, IntoPrimitive};
 use std::fmt;
 
-/// Represents a custom 8-bit character string used by Cube 2.
-/// This format does not strictly map to UTF-8.
-#[derive(Clone, PartialEq, Eq, PartialOrd)]
-pub struct CubeString(pub Vec<u8>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive)]
+#[repr(u8)]
+pub enum Volume {
+    #[default]
+    Air = 0,
+    Water,
+    Lava,
+    Glass,
+}
 
-impl CubeString {
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        CubeString(bytes.to_vec())
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive)]
+#[repr(u8)]
+pub enum Clip {
+    #[default]
+    None = 0,
+    NoClip,
+    Clip,
+    GameClip,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Material {
+    pub volume: Volume,
+    pub clip: Clip,
+    pub death: bool,
+    pub alpha: bool,
+}
+
+impl Material {
+    pub fn from_bits(bits: u16) -> Self {
+        Self {
+            volume: Volume::from(((bits >> 2) as u8) & 0b11),
+            clip: Clip::from((bits >> 5) as u8 & 0b11),
+            death: (bits & (1 << 8)) != 0,
+            alpha: (bits & (1 << 10)) != 0,
+        }
     }
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+
+    pub fn to_bits(self) -> u16 {
+        ((self.volume as u16) << 2)
+            | ((self.clip as u16) << 5)
+            | ((self.death as u16) << 8)
+            | ((self.alpha as u16) << 10)
     }
 }
 
-impl fmt::Debug for CubeString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "\"{}\"", String::from_utf8_lossy(&self.0))
+impl From<u16> for Material {
+    fn from(bits: u16) -> Self {
+        Self::from_bits(bits)
     }
+}
+
+impl From<Material> for u16 {
+    fn from(mat: Material) -> Self {
+        mat.to_bits()
+    }
+}
+
+impl fmt::Display for Material {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.volume)?;
+
+        if self.clip != Clip::None {
+            write!(f, "|{:?}", self.clip)?;
+        }
+
+        if self.death {
+            write!(f, "|Death")?;
+        }
+
+        if self.alpha {
+            write!(f, "|Alpha")?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Engine-defined entity types (shared/ents.h).
+/// Values >= 8 are game-specific and stored as `GameSpecific(u8)`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromPrimitive, IntoPrimitive,
+)]
+#[repr(u8)]
+pub enum EntityType {
+    Empty = 0,
+    Light,
+    MapModel,
+    PlayerStart,
+    Envmap,
+    Particles,
+    Sound,
+    Spotlight,
+    #[num_enum(catch_all)]
+    GameSpecific(u8),
 }
 
 /// The top-level representation of an `.ogz` map.
@@ -90,7 +169,7 @@ pub enum Variable {
 pub struct Entity {
     pub position: [f32; 3],
     pub attrs: [i16; 5],
-    pub ent_type: u8,
+    pub ent_type: EntityType,
     pub extra_data: Vec<u8>,
 }
 

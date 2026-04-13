@@ -48,22 +48,22 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
                 match var {
                     Variable::Int { name, value } => {
                         encoder.write_u8(0)?;
-                        encoder.write_u16_le(name.0.len() as u16)?;
-                        encoder.write_all(&name.0)?;
+                        encoder.write_u16_le(name.len() as u16)?;
+                        encoder.write_all(name.as_bytes())?;
                         encoder.write_i32_le(*value)?;
                     }
                     Variable::Float { name, value } => {
                         encoder.write_u8(1)?;
-                        encoder.write_u16_le(name.0.len() as u16)?;
-                        encoder.write_all(&name.0)?;
+                        encoder.write_u16_le(name.len() as u16)?;
+                        encoder.write_all(name.as_bytes())?;
                         encoder.write_f32_le(*value)?;
                     }
                     Variable::String { name, value } => {
                         encoder.write_u8(2)?;
-                        encoder.write_u16_le(name.0.len() as u16)?;
-                        encoder.write_all(&name.0)?;
-                        encoder.write_u16_le(value.0.len() as u16)?;
-                        encoder.write_all(&value.0)?;
+                        encoder.write_u16_le(name.len() as u16)?;
+                        encoder.write_all(name.as_bytes())?;
+                        encoder.write_u16_le(value.len() as u16)?;
+                        encoder.write_all(value.as_bytes())?;
                     }
                 }
             }
@@ -72,8 +72,8 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
     }
 
     if let Some(ref gt) = map.game_type {
-        encoder.write_u8(gt.0.len() as u8)?;
-        encoder.write_all(&gt.0)?;
+        encoder.write_u8(gt.len() as u8)?;
+        encoder.write_all(gt.as_bytes())?;
         encoder.write_u8(0)?; // Null terminator
         encoder.write_u16_le(map.eif)?;
         encoder.write_u16_le(map.extra_game_data.len() as u16)?;
@@ -97,7 +97,7 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         for a in &ent.attrs {
             encoder.write_i16_le(*a)?;
         }
-        encoder.write_u8(ent.ent_type)?;
+        encoder.write_u8(ent.ent_type.into())?;
         encoder.write_u8(0)?; // reserved
         if map.eif > 0 {
             encoder.write_all(&ent.extra_data)?;
@@ -147,8 +147,8 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
             if !slot.params.is_empty() {
                 encoder.write_u16_le(slot.params.len() as u16)?;
                 for p in &slot.params {
-                    encoder.write_u16_le(p.name.0.len() as u16)?;
-                    encoder.write_all(&p.name.0)?;
+                    encoder.write_u16_le(p.name.len() as u16)?;
+                    encoder.write_all(p.name.as_bytes())?;
                     for f in &p.values {
                         encoder.write_f32_le(*f)?;
                     }
