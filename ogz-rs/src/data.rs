@@ -46,12 +46,12 @@ pub struct OgzMap {
 
 impl OgzMap {
     /// Deserializes a map from a raw byte slice (the contents of the `.ogz` file).
-    pub fn from_bytes(data: &[u8]) -> Result<Self, crate::error::OgzError> {
+    pub fn parse(data: &[u8]) -> Result<Self, crate::error::OgzError> {
         crate::de::parse_map(data)
     }
 
     /// Serializes the map to the modern Version 33 `.ogz` byte array.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, crate::error::OgzError> {
+    pub fn serialize(&self) -> Result<Vec<u8>, crate::error::OgzError> {
         crate::ser::serialize_map(self)
     }
 }

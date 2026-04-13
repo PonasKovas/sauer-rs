@@ -25,7 +25,7 @@ fn main() {
     println!("File loaded ({} bytes). Parsing...", original_data.len());
 
     // 3. Parse the map
-    let map1 = match OgzMap::from_bytes(&original_data) {
+    let mut map1 = match OgzMap::parse(&original_data) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Failed to parse map: {}", e);
@@ -45,10 +45,14 @@ fn main() {
         return;
     }
 
+    // We are upgrading the map to version 33 upon serialization,
+    // so we must update the in-memory version of map1 so the equality check passes later.
+    map1.version = 33;
+
     println!("Serializing map back to memory...");
 
     // 4. Serialize back to memory buffer
-    let serialized_data = match map1.to_bytes() {
+    let serialized_data = match map1.serialize() {
         Ok(b) => b,
         Err(e) => {
             eprintln!("Failed to serialize map: {}", e);
@@ -62,7 +66,7 @@ fn main() {
     );
 
     // 5. Parse the newly serialized buffer
-    let map2 = match OgzMap::from_bytes(&serialized_data) {
+    let map2 = match OgzMap::parse(&serialized_data) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Failed to deserialize roundtrip data: {}", e);

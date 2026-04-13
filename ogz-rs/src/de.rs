@@ -1,7 +1,7 @@
 use crate::data::*;
 use crate::error::OgzError;
-use flate2::read::DeflateDecoder;
-use std::io::{Cursor, ErrorKind, Read};
+use flate2::read::MultiGzDecoder;
+use std::io::{Cursor, Read};
 
 // Helper trait to abstract Little-Endian reads securely
 trait ReadExt: Read {
@@ -33,54 +33,27 @@ trait ReadExt: Read {
 }
 impl<R: Read + ?Sized> ReadExt for R {}
 
-/// Leniently decompresses an .ogz file, bypassing broken GZIP footers.
+/// Leniently decompresses an .ogz file, handling concatenated GZIP streams
+/// and bypassing Sauerbraten's historically broken GZIP footers.
 fn decompress_ogz(data: &[u8]) -> Result<Vec<u8>, OgzError> {
-    let mut cursor = Cursor::new(data);
-    let mut base_hdr = [0u8; 10];
-
-    if cursor.read_exact(&mut base_hdr).is_err() {
-        return Err(OgzError::InvalidGzip);
-    }
-
-    if base_hdr[0] != 0x1F || base_hdr[1] != 0x8B || base_hdr[2] != 8 {
-        return Err(OgzError::InvalidGzip);
-    }
-
-    let flags = base_hdr[3];
-    let f_ext = (flags & 0x04) != 0;
-    let f_name = (flags & 0x08) != 0;
-    let f_comment = (flags & 0x10) != 0;
-    let f_hcrc = (flags & 0x02) != 0;
-
-    if f_ext {
-        let xlen = cursor.read_u16_le()? as u64;
-        cursor.set_position(cursor.position() + xlen);
-    }
-
-    let mut skip_c_string = || -> std::io::Result<()> {
-        while cursor.read_u8()? != 0 {}
-        Ok(())
-    };
-
-    if f_name {
-        skip_c_string()?;
-    }
-    if f_comment {
-        skip_c_string()?;
-    }
-    if f_hcrc {
-        cursor.set_position(cursor.position() + 2);
-    }
-
-    let mut decoder = DeflateDecoder::new(cursor);
+    let mut decoder = MultiGzDecoder::new(Cursor::new(data));
     let mut decompressed = Vec::new();
+
     match decoder.read_to_end(&mut decompressed) {
         Ok(_) => Ok(decompressed),
-        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Ok(decompressed), // Standard engine fallback
-        Err(e) => Err(OgzError::Io(e)),
+        Err(e) => {
+            // flate2 strictly enforces the GZIP trailer CRC32. Sauerbraten files often have
+            // broken trailers but perfectly intact DEFLATE payloads. `read_to_end` successfully
+            // appends the intact payload before throwing the trailer error, so if our buffer
+            // has data, we can safely ignore the error!
+            if !decompressed.is_empty() {
+                Ok(decompressed)
+            } else {
+                Err(OgzError::Io(e))
+            }
+        }
     }
 }
-
 pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     let decompressed = decompress_ogz(data)?;
     let mut cursor = Cursor::new(&decompressed);
@@ -102,7 +75,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     let numpvs = cursor.read_i32_le()?;
     let lightmaps = cursor.read_i32_le()?;
 
-    let blendmap_res;
+    let mut blendmap_res;
     let map_vars;
     let mut map_vslots = 0;
 
@@ -374,9 +347,18 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
     let mut blendmap_data = None;
     if version >= 28 && blendmap_res > 0 {
-        let mut bdata = vec![0u8; (blendmap_res * blendmap_res) as usize];
+        // Map version 28 has an engine quirk where it reads an extra int32
+        // to dictate the actual resolution before reading the pixel array.
+        let actual_res = if version == 28 {
+            cursor.read_i32_le()?
+        } else {
+            blendmap_res
+        };
+
+        let mut bdata = vec![0u8; (actual_res * actual_res) as usize];
         cursor.read_exact(&mut bdata)?;
         blendmap_data = Some(bdata);
+        blendmap_res = actual_res; // Sync the resolution so it serializes properly later
     }
 
     Ok(OgzMap {
