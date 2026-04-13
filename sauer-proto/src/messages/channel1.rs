@@ -563,6 +563,11 @@ pub enum Chan1Client {
         qcn: i32,
     },
 
+    /// Plays a sound
+    Sound {
+        sound_id: i32,
+    },
+
     /// The client toggled cooperative edit mode locally.
     EditMode {
         val: i32,

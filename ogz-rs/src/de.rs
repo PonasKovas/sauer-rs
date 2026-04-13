@@ -504,7 +504,7 @@ fn read_legacy_surfaces(
 ) -> Result<LegacySurfaceData, OgzError> {
     let mask = cursor.read_u8()?;
     let material = if (mask & 0x80) != 0 {
-        Some(cursor.read_u8()?)
+        Some(Material::from_bits(cursor.read_u8()? as u16))
     } else {
         None
     };
@@ -576,11 +576,11 @@ fn read_modern_surfaces(
     octsav: u8,
 ) -> Result<ModernSurfaceData, OgzError> {
     let material = if (octsav & 0x40) != 0 {
-        Some(if version == 32 {
+        Some(Material::from_bits(if version == 32 {
             cursor.read_u8()? as u16
         } else {
             cursor.read_u16_le()?
-        })
+        }))
     } else {
         None
     };

@@ -265,7 +265,7 @@ fn write_cube<W: Write>(node: &OctreeNode, w: &mut W) -> Result<(), OgzError> {
     }
 
     if let Some(mat) = mod_surf.material {
-        w.write_u16_le(mat)?;
+        w.write_u16_le(mat.to_bits())?;
     }
     if let Some(m) = mod_surf.merged {
         w.write_u8(m)?;

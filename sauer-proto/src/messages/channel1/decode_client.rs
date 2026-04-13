@@ -524,6 +524,9 @@ impl Decode for Chan1Client {
             }
             N_TAKETOKEN => Ok(Chan1Client::TakeToken { id: r.get_int()? }),
             N_DEPOSITTOKENS => Ok(Chan1Client::DepositTokens { base: r.get_int()? }),
+            N_SOUND => Ok(Chan1Client::Sound {
+                sound_id: r.get_int()?,
+            }),
             _ => Err(ParseError::UnknownMessageType {
                 channel: 1,
                 id: msg_type,

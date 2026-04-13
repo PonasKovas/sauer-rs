@@ -454,6 +454,10 @@ impl Encode for Chan1Client {
                 w.put_int(N_DEPOSITTOKENS);
                 w.put_int(*base);
             }
+            Chan1Client::Sound { sound_id } => {
+                w.put_int(N_SOUND);
+                w.put_int(*sound_id);
+            }
         }
     }
 }

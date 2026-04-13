@@ -9,6 +9,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "anyhow"
+version = "1.0.102"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+
+[[package]]
 name = "bitflags"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -410,6 +416,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "sauer-map"
+version = "0.1.0"
+dependencies = [
+ "ogz-rs",
+]
+
+[[package]]
 name = "sauer-proto"
 version = "0.1.0"
 dependencies = [
@@ -417,6 +430,18 @@ dependencies = [
  "num_enum",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "sauer-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cube-string",
+ "enet-rs",
+ "ogz-rs",
+ "sauer-proto",
+ "tokio",
 ]
 
 [[package]]

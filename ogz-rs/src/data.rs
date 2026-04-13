@@ -2,6 +2,42 @@ use cube_string::CubeString;
 use num_enum::{FromPrimitive, IntoPrimitive};
 use std::fmt;
 
+/// The top-level representation of an `.ogz` map.
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct OgzMap {
+    pub version: i32,
+    pub world_size: i32,
+    pub config: MapConfig,
+
+    // Game Extras
+    pub game_type: Option<CubeString>,
+    pub eif: u16, // Extra entity info size
+    pub extra_game_data: Vec<u8>,
+
+    pub mru_textures: Vec<u16>,
+    pub entities: Vec<Entity>,
+    pub vslots: Vec<Option<VSlot>>,
+    pub octree: OctreeNode,
+
+    pub lightmaps: Vec<Lightmap>,
+    pub pvs: Vec<u8>,
+
+    pub blendmap_resolution: i32,
+    pub blendmap_data: Option<Vec<u8>>,
+}
+
+impl OgzMap {
+    /// Deserializes a map from a raw byte slice (the contents of the `.ogz` file).
+    pub fn parse(data: &[u8]) -> Result<Self, crate::error::OgzError> {
+        crate::de::parse_map(data)
+    }
+
+    /// Serializes the map to the modern Version 33 `.ogz` byte array.
+    pub fn serialize(&self) -> Result<Vec<u8>, crate::error::OgzError> {
+        crate::ser::serialize_map(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive)]
 #[repr(u8)]
 pub enum Volume {
@@ -99,42 +135,6 @@ pub enum EntityType {
     GameSpecific(u8),
 }
 
-/// The top-level representation of an `.ogz` map.
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct OgzMap {
-    pub version: i32,
-    pub world_size: i32,
-    pub config: MapConfig,
-
-    // Game Extras
-    pub game_type: Option<CubeString>,
-    pub eif: u16, // Extra entity info size
-    pub extra_game_data: Vec<u8>,
-
-    pub mru_textures: Vec<u16>,
-    pub entities: Vec<Entity>,
-    pub vslots: Vec<Option<VSlot>>,
-    pub octree: OctreeNode,
-
-    pub lightmaps: Vec<Lightmap>,
-    pub pvs: Vec<u8>,
-
-    pub blendmap_resolution: i32,
-    pub blendmap_data: Option<Vec<u8>>,
-}
-
-impl OgzMap {
-    /// Deserializes a map from a raw byte slice (the contents of the `.ogz` file).
-    pub fn parse(data: &[u8]) -> Result<Self, crate::error::OgzError> {
-        crate::de::parse_map(data)
-    }
-
-    /// Serializes the map to the modern Version 33 `.ogz` byte array.
-    pub fn serialize(&self) -> Result<Vec<u8>, crate::error::OgzError> {
-        crate::ser::serialize_map(self)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum MapConfig {
     Modern {
@@ -223,7 +223,7 @@ pub enum Surfaces {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct LegacySurfaceData {
     pub mask: u8,
-    pub material: Option<u8>,
+    pub material: Option<Material>,
     pub surfaces: Vec<LegacySurface>,
     pub merges: Option<LegacyMerge>,
 }
@@ -243,7 +243,7 @@ pub struct LegacyMerge {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ModernSurfaceData {
-    pub material: Option<u16>,
+    pub material: Option<Material>,
     pub merged: Option<u8>,
     pub surfaces: Option<ModernSurfaces>,
 }
