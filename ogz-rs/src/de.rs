@@ -325,7 +325,10 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                     unlit = Some((cursor.read_u16_le()?, cursor.read_u16_le()?));
                 }
             }
-            let bpp = if (ty & 0x01) != 0 && (ty & 0x06) != 0x04 {
+            // LM_ALPHA = 0x10 (bit 4), LM_TYPE = 0x0F, LM_BUMPMAP1 = 2
+            // bpp=4 only when alpha flag is set AND type is not BUMPMAP1
+            let lm_type = ty & 0x7F; // strip unlit-coords flag before type check
+            let bpp = if (lm_type & 0x10) != 0 && (lm_type & 0x0F) != 2 {
                 4
             } else {
                 3
