@@ -20,4 +20,10 @@ pub enum OgzError {
 
     #[error("Cannot serialize map with legacy surfaces to v33. Convert to modern format first.")]
     CannotSerializeLegacy,
+
+    #[error("Decompressed size exceeds safety limit ({0} bytes)")]
+    DecompressedTooLarge(usize),
+
+    #[error("Field value {0} exceeds safety limit")]
+    LimitExceeded(&'static str),
 }
