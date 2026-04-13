@@ -450,7 +450,7 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
             }
             Ok(OctreeNode::Children(Box::new(children.try_into().unwrap())))
         }
-        1 | 2 | 3 | 4 => {
+        1..=4 => {
             let mut edges = [0u8; 12];
             if ty == 3 {
                 cursor.read_exact(&mut edges)?;

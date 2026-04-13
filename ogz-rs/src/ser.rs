@@ -209,7 +209,7 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         encoder.write_all(&lm.data)?;
     }
 
-    if map.pvs.len() > 0 {
+    if !map.pvs.is_empty() {
         encoder.write_all(&map.pvs)?;
     }
     if let Some(ref bdata) = map.blendmap_data {
