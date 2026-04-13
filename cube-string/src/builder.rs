@@ -8,9 +8,7 @@
 //! ```
 //! use cube_string::{CubeStringBuilder, Color};
 //!
-//! let mut builder = CubeStringBuilder::new();
-//! builder.push_str("Hello").color(Color::Red).push_str("World");
-//! let s = builder.build();
+//! let s = CubeStringBuilder::new().push_str("Hello").color(Color::Red).push_str("World").build();
 //! ```
 
 use alloc::vec::Vec;

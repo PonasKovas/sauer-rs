@@ -7,13 +7,17 @@ use sauer_proto::{
     data::{ArmourType, GameMode, Gun, PlayerState},
     protocol_route::{C2S, Chan0, Chan1, S2C},
 };
+use std::sync::Arc;
 
 const MAP: &str = "face-capture";
-const MAP_DATA: &[u8] =
-    include_bytes!("/home/mykolas/Projects/c++/sauerbraten/packages/base/face-capture.ogz");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let ogz_map = Arc::new(OgzMap::parse(
+        &tokio::fs::read("/home/mykolas/Projects/c++/sauerbraten/packages/base/face-capture.ogz")
+            .await?,
+    )?);
+
     let mut host = Host::bind(
         "127.0.0.1:28785",
         HostConfig {
@@ -27,8 +31,9 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     while let Some(peer) = host.accept().await {
+        let ogz_map = Arc::clone(&ogz_map);
         tokio::spawn(async move {
-            if let Err(e) = handle_client(peer).await {
+            if let Err(e) = handle_client(peer, ogz_map).await {
                 println!("Error: {e}");
             }
         });
@@ -37,9 +42,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_client(mut peer: Peer) -> anyhow::Result<()> {
-    let ogz = OgzMap::parse(MAP_DATA)?;
-
+async fn handle_client(mut peer: Peer, ogz: Arc<OgzMap>) -> anyhow::Result<()> {
     let map = World::from_ogz(&ogz);
 
     send_chan1(

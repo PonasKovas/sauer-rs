@@ -55,17 +55,17 @@ pub enum Gun {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(i32)]
 pub enum ItemType {
-    Shells = 1,
-    Bullets = 2,
-    Rockets = 3,
-    Rounds = 4,
-    Grenades = 5,
-    Cartridges = 6,
-    Health = 7,
-    Boost = 8,
-    GreenArmour = 9,
-    YellowArmour = 10,
-    Quad = 11,
+    Shells = 8,
+    Bullets = 9,
+    Rockets = 10,
+    Rounds = 11,
+    Grenades = 12,
+    Cartridges = 13,
+    Health = 14,
+    Boost = 15,
+    GreenArmour = 16,
+    YellowArmour = 17,
+    Quad = 18,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
