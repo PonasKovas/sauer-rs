@@ -417,11 +417,10 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
                     cursor.read_u16_le()?
                 };
             }
-            if version < 7 {
-                cursor.read_exact(&mut [0; 3])?;
-            }
-
-            let surfaces = if version <= 31 {
+            let surfaces = if version < 7 {
+                cursor.read_exact(&mut [0; 3])?; // skip 3 legacy lightmap bytes, no surface data
+                Surfaces::None
+            } else if version <= 31 {
                 Surfaces::Legacy(read_legacy_surfaces(cursor, version, octsav)?)
             } else {
                 Surfaces::Modern(read_modern_surfaces(cursor, version, octsav)?)
