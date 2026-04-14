@@ -1,3 +1,25 @@
+//! Color segment iteration for cube strings.
+//!
+//! This module provides types for iterating over the color segments of a
+//! cube string. Each color segment consists of a color and the text
+//! that follows it until the next color change.
+//!
+//! # Example
+//!
+//! ```
+//! use cube_string::{CubeString, Color};
+//!
+//! let mut s = CubeString::from_str_lossy("Hello");
+//! s.push_color(Color::Red);
+//! s.push(b'W');
+//!
+//! for segment in &s[..] {
+//!     let color = segment.color;
+//!     let text_len = segment.text.len();
+//!     println!("{:?}: {} bytes", color, text_len);
+//! }
+//! ```
+
 use core::ops::Deref;
 
 use crate::raw::COLOR_ESCAPE;
