@@ -300,16 +300,25 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                 slot.rotation = Some(cursor.read_i32::<LittleEndian>()?);
             }
             if changed & (1 << 3) != 0 {
-                slot.offset = Some((cursor.read_i32::<LittleEndian>()?, cursor.read_i32::<LittleEndian>()?));
+                slot.offset = Some((
+                    cursor.read_i32::<LittleEndian>()?,
+                    cursor.read_i32::<LittleEndian>()?,
+                ));
             }
             if changed & (1 << 4) != 0 {
-                slot.scroll = Some((cursor.read_f32::<LittleEndian>()?, cursor.read_f32::<LittleEndian>()?));
+                slot.scroll = Some((
+                    cursor.read_f32::<LittleEndian>()?,
+                    cursor.read_f32::<LittleEndian>()?,
+                ));
             }
             if changed & (1 << 5) != 0 {
                 slot.layer = Some(cursor.read_i32::<LittleEndian>()?);
             }
             if changed & (1 << 6) != 0 {
-                slot.alpha = Some((cursor.read_f32::<LittleEndian>()?, cursor.read_f32::<LittleEndian>()?));
+                slot.alpha = Some((
+                    cursor.read_f32::<LittleEndian>()?,
+                    cursor.read_f32::<LittleEndian>()?,
+                ));
             }
             if changed & (1 << 7) != 0 {
                 slot.color = Some((
@@ -336,7 +345,10 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             if version >= 17 {
                 ty = cursor.read_u8()?;
                 if version >= 20 && (ty & 0x80) != 0 {
-                    unlit = Some((cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?));
+                    unlit = Some((
+                        cursor.read_u16::<LittleEndian>()?,
+                        cursor.read_u16::<LittleEndian>()?,
+                    ));
                 }
             }
             // LM_ALPHA = 0x10 (bit 4), LM_TYPE = 0x0F, LM_BUMPMAP1 = 2
@@ -411,7 +423,11 @@ fn read_8_children(
     for _ in 0..8 {
         children.push(read_cube(cursor, version)?);
     }
-    Ok(Box::new(children.try_into().expect("8 elements pushed to 8-element array")))
+    Ok(Box::new(
+        children
+            .try_into()
+            .expect("8 elements pushed to 8-element array"),
+    ))
 }
 
 fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, OgzError> {
@@ -452,12 +468,10 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
                 1 => Ok(OctreeNode::Empty(info)),
                 2 => Ok(OctreeNode::Solid(info)),
                 3 => Ok(OctreeNode::Normal { info, edges }),
-                4 => {
-                    Ok(OctreeNode::LodCube {
-                        info,
-                        children: read_8_children(cursor, version)?,
-                    })
-                }
+                4 => Ok(OctreeNode::LodCube {
+                    info,
+                    children: read_8_children(cursor, version)?,
+                }),
                 _ => unreachable!(),
             }
         }
@@ -619,12 +633,18 @@ fn read_modern_surfaces(
                 if hasxyz || hasuv || hasnorm {
                     for _ in 0..layerverts {
                         let vx = if hasxyz {
-                            Some([cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?])
+                            Some([
+                                cursor.read_u16::<LittleEndian>()?,
+                                cursor.read_u16::<LittleEndian>()?,
+                            ])
                         } else {
                             None
                         };
                         let vu = if hasuv {
-                            Some([cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?])
+                            Some([
+                                cursor.read_u16::<LittleEndian>()?,
+                                cursor.read_u16::<LittleEndian>()?,
+                            ])
                         } else {
                             None
                         };
@@ -645,7 +665,10 @@ fn read_modern_surfaces(
                 if (numverts & 0x80) != 0 {
                     for _ in 0..layerverts {
                         let vu = if hasuv {
-                            Some([cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?])
+                            Some([
+                                cursor.read_u16::<LittleEndian>()?,
+                                cursor.read_u16::<LittleEndian>()?,
+                            ])
                         } else {
                             None
                         };

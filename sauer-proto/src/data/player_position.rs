@@ -23,9 +23,22 @@ impl PositionPhysState {
         let move_raw = (bits >> 4) & 0b11;
         let strafe_raw = (bits >> 6) & 0b11;
         // 2-bit sign extension: 0b11 (3) -> -1, 0b10 (2) -> -2, etc.
-        let move_dir = if move_raw >= 2 { move_raw as i8 - 4 } else { move_raw as i8 };
-        let strafe = if strafe_raw >= 2 { strafe_raw as i8 - 4 } else { strafe_raw as i8 };
-        Self { phys_state, life_sequence, move_dir, strafe }
+        let move_dir = if move_raw >= 2 {
+            move_raw as i8 - 4
+        } else {
+            move_raw as i8
+        };
+        let strafe = if strafe_raw >= 2 {
+            strafe_raw as i8 - 4
+        } else {
+            strafe_raw as i8
+        };
+        Self {
+            phys_state,
+            life_sequence,
+            move_dir,
+            strafe,
+        }
     }
 
     pub fn to_bits(self) -> u8 {

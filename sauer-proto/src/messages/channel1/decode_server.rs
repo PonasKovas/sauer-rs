@@ -143,11 +143,10 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         N_MAPCHANGE => {
             let map_name = r.get_string()?;
             let mode_val = r.get_int()?;
-            let mode =
-                GameMode::try_from(mode_val).map_err(|_| ParseError::InvalidEnumValue {
-                    value: mode_val,
-                    enum_name: "GameMode",
-                })?;
+            let mode = GameMode::try_from(mode_val).map_err(|_| ParseError::InvalidEnumValue {
+                value: mode_val,
+                enum_name: "GameMode",
+            })?;
             Ok(Chan1Server::MapChange {
                 map_name,
                 mode,
@@ -316,12 +315,11 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
                     break;
                 }
                 let state_val = r.get_int()?;
-                let state = ClientState::try_from(state_val).map_err(|_| {
-                    ParseError::InvalidEnumValue {
+                let state =
+                    ClientState::try_from(state_val).map_err(|_| ParseError::InvalidEnumValue {
                         value: state_val,
                         enum_name: "ClientState",
-                    }
-                })?;
+                    })?;
                 let frags = r.get_int()?;
                 let flags = r.get_int()?;
                 let deaths = r.get_int()?;

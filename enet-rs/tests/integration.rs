@@ -123,7 +123,9 @@ async fn test_reliable_ordering() {
     tokio::spawn(async move {
         if let Some(mut peer) = server.accept().await {
             while let Ok(pkt) = peer.recv().await {
-                peer.send_packet(Packet::reliable(pkt.data, 0)).await.unwrap();
+                peer.send_packet(Packet::reliable(pkt.data, 0))
+                    .await
+                    .unwrap();
             }
         }
     });
@@ -157,7 +159,9 @@ async fn test_large_reliable_fragmented() {
     tokio::spawn(async move {
         if let Some(mut peer) = server.accept().await {
             while let Ok(pkt) = peer.recv().await {
-                peer.send_packet(Packet::reliable(pkt.data, 0)).await.unwrap();
+                peer.send_packet(Packet::reliable(pkt.data, 0))
+                    .await
+                    .unwrap();
             }
         }
     });
@@ -166,7 +170,9 @@ async fn test_large_reliable_fragmented() {
 
     // 64 KiB — definitely larger than MTU (1392 bytes) → triggers fragmentation
     let big: Vec<u8> = (0..65536u32).map(|i| (i & 0xFF) as u8).collect();
-    peer.send_packet(Packet::reliable(big.clone(), 0)).await.unwrap();
+    peer.send_packet(Packet::reliable(big.clone(), 0))
+        .await
+        .unwrap();
 
     let reply = timeout(Duration::from_secs(10), peer.recv())
         .await
@@ -197,7 +203,9 @@ async fn test_sink_stream_api() {
     });
 
     let mut peer = Host::connect(&addr, 2).await.unwrap();
-    peer.send(Packet::reliable(b"sink api".as_ref(), 0)).await.unwrap();
+    peer.send(Packet::reliable(b"sink api".as_ref(), 0))
+        .await
+        .unwrap();
 
     let reply = timeout(Duration::from_secs(5), peer.next())
         .await
@@ -220,7 +228,9 @@ async fn test_split_peer() {
     tokio::spawn(async move {
         if let Some(mut peer) = server.accept().await {
             while let Ok(pkt) = peer.recv().await {
-                peer.send_packet(Packet::reliable(pkt.data, 0)).await.unwrap();
+                peer.send_packet(Packet::reliable(pkt.data, 0))
+                    .await
+                    .unwrap();
             }
         }
     });
@@ -228,7 +238,10 @@ async fn test_split_peer() {
     let peer = Host::connect(&addr, 2).await.unwrap();
     let (sender, mut receiver) = peer.split();
 
-    sender.send_packet(Packet::reliable(b"split works".as_ref(), 0)).await.unwrap();
+    sender
+        .send_packet(Packet::reliable(b"split works".as_ref(), 0))
+        .await
+        .unwrap();
 
     let reply = timeout(Duration::from_secs(5), receiver.rx.recv())
         .await
@@ -252,7 +265,9 @@ async fn test_multiple_clients() {
         while let Some(mut peer) = server.accept().await {
             tokio::spawn(async move {
                 while let Ok(pkt) = peer.recv().await {
-                    peer.send_packet(Packet::reliable(pkt.data, 0)).await.unwrap();
+                    peer.send_packet(Packet::reliable(pkt.data, 0))
+                        .await
+                        .unwrap();
                 }
             });
         }
@@ -265,7 +280,9 @@ async fn test_multiple_clients() {
         handles.push(tokio::spawn(async move {
             let mut peer = Host::connect(&addr, 2).await.unwrap();
             let msg = i.to_be_bytes().to_vec();
-            peer.send_packet(Packet::reliable(msg.clone(), 0)).await.unwrap();
+            peer.send_packet(Packet::reliable(msg.clone(), 0))
+                .await
+                .unwrap();
             let reply = timeout(Duration::from_secs(5), peer.recv())
                 .await
                 .expect("timeout")

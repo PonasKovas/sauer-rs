@@ -145,11 +145,10 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
         N_SPAWN => {
             let life_sequence = r.get_int()?;
             let gun_val = r.get_int()?;
-            let gun_select =
-                Gun::try_from(gun_val).map_err(|_| ParseError::InvalidEnumValue {
-                    value: gun_val,
-                    enum_name: "Gun",
-                })?;
+            let gun_select = Gun::try_from(gun_val).map_err(|_| ParseError::InvalidEnumValue {
+                value: gun_val,
+                enum_name: "Gun",
+            })?;
             Ok(Chan1Client::Spawn {
                 life_sequence,
                 gun_select,
@@ -261,11 +260,9 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             let mode_val = r.get_int()?;
             Ok(Chan1Client::MapVote {
                 map_name,
-                mode: GameMode::try_from(mode_val).map_err(|_| {
-                    ParseError::InvalidEnumValue {
-                        value: mode_val,
-                        enum_name: "GameMode",
-                    }
+                mode: GameMode::try_from(mode_val).map_err(|_| ParseError::InvalidEnumValue {
+                    value: mode_val,
+                    enum_name: "GameMode",
                 })?,
             })
         }

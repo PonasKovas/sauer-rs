@@ -8,9 +8,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
 
 use crate::{
-    Packet,
     error::{Error, Result},
     task::{PeerKey, PeerMsg, ToTask},
+    Packet,
 };
 
 // ── PeerSender ────────────────────────────────────────────────────────────────
@@ -28,7 +28,11 @@ pub struct PeerSender {
 impl PeerSender {
     pub(crate) fn new(key: PeerKey, task_tx: mpsc::Sender<ToTask>) -> Self {
         let poll_sender = PollSender::new(task_tx.clone());
-        Self { key, task_tx, poll_sender }
+        Self {
+            key,
+            task_tx,
+            poll_sender,
+        }
     }
 }
 
@@ -80,7 +84,10 @@ impl Sink<Packet> for PeerSender {
     fn start_send(mut self: Pin<&mut Self>, item: Packet) -> Result<()> {
         let key = self.key;
         Pin::new(&mut self.poll_sender)
-            .send_item(ToTask::Send { peer_key: key, packet: item })
+            .send_item(ToTask::Send {
+                peer_key: key,
+                packet: item,
+            })
             .map_err(|_| Error::ChannelClosed)
     }
 
@@ -109,10 +116,10 @@ impl Stream for PeerReceiver {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Packet>>> {
         match self.rx.poll_recv(cx) {
-            Poll::Ready(Some(Ok(pkt)))    => Poll::Ready(Some(Ok(pkt))),
-            Poll::Ready(Some(Err(data)))  => Poll::Ready(Some(Err(Error::Disconnected(data)))),
-            Poll::Ready(None)             => Poll::Ready(None),
-            Poll::Pending                 => Poll::Pending,
+            Poll::Ready(Some(Ok(pkt))) => Poll::Ready(Some(Ok(pkt))),
+            Poll::Ready(Some(Err(data))) => Poll::Ready(Some(Err(Error::Disconnected(data)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -145,7 +152,11 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub(crate) fn new(key: PeerKey, task_tx: mpsc::Sender<ToTask>, rx: mpsc::Receiver<PeerMsg>) -> Self {
+    pub(crate) fn new(
+        key: PeerKey,
+        task_tx: mpsc::Sender<ToTask>,
+        rx: mpsc::Receiver<PeerMsg>,
+    ) -> Self {
         Self {
             sender: PeerSender::new(key, task_tx),
             receiver: PeerReceiver { rx },
@@ -175,9 +186,9 @@ impl Peer {
     /// Returns `Err(Error::ChannelClosed)` when the host task has shut down.
     pub async fn recv(&mut self) -> Result<Packet> {
         match self.receiver.rx.recv().await {
-            Some(Ok(pkt))   => Ok(pkt),
+            Some(Ok(pkt)) => Ok(pkt),
             Some(Err(data)) => Err(Error::Disconnected(data)),
-            None            => Err(Error::ChannelClosed),
+            None => Err(Error::ChannelClosed),
         }
     }
 

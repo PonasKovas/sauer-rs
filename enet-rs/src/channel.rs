@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use bytes::{Bytes, BytesMut};
 
-use crate::protocol::{FREE_RELIABLE_WINDOWS, RELIABLE_WINDOW_SIZE, seq_lt};
+use crate::protocol::{seq_lt, FREE_RELIABLE_WINDOWS, RELIABLE_WINDOW_SIZE};
 
 /// Maximum number of out-of-order reliable packets buffered per channel.
 /// Caps per-channel memory use and prevents a malicious peer from exhausting

@@ -18,10 +18,16 @@ pub(crate) trait ParseResultExt<T> {
 
 impl<T> ParseResultExt<T> for Result<T, ParseError> {
     fn in_packet(self, packet: &'static str) -> Result<T, ParseError> {
-        self.map_err(|e| ParseError::InPacket { packet, source: Box::new(e) })
+        self.map_err(|e| ParseError::InPacket {
+            packet,
+            source: Box::new(e),
+        })
     }
     fn in_field(self, field: &'static str) -> Result<T, ParseError> {
-        self.map_err(|e| ParseError::InField { field, source: Box::new(e) })
+        self.map_err(|e| ParseError::InField {
+            field,
+            source: Box::new(e),
+        })
     }
 }
 

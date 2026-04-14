@@ -413,7 +413,10 @@ impl Command {
                 }
                 let data = Bytes::copy_from_slice(&buf[..data_length]);
                 *buf = &buf[data_length..];
-                CommandBody::SendUnreliable(SendUnreliableCmd { unreliable_seq, data })
+                CommandBody::SendUnreliable(SendUnreliableCmd {
+                    unreliable_seq,
+                    data,
+                })
             }
             CMD_SEND_FRAGMENT | CMD_SEND_UNRELIABLE_FRAGMENT => {
                 if buf.len() < 20 {
@@ -457,7 +460,10 @@ impl Command {
                 }
                 let data = Bytes::copy_from_slice(&buf[..data_length]);
                 *buf = &buf[data_length..];
-                CommandBody::SendUnsequenced(SendUnsequencedCmd { unsequenced_group, data })
+                CommandBody::SendUnsequenced(SendUnsequencedCmd {
+                    unsequenced_group,
+                    data,
+                })
             }
             CMD_BANDWIDTH_LIMIT => {
                 if buf.len() < 8 {

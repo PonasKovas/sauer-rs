@@ -30,34 +30,19 @@ pub enum Chan1Server {
     Welcome,
 
     /// `N_PAUSEGAME` Sets or removes the paused state of the game.
-    PauseGame {
-        is_paused: bool,
-        client_num: i32,
-    },
+    PauseGame { is_paused: bool, client_num: i32 },
 
     /// `N_GAMESPEED` Modifies the speed of the game.
-    GameSpeed {
-        speed: i32,
-        client_num: i32,
-    },
+    GameSpeed { speed: i32, client_num: i32 },
 
     /// `N_SOUND` Plays a sound at the target client's location.
-    Sound {
-        client_num: i32,
-        sound_id: i32,
-    },
+    Sound { client_num: i32, sound_id: i32 },
 
     /// `N_TEXT` Emits a global chat message from a client.
-    Text {
-        client_num: i32,
-        text: CubeString,
-    },
+    Text { client_num: i32, text: CubeString },
 
     /// `N_SAYTEAM` Emits a team chat message.
-    SayTeam {
-        client_num: i32,
-        text: CubeString,
-    },
+    SayTeam { client_num: i32, text: CubeString },
 
     /// `N_MAPCHANGE` Notifies clients to change the current map and gamemode.
     MapChange {
@@ -67,14 +52,10 @@ pub enum Chan1Server {
     },
 
     /// `N_FORCEDEATH` Forces a client to die instantly.
-    ForceDeath {
-        client_num: i32,
-    },
+    ForceDeath { client_num: i32 },
 
     /// `N_ITEMLIST` Bulk sends the locations/types of all items on a map.
-    ItemList {
-        items: Vec<ItemSpawn>,
-    },
+    ItemList { items: Vec<ItemSpawn> },
 
     /// `N_INITCLIENT` A new client has connected.
     InitClient {
@@ -85,33 +66,19 @@ pub enum Chan1Server {
     },
 
     /// `N_SWITCHNAME` Informs the client that someone changed their name.
-    SwitchName {
-        client_num: i32,
-        name: CubeString,
-    },
+    SwitchName { client_num: i32, name: CubeString },
 
     /// `N_SWITCHMODEL` Informs the client that someone changed their playermodel.
-    SwitchModel {
-        client_num: i32,
-        model: PlayerModel,
-    },
+    SwitchModel { client_num: i32, model: PlayerModel },
 
     /// `N_CDIS` A client has fully disconnected.
-    ClientDisconnected {
-        client_num: i32,
-    },
+    ClientDisconnected { client_num: i32 },
 
     /// `N_SPAWN` Sent to instruct a client to spawn in the game.
-    Spawn {
-        client_num: i32,
-        state: PlayerState,
-    },
+    Spawn { client_num: i32, state: PlayerState },
 
     /// `N_SPAWNSTATE` Confirms the specific state (health, ammo, etc.) of a client who just spawned.
-    SpawnState {
-        client_num: i32,
-        state: PlayerState,
-    },
+    SpawnState { client_num: i32, state: PlayerState },
 
     /// `N_SHOTFX` Replicates weapon firing effects across clients.
     ShotFx {
@@ -123,11 +90,7 @@ pub enum Chan1Server {
     },
 
     /// `N_EXPLODEFX` Replicates projectile explosion effects across clients.
-    ExplodeFx {
-        client_num: i32,
-        gun: Gun,
-        id: i32,
-    },
+    ExplodeFx { client_num: i32, gun: Gun, id: i32 },
 
     /// `N_DAMAGE` Applies damage to a target client.
     Damage {
@@ -155,36 +118,22 @@ pub enum Chan1Server {
     },
 
     /// `N_TEAMINFO` Transmits team scores (frags).
-    TeamInfo {
-        teams: Vec<TeamInfo>,
-    },
+    TeamInfo { teams: Vec<TeamInfo> },
 
     /// `N_GUNSELECT` Indicates that a player changed their current weapon selection.
-    GunSelect {
-        client_num: i32,
-        gun: Gun,
-    },
+    GunSelect { client_num: i32, gun: Gun },
 
     /// `N_TAUNT` Indicates that a player is taunting.
-    Taunt {
-        client_num: i32,
-    },
+    Taunt { client_num: i32 },
 
     /// `N_RESUME` Sent during a late join to tell the connecting client about the state of all players.
-    Resume {
-        clients: Vec<ClientResumeState>,
-    },
+    Resume { clients: Vec<ClientResumeState> },
 
     /// `N_ITEMSPAWN` Notifies that an item has spawned on the map.
-    ItemSpawn {
-        item_index: i32,
-    },
+    ItemSpawn { item_index: i32 },
 
     /// `N_ITEMACC` Acknowledges an item pickup.
-    ItemAck {
-        item_index: i32,
-        client_num: i32,
-    },
+    ItemAck { item_index: i32, client_num: i32 },
 
     /// `N_CLIPBOARD` Pushes map clipboard data (for cooperative editing) to the client.
     Clipboard {
@@ -236,22 +185,13 @@ pub enum Chan1Server {
     },
 
     /// `N_FLIP` Coop Edit: Flip geometry.
-    Flip {
-        client_num: i32,
-        sel: SelInfo,
-    },
+    Flip { client_num: i32, sel: SelInfo },
 
     /// `N_COPY` Coop Edit: Copy geometry.
-    Copy {
-        client_num: i32,
-        sel: SelInfo,
-    },
+    Copy { client_num: i32, sel: SelInfo },
 
     /// `N_PASTE` Coop Edit: Paste geometry.
-    Paste {
-        client_num: i32,
-        sel: SelInfo,
-    },
+    Paste { client_num: i32, sel: SelInfo },
 
     /// `N_ROTATE` Coop Edit: Rotate geometry.
     Rotate {
@@ -271,10 +211,7 @@ pub enum Chan1Server {
     },
 
     /// `N_DELCUBE` Coop Edit: Delete a cube.
-    DelCube {
-        client_num: i32,
-        sel: SelInfo,
-    },
+    DelCube { client_num: i32, sel: SelInfo },
 
     /// `N_EDITVSLOT` Coop Edit: Modify texture V-Slots.
     EditVSlot {
@@ -286,9 +223,7 @@ pub enum Chan1Server {
     },
 
     /// `N_REMIP` Coop Edit: Informs clients that someone recalculates lighting/mips.
-    Remip {
-        client_num: i32,
-    },
+    Remip { client_num: i32 },
 
     /// `N_EDITENT` Coop Edit: Modification of map entities.
     EditEnt {
@@ -311,36 +246,22 @@ pub enum Chan1Server {
     },
 
     /// `N_PONG` Basic ping packet sent to measure round-trip time.
-    Pong {
-        ping: i32,
-    },
+    Pong { ping: i32 },
 
     /// `N_CLIENTPING` Updates the scoreboard ping value for a specific client.
-    ClientPing {
-        client_num: i32,
-        ping: i32,
-    },
+    ClientPing { client_num: i32, ping: i32 },
 
     /// `N_TIMEUP` Indicates that the current match time limit has been updated.
-    TimeUp {
-        seconds_remaining: i32,
-    },
+    TimeUp { seconds_remaining: i32 },
 
     /// `N_SERVMSG` Displays a direct system/server message in the client's console.
-    ServMsg {
-        text: CubeString,
-    },
+    ServMsg { text: CubeString },
 
     /// `N_SENDDEMOLIST` Replicates the list of available demos back to the client.
-    SendDemoList {
-        demos: Vec<CubeString>,
-    },
+    SendDemoList { demos: Vec<CubeString> },
 
     /// `N_DEMOPLAYBACK` Informs the client that the server has started or stopped demo playback.
-    DemoPlayback {
-        is_on: bool,
-        client_num: i32,
-    },
+    DemoPlayback { is_on: bool, client_num: i32 },
 
     /// `N_CURRENTMASTER` Notifies clients of the current master mode and list of clients with privileges.
     CurrentMaster {
@@ -349,21 +270,13 @@ pub enum Chan1Server {
     },
 
     /// `N_MASTERMODE` Updates the global Master Mode.
-    MasterMode {
-        master_mode: MasterMode,
-    },
+    MasterMode { master_mode: MasterMode },
 
     /// `N_EDITMODE` Notifies that a player entered or left Edit Mode.
-    EditMode {
-        client_num: i32,
-        is_editing: bool,
-    },
+    EditMode { client_num: i32, is_editing: bool },
 
     /// `N_SPECTATOR` Forces a player into or out of Spectator Mode.
-    Spectator {
-        client_num: i32,
-        is_spectator: bool,
-    },
+    Spectator { client_num: i32, is_spectator: bool },
 
     /// `N_SETTEAM` Moves a player to a specific team.
     SetTeam {
@@ -373,20 +286,13 @@ pub enum Chan1Server {
     },
 
     /// `N_ANNOUNCE` Server announces important item spawns natively (e.g., Quad Damage).
-    Announce {
-        item_type: ItemType,
-    },
+    Announce { item_type: ItemType },
 
     /// `N_NEWMAP` Sent to force all clients to generate a new empty map of the specified size.
-    NewMap {
-        client_num: Option<i32>,
-        size: i32,
-    },
+    NewMap { client_num: Option<i32>, size: i32 },
 
     /// `N_REQAUTH` Initiates an authentication request from the server.
-    ReqAuth {
-        auth_domain: CubeString,
-    },
+    ReqAuth { auth_domain: CubeString },
 
     /// `N_AUTHCHAL` Sends the cryptographic challenge down to the client.
     AuthChal {
@@ -407,14 +313,10 @@ pub enum Chan1Server {
     },
 
     /// `N_SERVCMD` Remote server command feedback.
-    ServCmd {
-        cmd: CubeString,
-    },
+    ServCmd { cmd: CubeString },
 
     /// `N_BASES` Sends the list of capture bases for the current map (Capture / Regen Capture).
-    Bases {
-        bases: Vec<BaseInfo>,
-    },
+    Bases { bases: Vec<BaseInfo> },
 
     /// `N_BASEINFO` Updates the state of a single capture base.
     BaseInfo {
@@ -433,10 +335,7 @@ pub enum Chan1Server {
     },
 
     /// `N_REPAMMO` Replenishes a player's ammo (Regen Capture).
-    RepAmmo {
-        client_num: i32,
-        ammotype: ItemType,
-    },
+    RepAmmo { client_num: i32, ammotype: ItemType },
 
     /// `N_BASEREGEN` Regenerates a player's health and armour at a capture base.
     BaseRegen {
@@ -498,10 +397,7 @@ pub enum Chan1Server {
     },
 
     /// `N_INVISFLAG` Marks a flag as invisible or visible.
-    InvisFlag {
-        flag: i32,
-        invis: bool,
-    },
+    InvisFlag { flag: i32, invis: bool },
 
     /// `N_INITTOKENS` Sends initial token states to joining clients (Collect mode).
     InitTokens {
@@ -518,9 +414,7 @@ pub enum Chan1Server {
     },
 
     /// `N_EXPIRETOKENS` Notifies that specific tokens have expired.
-    ExpireTokens {
-        tokens: Vec<i32>,
-    },
+    ExpireTokens { tokens: Vec<i32> },
 
     /// `N_DROPTOKENS` A player dropped their held tokens.
     DropTokens {
@@ -571,30 +465,19 @@ pub enum Chan1Client {
     },
 
     /// `N_PING` Measures the roundtrip time.
-    Ping {
-        time: i32,
-    },
+    Ping { time: i32 },
 
     /// `N_FROMAI` Alters the context of subsequent messages in the packet to act as if they came from the specified AI bot.
-    FromAi {
-        qcn: i32,
-    },
+    FromAi { qcn: i32 },
 
     /// `N_SOUND` Plays a sound.
-    Sound {
-        sound_id: i32,
-    },
+    Sound { sound_id: i32 },
 
     /// `N_EDITMODE` The client toggled cooperative edit mode locally.
-    EditMode {
-        val: bool,
-    },
+    EditMode { val: bool },
 
     /// `N_MAPCRC` The client verifies the CRC of the map they currently have loaded.
-    MapCrc {
-        map_name: CubeString,
-        crc: i32,
-    },
+    MapCrc { map_name: CubeString, crc: i32 },
 
     /// `N_CHECKMAPS` Forces a manual check of map CRCs on the server.
     CheckMaps,
@@ -603,15 +486,10 @@ pub enum Chan1Client {
     TrySpawn,
 
     /// `N_GUNSELECT` Acknowledges the client switching weapons.
-    GunSelect {
-        gun: Gun,
-    },
+    GunSelect { gun: Gun },
 
     /// `N_SPAWN` The client actually spawns.
-    Spawn {
-        life_sequence: i32,
-        gun_select: Gun,
-    },
+    Spawn { life_sequence: i32, gun_select: Gun },
 
     /// `N_SUICIDE` The client forcefully kills themselves.
     Suicide,
@@ -634,34 +512,22 @@ pub enum Chan1Client {
     },
 
     /// `N_ITEMPICKUP` The client requested to pick up an item.
-    ItemPickup {
-        item_index: i32,
-    },
+    ItemPickup { item_index: i32 },
 
     /// `N_TEXT` Submits a global chat message.
-    Text {
-        text: CubeString,
-    },
+    Text { text: CubeString },
 
     /// `N_SAYTEAM` Submits a team chat message.
-    SayTeam {
-        text: CubeString,
-    },
+    SayTeam { text: CubeString },
 
     /// `N_SWITCHNAME` The client requests to change their display name.
-    SwitchName {
-        name: CubeString,
-    },
+    SwitchName { name: CubeString },
 
     /// `N_SWITCHMODEL` The client changes their display model.
-    SwitchModel {
-        model: PlayerModel,
-    },
+    SwitchModel { model: PlayerModel },
 
     /// `N_SWITCHTEAM` The client requests to switch teams.
-    SwitchTeam {
-        team: CubeString,
-    },
+    SwitchTeam { team: CubeString },
 
     /// `N_MAPVOTE` The client votes to change the map and mode.
     MapVote {
@@ -670,9 +536,7 @@ pub enum Chan1Client {
     },
 
     /// `N_ITEMLIST` Bulk sends the items available on the client's map to the server (synchronization).
-    ItemList {
-        items: Vec<ItemSpawn>,
-    },
+    ItemList { items: Vec<ItemSpawn> },
 
     /// `N_EDITENT` Coop Edit: A map entity was modified.
     EditEnt {
@@ -689,74 +553,49 @@ pub enum Chan1Client {
     },
 
     /// `N_EDITVAR` Coop Edit: A map variable was modified locally.
-    EditVar {
-        name: CubeString,
-        val: EditVarValue,
-    },
+    EditVar { name: CubeString, val: EditVarValue },
 
     /// `N_CLIENTPING` Reports the client's smoothed ping to the server.
-    ClientPing {
-        ping: i32,
-    },
+    ClientPing { ping: i32 },
 
     /// `N_MASTERMODE` Requests to change the global Master Mode.
-    MasterMode {
-        mode: MasterMode,
-    },
+    MasterMode { mode: MasterMode },
 
     /// `N_CLEARBANS` Requests to clear all bans.
     ClearBans,
 
     /// `N_KICK` Requests to kick a player.
-    Kick {
-        victim_cn: i32,
-        reason: CubeString,
-    },
+    Kick { victim_cn: i32, reason: CubeString },
 
     /// `N_SPECTATOR` Requests to move someone (or self) to/from the spectator team.
-    Spectator {
-        spectator_cn: i32,
-        val: bool,
-    },
+    Spectator { spectator_cn: i32, val: bool },
 
     /// `N_SETTEAM` Requests to force someone to a specific team.
-    SetTeam {
-        client_num: i32,
-        team: CubeString,
-    },
+    SetTeam { client_num: i32, team: CubeString },
 
     /// `N_FORCEINTERMISSION` Requests to force the current match to end.
     ForceIntermission,
 
     /// `N_RECORDDEMO` Toggles automatic demo recording for the next match.
-    RecordDemo {
-        val: bool,
-    },
+    RecordDemo { val: bool },
 
     /// `N_STOPDEMO` Stops the current demo recording.
     StopDemo,
 
     /// `N_CLEARDEMOS` Clears a specific demo (or all) from server memory.
-    ClearDemos {
-        demo_id: i32,
-    },
+    ClearDemos { demo_id: i32 },
 
     /// `N_LISTDEMOS` Requests a listing of all available demos on the server.
     ListDemos,
 
     /// `N_GETDEMO` Requests to download a specific demo from the server.
-    GetDemo {
-        demo_id: i32,
-        tag: i32,
-    },
+    GetDemo { demo_id: i32, tag: i32 },
 
     /// `N_GETMAP` Requests to download the current map from the server (Coop Edit).
     GetMap,
 
     /// `N_NEWMAP` Requests to clear the map into a new empty state of the specified size.
-    NewMap {
-        size: i32,
-    },
+    NewMap { size: i32 },
 
     /// `N_SETMASTER` Requests to set master privileges using a password hash.
     SetMaster {
@@ -766,28 +605,19 @@ pub enum Chan1Client {
     },
 
     /// `N_ADDBOT` Requests to add a bot with specific skill.
-    AddBot {
-        skill: i32,
-    },
+    AddBot { skill: i32 },
 
     /// `N_DELBOT` Requests to delete a bot.
     DelBot,
 
     /// `N_BOTLIMIT` Modifies the global bot limit.
-    BotLimit {
-        limit: i32,
-    },
+    BotLimit { limit: i32 },
 
     /// `N_BOTBALANCE` Modifies the global bot auto-balance flag.
-    BotBalance {
-        balance: bool,
-    },
+    BotBalance { balance: bool },
 
     /// `N_AUTHTRY` Submits a request to authenticate and claim privileges via cryptographic keys.
-    AuthTry {
-        desc: CubeString,
-        name: CubeString,
-    },
+    AuthTry { desc: CubeString, name: CubeString },
 
     /// `N_AUTHKICK` Submits a request to kick an individual via cryptographic auth verification.
     AuthKick {
@@ -798,14 +628,10 @@ pub enum Chan1Client {
     },
 
     /// `N_PAUSEGAME` Toggles game paused state.
-    PauseGame {
-        val: bool,
-    },
+    PauseGame { val: bool },
 
     /// `N_GAMESPEED` Changes global game speed.
-    GameSpeed {
-        speed: i32,
-    },
+    GameSpeed { speed: i32 },
 
     /// `N_COPY` Coop Edit: Client copies geometry to their clipboard.
     Copy,
@@ -850,22 +676,13 @@ pub enum Chan1Client {
     },
 
     /// `N_EDITM` Coop Edit: Material Modification.
-    EditMat {
-        sel: SelInfo,
-        mat: i32,
-        filter: i32,
-    },
+    EditMat { sel: SelInfo, mat: i32, filter: i32 },
 
     /// `N_FLIP` Coop Edit: Flip geometry.
-    Flip {
-        sel: SelInfo,
-    },
+    Flip { sel: SelInfo },
 
     /// `N_ROTATE` Coop Edit: Rotate geometry.
-    Rotate {
-        sel: SelInfo,
-        dir: i32,
-    },
+    Rotate { sel: SelInfo, dir: i32 },
 
     /// `N_REPLACE` Coop Edit: Replace texture.
     Replace {
@@ -877,9 +694,7 @@ pub enum Chan1Client {
     },
 
     /// `N_DELCUBE` Coop Edit: Delete a cube.
-    DelCube {
-        sel: SelInfo,
-    },
+    DelCube { sel: SelInfo },
 
     /// `N_EDITVSLOT` Coop Edit: Modify texture V-Slots.
     EditVSlot {
@@ -893,14 +708,10 @@ pub enum Chan1Client {
     Remip,
 
     /// `N_SERVCMD` Dispatches a raw server command payload.
-    ServCmd {
-        cmd: CubeString,
-    },
+    ServCmd { cmd: CubeString },
 
     /// `N_BASES` Sends the list of capture base spawns to the server (Capture / Regen Capture).
-    Bases {
-        bases: Vec<BaseSpawn>,
-    },
+    Bases { bases: Vec<BaseSpawn> },
 
     /// `N_REPAMMO` Requests ammo replenishment (Regen Capture).
     RepAmmo,
@@ -909,28 +720,17 @@ pub enum Chan1Client {
     TryDropFlag,
 
     /// `N_TAKEFLAG` Client acknowledges picking up a flag.
-    TakeFlag {
-        flag: i32,
-        version: i32,
-    },
+    TakeFlag { flag: i32, version: i32 },
 
     /// `N_INITFLAGS` Sends initial flag spawn positions to the server (CTF modes).
-    InitFlags {
-        flags: Vec<FlagSpawn>,
-    },
+    InitFlags { flags: Vec<FlagSpawn> },
 
     /// `N_INITTOKENS` Sends initial token base spawn data to the server (Collect mode).
-    InitTokens {
-        bases: Vec<TokenBaseSpawn>,
-    },
+    InitTokens { bases: Vec<TokenBaseSpawn> },
 
     /// `N_TAKETOKEN` Client collected a token.
-    TakeToken {
-        id: i32,
-    },
+    TakeToken { id: i32 },
 
     /// `N_DEPOSITTOKENS` Client deposited tokens at a base.
-    DepositTokens {
-        base: i32,
-    },
+    DepositTokens { base: i32 },
 }

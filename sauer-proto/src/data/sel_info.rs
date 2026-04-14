@@ -32,11 +32,10 @@ impl SelInfo {
         };
         let grid = r.get_int()?;
         let orient_val = r.get_int()?;
-        let orient =
-            Orient::try_from(orient_val).map_err(|_| ParseError::InvalidEnumValue {
-                value: orient_val,
-                enum_name: "Orient",
-            })?;
+        let orient = Orient::try_from(orient_val).map_err(|_| ParseError::InvalidEnumValue {
+            value: orient_val,
+            enum_name: "Orient",
+        })?;
         Ok(SelInfo {
             o,
             s,

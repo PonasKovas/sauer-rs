@@ -54,8 +54,8 @@ pub use error::{Error, Result};
 pub use peer::{Peer, PeerReceiver, PeerSender};
 pub use task::PeerKey;
 
-use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 use bytes::Bytes;
+use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 use tokio::{net::UdpSocket, sync::mpsc, time::timeout};
 
 use task::{HostTask, PeerMsg, ToTask};
@@ -84,21 +84,32 @@ pub struct Packet {
     pub mode: SendMode,
 }
 
-
 impl Packet {
     /// Create a reliable packet.
     pub fn reliable(data: impl Into<Bytes>, channel: u8) -> Self {
-        Self { data: data.into(), channel, mode: SendMode::Reliable }
+        Self {
+            data: data.into(),
+            channel,
+            mode: SendMode::Reliable,
+        }
     }
 
     /// Create an unreliable, sequenced packet.
     pub fn unreliable(data: impl Into<Bytes>, channel: u8) -> Self {
-        Self { data: data.into(), channel, mode: SendMode::Unreliable }
+        Self {
+            data: data.into(),
+            channel,
+            mode: SendMode::Unreliable,
+        }
     }
 
     /// Create an unsequenced (fire-and-forget) packet.
     pub fn unsequenced(data: impl Into<Bytes>) -> Self {
-        Self { data: data.into(), channel: 0, mode: SendMode::Unsequenced }
+        Self {
+            data: data.into(),
+            channel: 0,
+            mode: SendMode::Unsequenced,
+        }
     }
 }
 
@@ -186,10 +197,7 @@ impl Host {
     /// a [`Peer`] when the connection is established.
     ///
     /// `channel_count` is the number of channels to negotiate (≥ 1).
-    pub async fn connect(
-        addr: impl ToSocketAddrs,
-        channel_count: u8,
-    ) -> Result<Peer> {
+    pub async fn connect(addr: impl ToSocketAddrs, channel_count: u8) -> Result<Peer> {
         Self::connect_with_timeout(addr, channel_count, Duration::from_secs(5)).await
     }
 
@@ -211,12 +219,8 @@ impl Host {
         let (accept_tx, _accept_rx) = mpsc::channel(1); // unused for client
         let (task_tx, task_rx) = mpsc::channel(1024);
         let task = HostTask::new(
-            socket,
-            accept_tx,
-            task_rx,
-            1, // only one peer
-            false,
-            0, // no incoming bandwidth limit for client
+            socket, accept_tx, task_rx, 1, // only one peer
+            false, 0, // no incoming bandwidth limit for client
             0, // no outgoing bandwidth limit for client
         );
         tokio::spawn(task.run());

@@ -60,7 +60,12 @@ fn test_chan0_client_roundtrip() {
         Chan0Client::Position {
             pos: PlayerPosition {
                 client_num: 123,
-                phys_state: PositionPhysState { phys_state: PhysState::Fall, life_sequence: true, move_dir: -1, strafe: 1 },
+                phys_state: PositionPhysState {
+                    phys_state: PhysState::Fall,
+                    life_sequence: true,
+                    move_dir: -1,
+                    strafe: 1
+                },
                 flags: 0x7F, // Enable all bitflags (tests the maximum payload size & sign extensions)
                 pos: Vector3 {
                     x: -10.0,
@@ -228,7 +233,12 @@ fn test_chan1_client_roundtrip() {
             name: cstr("NewName"),
         }
     );
-    assert_roundtrip!(R, Chan1Client::SwitchModel { model: PlayerModel::Snoutx10k });
+    assert_roundtrip!(
+        R,
+        Chan1Client::SwitchModel {
+            model: PlayerModel::Snoutx10k
+        }
+    );
     assert_roundtrip!(R, Chan1Client::SwitchTeam { team: cstr("evil") });
 
     // Items
@@ -523,7 +533,12 @@ fn test_chan0_server_roundtrip() {
         Chan0Server::Position {
             pos: PlayerPosition {
                 client_num: 123,
-                phys_state: PositionPhysState { phys_state: PhysState::Fall, life_sequence: true, move_dir: -1, strafe: 1 },
+                phys_state: PositionPhysState {
+                    phys_state: PhysState::Fall,
+                    life_sequence: true,
+                    move_dir: -1,
+                    strafe: 1
+                },
                 flags: 0x7F, // Enable all bitflags (so we test the maximum payload size & sign extension)
                 pos: Vector3 {
                     x: -10.0,
@@ -694,7 +709,14 @@ fn test_chan1_server_roundtrip() {
         armour: 50,
         armour_type: ArmourType::Green,
         gun_select: Gun::Rl,
-        ammo: PlayerAmmo { shotgun: 10, chaingun: 20, rocket_launcher: 30, rifle: 40, grenade_launcher: 50, pistol: 60 },
+        ammo: PlayerAmmo {
+            shotgun: 10,
+            chaingun: 20,
+            rocket_launcher: 30,
+            rifle: 40,
+            grenade_launcher: 50,
+            pistol: 60,
+        },
     };
     assert_roundtrip!(
         R,
@@ -1226,7 +1248,13 @@ fn test_chan1_server_roundtrip() {
             score: 5,
         }
     );
-    assert_roundtrip!(R, Chan1Server::InvisFlag { flag: 1, invis: true });
+    assert_roundtrip!(
+        R,
+        Chan1Server::InvisFlag {
+            flag: 1,
+            invis: true
+        }
+    );
 
     // Collect / Tokens Mode
     assert_roundtrip!(
