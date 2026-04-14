@@ -454,6 +454,7 @@ dependencies = [
  "anyhow",
  "cube-string",
  "enet-rs",
+ "glam",
  "ogz-rs",
  "sauer-map",
  "sauer-proto",
