@@ -68,7 +68,7 @@ struct FakePlayer {
 impl FakePlayer {
     fn new() -> Self {
         Self {
-            pos: Vec3::new(0., 0., 300.),
+            pos: Vec3::new(0., 0., 600.),
             vel: Vec3::ZERO,
             last_tick: Instant::now(),
         }
@@ -77,7 +77,7 @@ impl FakePlayer {
     /// Step the fake player toward `target` using physics.
     fn step(&mut self, target: Vec3, world: &World) {
         let diff = target - self.pos;
-        let delta = self.last_tick.elapsed().as_secs_f32() / 1000.0;
+        let delta = self.last_tick.elapsed().as_secs_f32();
         self.last_tick = Instant::now();
 
         let xy_mag = (diff.x.powi(2) + diff.y.powi(2)).sqrt();
