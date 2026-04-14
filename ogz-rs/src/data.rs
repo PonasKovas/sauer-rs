@@ -1,42 +1,9 @@
 use cube_string::CubeString;
 use num_enum::{FromPrimitive, IntoPrimitive};
-use std::fmt;
 
-/// The top-level representation of an `.ogz` map.
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct OgzMap {
-    pub version: i32,
-    pub world_size: i32,
-    pub config: MapConfig,
+mod material;
 
-    // Game Extras
-    pub game_type: Option<CubeString>,
-    pub eif: u16, // Extra entity info size
-    pub extra_game_data: Vec<u8>,
-
-    pub mru_textures: Vec<u16>,
-    pub entities: Vec<Entity>,
-    pub vslots: Vec<Option<VSlot>>,
-    pub octree: OctreeNode,
-
-    pub lightmaps: Vec<Lightmap>,
-    pub pvs: Vec<u8>,
-
-    pub blendmap_resolution: i32,
-    pub blendmap_data: Option<Vec<u8>>,
-}
-
-impl OgzMap {
-    /// Deserializes a map from a raw byte slice (the contents of the `.ogz` file).
-    pub fn parse(data: &[u8]) -> Result<Self, crate::error::OgzError> {
-        crate::de::parse_map(data)
-    }
-
-    /// Serializes the map to the modern Version 33 `.ogz` byte array.
-    pub fn serialize(&self) -> Result<Vec<u8>, crate::error::OgzError> {
-        crate::ser::serialize_map(self)
-    }
-}
+pub use material::Material;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive)]
 #[repr(u8)]
@@ -56,64 +23,6 @@ pub enum Clip {
     NoClip,
     Clip,
     GameClip,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Material {
-    pub volume: Volume,
-    pub clip: Clip,
-    pub death: bool,
-    pub alpha: bool,
-}
-
-impl Material {
-    pub fn from_bits(bits: u16) -> Self {
-        Self {
-            volume: Volume::from(((bits >> 2) as u8) & 0b11),
-            clip: Clip::from((bits >> 5) as u8 & 0b11),
-            death: (bits & (1 << 8)) != 0,
-            alpha: (bits & (1 << 10)) != 0,
-        }
-    }
-
-    pub fn to_bits(self) -> u16 {
-        ((self.volume as u16) << 2)
-            | ((self.clip as u16) << 5)
-            | ((self.death as u16) << 8)
-            | ((self.alpha as u16) << 10)
-    }
-}
-
-impl From<u16> for Material {
-    fn from(bits: u16) -> Self {
-        Self::from_bits(bits)
-    }
-}
-
-impl From<Material> for u16 {
-    fn from(mat: Material) -> Self {
-        mat.to_bits()
-    }
-}
-
-impl fmt::Display for Material {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.volume)?;
-
-        if self.clip != Clip::None {
-            write!(f, "|{:?}", self.clip)?;
-        }
-
-        if self.death {
-            write!(f, "|Death")?;
-        }
-
-        if self.alpha {
-            write!(f, "|Alpha")?;
-        }
-
-        Ok(())
-    }
 }
 
 /// Engine-defined entity types (shared/ents.h).
@@ -218,6 +127,16 @@ pub enum Surfaces {
     None,
     Legacy(LegacySurfaceData),
     Modern(ModernSurfaceData),
+}
+
+impl Surfaces {
+    pub fn material(&self) -> Option<Material> {
+        match self {
+            Self::Modern(m) => m.material,
+            Self::Legacy(l) => l.material,
+            Self::None => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]

@@ -1,5 +1,5 @@
-use crate::data::*;
 use crate::error::OgzError;
+use crate::{data::*, OgzMap};
 use byteorder::{LittleEndian, WriteBytesExt};
 use flate2::write::GzEncoder;
 use flate2::Compression;

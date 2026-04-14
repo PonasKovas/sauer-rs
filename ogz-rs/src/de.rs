@@ -1,5 +1,5 @@
-use crate::data::*;
 use crate::error::OgzError;
+use crate::{data::*, OgzMap};
 use byteorder::{LittleEndian, ReadBytesExt};
 use cube_string::CubeString;
 use flate2::read::MultiGzDecoder;
