@@ -111,7 +111,7 @@ async fn handle_client(mut peer: Peer, ogz: Arc<OgzMap>) -> anyhow::Result<()> {
                                         armour: 0,
                                         armour_type: ArmourType::Yellow,
                                         gun_select: Gun::Fist,
-                                        ammo: vec![0, 0, 0],
+                                        ammo: [0; 6],
                                     },
                                 },
                             )

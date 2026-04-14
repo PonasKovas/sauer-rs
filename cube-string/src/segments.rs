@@ -1,25 +1,3 @@
-//! Color segment iteration for cube strings.
-//!
-//! This module provides types for iterating over the color segments of a
-//! cube string. Each color segment consists of a color and the text
-//! that follows it until the next color change.
-//!
-//! # Example
-//!
-//! ```
-//! use cube_string::{CubeString, Color};
-//!
-//! let mut s = CubeString::from_str_lossy("Hello");
-//! s.push_color(Color::Red);
-//! s.push(b'W');
-//!
-//! for segment in &s[..] {
-//!     let color = segment.color;
-//!     let text_len = segment.text.len();
-//!     println!("{:?}: {} bytes", color, text_len);
-//! }
-//! ```
-
 use core::ops::Deref;
 
 use crate::raw::COLOR_ESCAPE;
@@ -53,6 +31,31 @@ impl<'a> ColorSegment<'a> {
     }
 }
 
+/// Decoded meaning of a color-escape sequence (the byte after `COLOR_ESCAPE`).
+enum EscapeCode {
+    /// `\x0C0`–`\x0C8`: switch to the given color.
+    SetColor(Color),
+    /// `\x0Cs` (save) or `\x0Cr` (restore): ignored by the segment iterator.
+    SaveRestore,
+}
+
+/// Decode the byte that follows a `COLOR_ESCAPE`, if it forms a valid escape.
+fn parse_escape(code: u8) -> Option<EscapeCode> {
+    match code {
+        b's' | b'r' => Some(EscapeCode::SaveRestore),
+        b'0' => Some(EscapeCode::SetColor(Color::Green)),
+        b'1' => Some(EscapeCode::SetColor(Color::Blue)),
+        b'2' => Some(EscapeCode::SetColor(Color::Yellow)),
+        b'3' => Some(EscapeCode::SetColor(Color::Red)),
+        b'4' => Some(EscapeCode::SetColor(Color::Gray)),
+        b'5' => Some(EscapeCode::SetColor(Color::Magenta)),
+        b'6' => Some(EscapeCode::SetColor(Color::Orange)),
+        b'7' => Some(EscapeCode::SetColor(Color::White)),
+        b'8' => Some(EscapeCode::SetColor(Color::Cyan)),
+        _ => None,
+    }
+}
+
 /// An iterator over the color segments of a cube string.
 pub struct ColorSegments<'a> {
     bytes: &'a [u8],
@@ -67,35 +70,6 @@ impl<'a> ColorSegments<'a> {
             pos: 0,
         }
     }
-
-    fn parse_color(&self, pos: usize) -> Option<Option<Color>> {
-        if pos >= self.bytes.len() {
-            return None;
-        }
-        let code = self.bytes[pos];
-        if code == b's' {
-            return Some(None);
-        }
-        if code == b'r' {
-            return Some(None);
-        }
-        if (b'0'..=b'8').contains(&code) {
-            Some(Some(match code {
-                b'0' => Color::Green,
-                b'1' => Color::Blue,
-                b'2' => Color::Yellow,
-                b'3' => Color::Red,
-                b'4' => Color::Gray,
-                b'5' => Color::Magenta,
-                b'6' => Color::Orange,
-                b'7' => Color::White,
-                b'8' => Color::Cyan,
-                _ => unreachable!(),
-            }))
-        } else {
-            Some(None)
-        }
-    }
 }
 
 impl<'a> Iterator for ColorSegments<'a> {
@@ -107,15 +81,17 @@ impl<'a> Iterator for ColorSegments<'a> {
         while self.pos < self.bytes.len() {
             if self.bytes[self.pos] == COLOR_ESCAPE {
                 if self.pos + 1 < self.bytes.len() {
-                    let code = self.bytes[self.pos + 1];
-                    if code == b's' || code == b'r' {
-                        self.pos += 2;
-                        continue;
-                    }
-                    if let Some(color) = self.parse_color(self.pos + 1) {
-                        current_color = color;
-                        self.pos += 2;
-                        continue;
+                    match parse_escape(self.bytes[self.pos + 1]) {
+                        Some(EscapeCode::SetColor(c)) => {
+                            current_color = Some(c);
+                            self.pos += 2;
+                            continue;
+                        }
+                        Some(EscapeCode::SaveRestore) => {
+                            self.pos += 2;
+                            continue;
+                        }
+                        None => {}
                     }
                 } else {
                     self.pos += 1;

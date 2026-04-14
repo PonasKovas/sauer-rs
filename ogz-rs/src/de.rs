@@ -1,5 +1,6 @@
 use crate::data::*;
 use crate::error::OgzError;
+use byteorder::{LittleEndian, ReadBytesExt};
 use cube_string::CubeString;
 use flate2::read::MultiGzDecoder;
 use std::io::{Cursor, Read};
@@ -12,36 +13,6 @@ const MAX_PVS_BYTES: i32 = 256 * 1024 * 1024; // 256 MB
 const MAX_VARS: i32 = 65_536;
 const MAX_VSLOTS: i32 = 1_000_000;
 const MAX_BLENDMAP_RES: i32 = 8_192; // 8192² = 64 MB
-
-// Helper trait to abstract Little-Endian reads securely
-trait ReadExt: Read {
-    fn read_u8(&mut self) -> std::io::Result<u8> {
-        let mut buf = [0; 1];
-        self.read_exact(&mut buf)?;
-        Ok(buf[0])
-    }
-    fn read_u16_le(&mut self) -> std::io::Result<u16> {
-        let mut buf = [0; 2];
-        self.read_exact(&mut buf)?;
-        Ok(u16::from_le_bytes(buf))
-    }
-    fn read_i16_le(&mut self) -> std::io::Result<i16> {
-        let mut buf = [0; 2];
-        self.read_exact(&mut buf)?;
-        Ok(i16::from_le_bytes(buf))
-    }
-    fn read_i32_le(&mut self) -> std::io::Result<i32> {
-        let mut buf = [0; 4];
-        self.read_exact(&mut buf)?;
-        Ok(i32::from_le_bytes(buf))
-    }
-    fn read_f32_le(&mut self) -> std::io::Result<f32> {
-        let mut buf = [0; 4];
-        self.read_exact(&mut buf)?;
-        Ok(f32::from_le_bytes(buf))
-    }
-}
-impl<R: Read + ?Sized> ReadExt for R {}
 
 /// Leniently decompresses an .ogz file, handling concatenated GZIP streams
 /// and bypassing Sauerbraten's historically broken GZIP footers.
@@ -81,16 +52,16 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         return Err(OgzError::InvalidMagic);
     }
 
-    let version = cursor.read_i32_le()?;
+    let version = cursor.read_i32::<LittleEndian>()?;
     if version > 33 {
         return Err(OgzError::UnsupportedVersion(version));
     }
 
-    let _headersize = cursor.read_i32_le()?;
-    let world_size = cursor.read_i32_le()?;
-    let numents = cursor.read_i32_le()?;
-    let numpvs = cursor.read_i32_le()?;
-    let lightmaps = cursor.read_i32_le()?;
+    let _headersize = cursor.read_i32::<LittleEndian>()?;
+    let world_size = cursor.read_i32::<LittleEndian>()?;
+    let numents = cursor.read_i32::<LittleEndian>()?;
+    let numpvs = cursor.read_i32::<LittleEndian>()?;
+    let lightmaps = cursor.read_i32::<LittleEndian>()?;
 
     if numents > MAX_ENTITIES {
         return Err(OgzError::LimitExceeded("numents"));
@@ -107,9 +78,9 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     let mut map_vslots = 0;
 
     let config = if version <= 28 {
-        let lightprecision = cursor.read_i32_le()?;
-        let lighterror = cursor.read_i32_le()?;
-        let lightlod = cursor.read_i32_le()?;
+        let lightprecision = cursor.read_i32::<LittleEndian>()?;
+        let lighterror = cursor.read_i32::<LittleEndian>()?;
+        let lightlod = cursor.read_i32::<LittleEndian>()?;
         let ambient = cursor.read_u8()?;
         let mut watercolour = [0; 3];
         cursor.read_exact(&mut watercolour)?;
@@ -151,10 +122,10 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             maptitle: CubeString::from_bytes(maptitle_buf[..title_len].to_vec()),
         }
     } else {
-        blendmap_res = cursor.read_i32_le()?;
-        map_vars = cursor.read_i32_le()?;
+        blendmap_res = cursor.read_i32::<LittleEndian>()?;
+        map_vars = cursor.read_i32::<LittleEndian>()?;
         if version >= 30 {
-            map_vslots = cursor.read_i32_le()?;
+            map_vslots = cursor.read_i32::<LittleEndian>()?;
         }
 
         if map_vars > MAX_VARS {
@@ -167,7 +138,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         let mut variables = Vec::new();
         for _ in 0..map_vars {
             let v_type = cursor.read_u8()?;
-            let namelen = cursor.read_u16_le()?;
+            let namelen = cursor.read_u16::<LittleEndian>()?;
             let mut name_buf = vec![0u8; namelen as usize];
             cursor.read_exact(&mut name_buf)?;
             let name = CubeString::from_bytes(name_buf);
@@ -175,14 +146,14 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             let var = match v_type {
                 0 => Variable::Int {
                     name,
-                    value: cursor.read_i32_le()?,
+                    value: cursor.read_i32::<LittleEndian>()?,
                 },
                 1 => Variable::Float {
                     name,
-                    value: cursor.read_f32_le()?,
+                    value: cursor.read_f32::<LittleEndian>()?,
                 },
                 2 => {
-                    let slen = cursor.read_u16_le()?;
+                    let slen = cursor.read_u16::<LittleEndian>()?;
                     let mut sbuf = vec![0u8; slen as usize];
                     cursor.read_exact(&mut sbuf)?;
                     Variable::String {
@@ -207,8 +178,8 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         g_buf.pop(); // Remove null terminator
         game_type = Some(CubeString::from_bytes(g_buf));
 
-        eif = cursor.read_u16_le()?;
-        let extrasize = cursor.read_u16_le()?;
+        eif = cursor.read_u16::<LittleEndian>()?;
+        let extrasize = cursor.read_u16::<LittleEndian>()?;
         extra_game_data = vec![0u8; extrasize as usize];
         cursor.read_exact(&mut extra_game_data)?;
     }
@@ -219,9 +190,9 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             mru_textures.push(cursor.read_u8()? as u16);
         }
     } else {
-        let nummru = cursor.read_u16_le()?;
+        let nummru = cursor.read_u16::<LittleEndian>()?;
         for _ in 0..nummru {
-            mru_textures.push(cursor.read_u16_le()?);
+            mru_textures.push(cursor.read_u16::<LittleEndian>()?);
         }
     }
 
@@ -229,12 +200,12 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     for _ in 0..numents {
         let mut position = [0f32; 3];
         for p in &mut position {
-            *p = cursor.read_f32_le()?;
+            *p = cursor.read_f32::<LittleEndian>()?;
         }
 
         let mut attrs = [0i16; 5];
         for a in &mut attrs {
-            *a = cursor.read_i16_le()?;
+            *a = cursor.read_i16::<LittleEndian>()?;
         }
 
         let mut ent_type = cursor.read_u8()?;
@@ -284,7 +255,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     let mut vslots = Vec::new();
     let mut num_tracked = map_vslots;
     while num_tracked > 0 {
-        let changed = cursor.read_i32_le()?;
+        let changed = cursor.read_i32::<LittleEndian>()?;
         if changed < 0 {
             let skip = changed
                 .checked_neg()
@@ -297,24 +268,24 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             }
             num_tracked -= skip;
         } else {
-            let prev = cursor.read_i32_le()?;
+            let prev = cursor.read_i32::<LittleEndian>()?;
             let mut slot = VSlot {
                 prev,
                 ..Default::default()
             };
 
             if changed & (1 << 0) != 0 {
-                let params = cursor.read_u16_le()?;
+                let params = cursor.read_u16::<LittleEndian>()?;
                 if params > 1024 {
                     return Err(OgzError::LimitExceeded("vslot params"));
                 }
                 for _ in 0..params {
-                    let nlen = cursor.read_u16_le()?;
+                    let nlen = cursor.read_u16::<LittleEndian>()?;
                     let mut nbuf = vec![0u8; nlen as usize];
                     cursor.read_exact(&mut nbuf)?;
                     let mut vals = [0f32; 4];
                     for v in &mut vals {
-                        *v = cursor.read_f32_le()?;
+                        *v = cursor.read_f32::<LittleEndian>()?;
                     }
                     slot.params.push(VSlotParam {
                         name: CubeString::from_bytes(nbuf),
@@ -323,28 +294,28 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                 }
             }
             if changed & (1 << 1) != 0 {
-                slot.scale = Some(cursor.read_f32_le()?);
+                slot.scale = Some(cursor.read_f32::<LittleEndian>()?);
             }
             if changed & (1 << 2) != 0 {
-                slot.rotation = Some(cursor.read_i32_le()?);
+                slot.rotation = Some(cursor.read_i32::<LittleEndian>()?);
             }
             if changed & (1 << 3) != 0 {
-                slot.offset = Some((cursor.read_i32_le()?, cursor.read_i32_le()?));
+                slot.offset = Some((cursor.read_i32::<LittleEndian>()?, cursor.read_i32::<LittleEndian>()?));
             }
             if changed & (1 << 4) != 0 {
-                slot.scroll = Some((cursor.read_f32_le()?, cursor.read_f32_le()?));
+                slot.scroll = Some((cursor.read_f32::<LittleEndian>()?, cursor.read_f32::<LittleEndian>()?));
             }
             if changed & (1 << 5) != 0 {
-                slot.layer = Some(cursor.read_i32_le()?);
+                slot.layer = Some(cursor.read_i32::<LittleEndian>()?);
             }
             if changed & (1 << 6) != 0 {
-                slot.alpha = Some((cursor.read_f32_le()?, cursor.read_f32_le()?));
+                slot.alpha = Some((cursor.read_f32::<LittleEndian>()?, cursor.read_f32::<LittleEndian>()?));
             }
             if changed & (1 << 7) != 0 {
                 slot.color = Some((
-                    cursor.read_f32_le()?,
-                    cursor.read_f32_le()?,
-                    cursor.read_f32_le()?,
+                    cursor.read_f32::<LittleEndian>()?,
+                    cursor.read_f32::<LittleEndian>()?,
+                    cursor.read_f32::<LittleEndian>()?,
                 ));
             }
 
@@ -355,13 +326,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
     // C++ loadchildren reads 8 worldroot cubes directly (no wrapper byte).
     // We wrap them in a Children node to fit the recursive OctreeNode type.
-    let octree = {
-        let mut children = Vec::with_capacity(8);
-        for _ in 0..8 {
-            children.push(read_cube(&mut cursor, version)?);
-        }
-        OctreeNode::Children(Box::new(children.try_into().unwrap()))
-    };
+    let octree = OctreeNode::Children(read_8_children(&mut cursor, version)?);
 
     let mut lm_vec = Vec::new();
     if version >= 7 {
@@ -371,7 +336,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
             if version >= 17 {
                 ty = cursor.read_u8()?;
                 if version >= 20 && (ty & 0x80) != 0 {
-                    unlit = Some((cursor.read_u16_le()?, cursor.read_u16_le()?));
+                    unlit = Some((cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?));
                 }
             }
             // LM_ALPHA = 0x10 (bit 4), LM_TYPE = 0x0F, LM_BUMPMAP1 = 2
@@ -403,7 +368,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         // Map version 28 has an engine quirk where it reads an extra int32
         // to dictate the actual resolution before reading the pixel array.
         let actual_res = if version == 28 {
-            cursor.read_i32_le()?
+            cursor.read_i32::<LittleEndian>()?
         } else {
             blendmap_res
         };
@@ -438,6 +403,17 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     })
 }
 
+fn read_8_children(
+    cursor: &mut Cursor<&Vec<u8>>,
+    version: i32,
+) -> Result<Box<[OctreeNode; 8]>, OgzError> {
+    let mut children = Vec::with_capacity(8);
+    for _ in 0..8 {
+        children.push(read_cube(cursor, version)?);
+    }
+    Ok(Box::new(children.try_into().expect("8 elements pushed to 8-element array")))
+}
+
 fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, OgzError> {
     let octsav = cursor.read_u8()?;
     let ty = octsav & 0x07;
@@ -445,11 +421,7 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
     match ty {
         0 => {
             // OCTSAV_CHILDREN
-            let mut children = Vec::with_capacity(8);
-            for _ in 0..8 {
-                children.push(read_cube(cursor, version)?);
-            }
-            Ok(OctreeNode::Children(Box::new(children.try_into().unwrap())))
+            Ok(OctreeNode::Children(read_8_children(cursor, version)?))
         }
         1..=4 => {
             let mut edges = [0u8; 12];
@@ -462,7 +434,7 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
                 *t = if version < 14 {
                     cursor.read_u8()? as u16
                 } else {
-                    cursor.read_u16_le()?
+                    cursor.read_u16::<LittleEndian>()?
                 };
             }
             let surfaces = if version < 7 {
@@ -481,13 +453,9 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
                 2 => Ok(OctreeNode::Solid(info)),
                 3 => Ok(OctreeNode::Normal { info, edges }),
                 4 => {
-                    let mut children = Vec::with_capacity(8);
-                    for _ in 0..8 {
-                        children.push(read_cube(cursor, version)?);
-                    }
                     Ok(OctreeNode::LodCube {
                         info,
-                        children: Box::new(children.try_into().unwrap()),
+                        children: read_8_children(cursor, version)?,
                     })
                 }
                 _ => unreachable!(),
@@ -547,7 +515,7 @@ fn read_legacy_surfaces(
                 if (merge_mask & (1 << i)) != 0 {
                     let mut arr = [0u16; 4];
                     for val in &mut arr {
-                        *val = cursor.read_u16_le()?;
+                        *val = cursor.read_u16::<LittleEndian>()?;
                     }
                     compat.push(arr);
                 }
@@ -579,7 +547,7 @@ fn read_modern_surfaces(
         Some(Material::from_bits(if version == 32 {
             cursor.read_u8()? as u16
         } else {
-            cursor.read_u16_le()?
+            cursor.read_u16::<LittleEndian>()?
         }))
     } else {
         None
@@ -614,26 +582,26 @@ fn read_modern_surfaces(
                 if layerverts == 4 {
                     if hasxyz && (vertmask & 0x01) != 0 {
                         xyz = Some([
-                            cursor.read_u16_le()?,
-                            cursor.read_u16_le()?,
-                            cursor.read_u16_le()?,
-                            cursor.read_u16_le()?,
+                            cursor.read_u16::<LittleEndian>()?,
+                            cursor.read_u16::<LittleEndian>()?,
+                            cursor.read_u16::<LittleEndian>()?,
+                            cursor.read_u16::<LittleEndian>()?,
                         ]);
                         hasxyz = false;
                     }
                     if hasuv && (vertmask & 0x02) != 0 {
                         uv = Some([
-                            cursor.read_u16_le()?,
-                            cursor.read_u16_le()?,
-                            cursor.read_u16_le()?,
-                            cursor.read_u16_le()?,
+                            cursor.read_u16::<LittleEndian>()?,
+                            cursor.read_u16::<LittleEndian>()?,
+                            cursor.read_u16::<LittleEndian>()?,
+                            cursor.read_u16::<LittleEndian>()?,
                         ]);
                         if (numverts & 0x80) != 0 {
                             dup_uv = Some([
-                                cursor.read_u16_le()?,
-                                cursor.read_u16_le()?,
-                                cursor.read_u16_le()?,
-                                cursor.read_u16_le()?,
+                                cursor.read_u16::<LittleEndian>()?,
+                                cursor.read_u16::<LittleEndian>()?,
+                                cursor.read_u16::<LittleEndian>()?,
+                                cursor.read_u16::<LittleEndian>()?,
                             ]);
                         }
                         hasuv = false;
@@ -642,7 +610,7 @@ fn read_modern_surfaces(
 
                 let norm = if hasnorm && (vertmask & 0x08) != 0 {
                     hasnorm = false;
-                    Some(cursor.read_u16_le()?)
+                    Some(cursor.read_u16::<LittleEndian>()?)
                 } else {
                     None
                 };
@@ -651,17 +619,17 @@ fn read_modern_surfaces(
                 if hasxyz || hasuv || hasnorm {
                     for _ in 0..layerverts {
                         let vx = if hasxyz {
-                            Some([cursor.read_u16_le()?, cursor.read_u16_le()?])
+                            Some([cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?])
                         } else {
                             None
                         };
                         let vu = if hasuv {
-                            Some([cursor.read_u16_le()?, cursor.read_u16_le()?])
+                            Some([cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?])
                         } else {
                             None
                         };
                         let vn = if hasnorm {
-                            Some(cursor.read_u16_le()?)
+                            Some(cursor.read_u16::<LittleEndian>()?)
                         } else {
                             None
                         };
@@ -677,7 +645,7 @@ fn read_modern_surfaces(
                 if (numverts & 0x80) != 0 {
                     for _ in 0..layerverts {
                         let vu = if hasuv {
-                            Some([cursor.read_u16_le()?, cursor.read_u16_le()?])
+                            Some([cursor.read_u16::<LittleEndian>()?, cursor.read_u16::<LittleEndian>()?])
                         } else {
                             None
                         };

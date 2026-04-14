@@ -1,68 +1,49 @@
 use crate::data::*;
 use crate::error::OgzError;
+use byteorder::{LittleEndian, WriteBytesExt};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::io::Write;
-
-// Helper trait to write Little-Endian
-trait WriteExt: Write {
-    fn write_u8(&mut self, n: u8) -> std::io::Result<()> {
-        self.write_all(&[n])
-    }
-    fn write_u16_le(&mut self, n: u16) -> std::io::Result<()> {
-        self.write_all(&n.to_le_bytes())
-    }
-    fn write_i16_le(&mut self, n: i16) -> std::io::Result<()> {
-        self.write_all(&n.to_le_bytes())
-    }
-    fn write_i32_le(&mut self, n: i32) -> std::io::Result<()> {
-        self.write_all(&n.to_le_bytes())
-    }
-    fn write_f32_le(&mut self, n: f32) -> std::io::Result<()> {
-        self.write_all(&n.to_le_bytes())
-    }
-}
-impl<W: Write + ?Sized> WriteExt for W {}
 
 pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
 
     // Header
     encoder.write_all(b"OCTA")?;
-    encoder.write_i32_le(33)?; // Hardcoded version 33
-    encoder.write_i32_le(28)?; // headersize
-    encoder.write_i32_le(map.world_size)?;
-    encoder.write_i32_le(map.entities.len() as i32)?;
-    encoder.write_i32_le(map.pvs.len() as i32)?;
-    encoder.write_i32_le(map.lightmaps.len() as i32)?;
+    encoder.write_i32::<LittleEndian>(33)?; // Hardcoded version 33
+    encoder.write_i32::<LittleEndian>(28)?; // headersize
+    encoder.write_i32::<LittleEndian>(map.world_size)?;
+    encoder.write_i32::<LittleEndian>(map.entities.len() as i32)?;
+    encoder.write_i32::<LittleEndian>(map.pvs.len() as i32)?;
+    encoder.write_i32::<LittleEndian>(map.lightmaps.len() as i32)?;
 
     match &map.config {
         MapConfig::Modern { variables } => {
-            encoder.write_i32_le(map.blendmap_resolution)?;
-            encoder.write_i32_le(variables.len() as i32)?;
+            encoder.write_i32::<LittleEndian>(map.blendmap_resolution)?;
+            encoder.write_i32::<LittleEndian>(variables.len() as i32)?;
 
             let vslots_count = map.vslots.len();
-            encoder.write_i32_le(vslots_count as i32)?; // numvslots logically
+            encoder.write_i32::<LittleEndian>(vslots_count as i32)?; // numvslots logically
 
             for var in variables {
                 match var {
                     Variable::Int { name, value } => {
                         encoder.write_u8(0)?;
-                        encoder.write_u16_le(name.len() as u16)?;
+                        encoder.write_u16::<LittleEndian>(name.len() as u16)?;
                         encoder.write_all(name.as_bytes())?;
-                        encoder.write_i32_le(*value)?;
+                        encoder.write_i32::<LittleEndian>(*value)?;
                     }
                     Variable::Float { name, value } => {
                         encoder.write_u8(1)?;
-                        encoder.write_u16_le(name.len() as u16)?;
+                        encoder.write_u16::<LittleEndian>(name.len() as u16)?;
                         encoder.write_all(name.as_bytes())?;
-                        encoder.write_f32_le(*value)?;
+                        encoder.write_f32::<LittleEndian>(*value)?;
                     }
                     Variable::String { name, value } => {
                         encoder.write_u8(2)?;
-                        encoder.write_u16_le(name.len() as u16)?;
+                        encoder.write_u16::<LittleEndian>(name.len() as u16)?;
                         encoder.write_all(name.as_bytes())?;
-                        encoder.write_u16_le(value.len() as u16)?;
+                        encoder.write_u16::<LittleEndian>(value.len() as u16)?;
                         encoder.write_all(value.as_bytes())?;
                     }
                 }
@@ -75,27 +56,27 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         encoder.write_u8(gt.len() as u8)?;
         encoder.write_all(gt.as_bytes())?;
         encoder.write_u8(0)?; // Null terminator
-        encoder.write_u16_le(map.eif)?;
-        encoder.write_u16_le(map.extra_game_data.len() as u16)?;
+        encoder.write_u16::<LittleEndian>(map.eif)?;
+        encoder.write_u16::<LittleEndian>(map.extra_game_data.len() as u16)?;
         encoder.write_all(&map.extra_game_data)?;
     } else {
         encoder.write_u8(0)?; // fallback gametype logic or empty
         encoder.write_u8(0)?;
-        encoder.write_u16_le(0)?; // eif
-        encoder.write_u16_le(0)?; // extrasize
+        encoder.write_u16::<LittleEndian>(0)?; // eif
+        encoder.write_u16::<LittleEndian>(0)?; // extrasize
     }
 
-    encoder.write_u16_le(map.mru_textures.len() as u16)?;
+    encoder.write_u16::<LittleEndian>(map.mru_textures.len() as u16)?;
     for tex in &map.mru_textures {
-        encoder.write_u16_le(*tex)?;
+        encoder.write_u16::<LittleEndian>(*tex)?;
     }
 
     for ent in &map.entities {
         for p in &ent.position {
-            encoder.write_f32_le(*p)?;
+            encoder.write_f32::<LittleEndian>(*p)?;
         }
         for a in &ent.attrs {
-            encoder.write_i16_le(*a)?;
+            encoder.write_i16::<LittleEndian>(*a)?;
         }
         encoder.write_u8(ent.ent_type.into())?;
         encoder.write_u8(0)?; // reserved
@@ -112,7 +93,7 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
                 skip += 1;
                 i += 1;
             }
-            encoder.write_i32_le(-skip)?;
+            encoder.write_i32::<LittleEndian>(-skip)?;
         } else {
             let slot = map.vslots[i].as_ref().unwrap();
             let mut changed = 0i32;
@@ -141,44 +122,44 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
                 changed |= 1 << 7;
             }
 
-            encoder.write_i32_le(changed)?;
-            encoder.write_i32_le(slot.prev)?;
+            encoder.write_i32::<LittleEndian>(changed)?;
+            encoder.write_i32::<LittleEndian>(slot.prev)?;
 
             if !slot.params.is_empty() {
-                encoder.write_u16_le(slot.params.len() as u16)?;
+                encoder.write_u16::<LittleEndian>(slot.params.len() as u16)?;
                 for p in &slot.params {
-                    encoder.write_u16_le(p.name.len() as u16)?;
+                    encoder.write_u16::<LittleEndian>(p.name.len() as u16)?;
                     encoder.write_all(p.name.as_bytes())?;
                     for f in &p.values {
-                        encoder.write_f32_le(*f)?;
+                        encoder.write_f32::<LittleEndian>(*f)?;
                     }
                 }
             }
             if let Some(s) = slot.scale {
-                encoder.write_f32_le(s)?;
+                encoder.write_f32::<LittleEndian>(s)?;
             }
             if let Some(r) = slot.rotation {
-                encoder.write_i32_le(r)?;
+                encoder.write_i32::<LittleEndian>(r)?;
             }
             if let Some(o) = slot.offset {
-                encoder.write_i32_le(o.0)?;
-                encoder.write_i32_le(o.1)?;
+                encoder.write_i32::<LittleEndian>(o.0)?;
+                encoder.write_i32::<LittleEndian>(o.1)?;
             }
             if let Some(sc) = slot.scroll {
-                encoder.write_f32_le(sc.0)?;
-                encoder.write_f32_le(sc.1)?;
+                encoder.write_f32::<LittleEndian>(sc.0)?;
+                encoder.write_f32::<LittleEndian>(sc.1)?;
             }
             if let Some(l) = slot.layer {
-                encoder.write_i32_le(l)?;
+                encoder.write_i32::<LittleEndian>(l)?;
             }
             if let Some(a) = slot.alpha {
-                encoder.write_f32_le(a.0)?;
-                encoder.write_f32_le(a.1)?;
+                encoder.write_f32::<LittleEndian>(a.0)?;
+                encoder.write_f32::<LittleEndian>(a.1)?;
             }
             if let Some(c) = slot.color {
-                encoder.write_f32_le(c.0)?;
-                encoder.write_f32_le(c.1)?;
-                encoder.write_f32_le(c.2)?;
+                encoder.write_f32::<LittleEndian>(c.0)?;
+                encoder.write_f32::<LittleEndian>(c.1)?;
+                encoder.write_f32::<LittleEndian>(c.2)?;
             }
             i += 1;
         }
@@ -199,11 +180,11 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         encoder.write_u8(lm.map_type)?;
         if (lm.map_type & 0x80) != 0 {
             if let Some((ux, uy)) = lm.unlit {
-                encoder.write_u16_le(ux)?;
-                encoder.write_u16_le(uy)?;
+                encoder.write_u16::<LittleEndian>(ux)?;
+                encoder.write_u16::<LittleEndian>(uy)?;
             } else {
-                encoder.write_u16_le(0)?;
-                encoder.write_u16_le(0)?; // Fallback safe empty
+                encoder.write_u16::<LittleEndian>(0)?;
+                encoder.write_u16::<LittleEndian>(0)?; // Fallback safe empty
             }
         }
         encoder.write_all(&lm.data)?;
@@ -261,11 +242,11 @@ fn write_cube<W: Write>(node: &OctreeNode, w: &mut W) -> Result<(), OgzError> {
         w.write_all(edges.unwrap())?;
     }
     for tex in &info.textures {
-        w.write_u16_le(*tex)?;
+        w.write_u16::<LittleEndian>(*tex)?;
     }
 
     if let Some(mat) = mod_surf.material {
-        w.write_u16_le(mat.to_bits())?;
+        w.write_u16::<LittleEndian>(mat.to_bits())?;
     }
     if let Some(m) = mod_surf.merged {
         w.write_u8(m)?;
@@ -281,41 +262,41 @@ fn write_cube<W: Write>(node: &OctreeNode, w: &mut W) -> Result<(), OgzError> {
 
             if let Some(xyz) = &face.xyz {
                 for v in xyz {
-                    w.write_u16_le(*v)?;
+                    w.write_u16::<LittleEndian>(*v)?;
                 }
             }
             if let Some(uv) = &face.uv {
                 for v in uv {
-                    w.write_u16_le(*v)?;
+                    w.write_u16::<LittleEndian>(*v)?;
                 }
             }
             if let Some(dup) = &face.dup_uv {
                 for v in dup {
-                    w.write_u16_le(*v)?;
+                    w.write_u16::<LittleEndian>(*v)?;
                 }
             }
             if let Some(n) = face.norm {
-                w.write_u16_le(n)?;
+                w.write_u16::<LittleEndian>(n)?;
             }
 
             for vert in &face.verts {
                 if let Some(vx) = &vert.xyz {
-                    w.write_u16_le(vx[0])?;
-                    w.write_u16_le(vx[1])?;
+                    w.write_u16::<LittleEndian>(vx[0])?;
+                    w.write_u16::<LittleEndian>(vx[1])?;
                 }
                 if let Some(vu) = &vert.uv {
-                    w.write_u16_le(vu[0])?;
-                    w.write_u16_le(vu[1])?;
+                    w.write_u16::<LittleEndian>(vu[0])?;
+                    w.write_u16::<LittleEndian>(vu[1])?;
                 }
                 if let Some(vn) = vert.norm {
-                    w.write_u16_le(vn)?;
+                    w.write_u16::<LittleEndian>(vn)?;
                 }
             }
 
             for dup in &face.dup_verts {
                 if let Some(vu) = &dup.uv {
-                    w.write_u16_le(vu[0])?;
-                    w.write_u16_le(vu[1])?;
+                    w.write_u16::<LittleEndian>(vu[0])?;
+                    w.write_u16::<LittleEndian>(vu[1])?;
                 }
             }
         }

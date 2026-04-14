@@ -9,3 +9,4 @@ cube-string.workspace = true
 thiserror.workspace = true
 flate2.workspace = true
 num_enum.workspace = true
+byteorder.workspace = true

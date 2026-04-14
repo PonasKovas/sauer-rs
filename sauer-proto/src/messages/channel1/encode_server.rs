@@ -53,7 +53,7 @@ impl Encode for Chan1Server {
                 w.put_int(*client_num);
                 w.put_int(*protocol);
                 w.put_int(*session_id);
-                w.put_int(if *has_password { 1 } else { 0 });
+                w.put_bool(*has_password);
                 w.put_string(server_desc);
                 w.put_string(server_auth);
             }
@@ -65,7 +65,7 @@ impl Encode for Chan1Server {
                 client_num,
             } => {
                 w.put_int(N_PAUSEGAME);
-                w.put_int(if *is_paused { 1 } else { 0 });
+                w.put_bool(*is_paused);
                 w.put_int(*client_num);
             }
 
@@ -105,7 +105,7 @@ impl Encode for Chan1Server {
                 w.put_int(N_MAPCHANGE);
                 w.put_string(map_name);
                 w.put_int(*mode as i32);
-                w.put_int(if *has_items { 1 } else { 0 });
+                w.put_bool(*has_items);
             }
 
             Chan1Server::ForceDeath { client_num } => {
@@ -350,7 +350,7 @@ impl Encode for Chan1Server {
                 w.put_int(N_EDITT);
                 sel.encode(w);
                 w.put_int(*tex);
-                w.put_int(if *all_faces { 1 } else { 0 });
+                w.put_bool(*all_faces);
                 let extra = extra_data.len() as u16;
                 w.put_byte((extra & 0xFF) as u8);
                 w.put_byte((extra >> 8) as u8);
@@ -428,7 +428,7 @@ impl Encode for Chan1Server {
                 w.put_int(N_EDITVSLOT);
                 sel.encode(w);
                 w.put_int(*delta);
-                w.put_int(if *all_faces { 1 } else { 0 });
+                w.put_bool(*all_faces);
                 let extra = extra_data.len() as u16;
                 w.put_byte((extra & 0xFF) as u8);
                 w.put_byte((extra >> 8) as u8);
@@ -521,7 +521,7 @@ impl Encode for Chan1Server {
 
             Chan1Server::DemoPlayback { is_on, client_num } => {
                 w.put_int(N_DEMOPLAYBACK);
-                w.put_int(if *is_on { 1 } else { 0 });
+                w.put_bool(*is_on);
                 w.put_int(*client_num);
             }
 
@@ -548,7 +548,7 @@ impl Encode for Chan1Server {
                 is_editing,
             } => {
                 w.put_int(N_EDITMODE);
-                w.put_int(if *is_editing { 1 } else { 0 });
+                w.put_bool(*is_editing);
             }
 
             Chan1Server::Spectator {
@@ -557,7 +557,7 @@ impl Encode for Chan1Server {
             } => {
                 w.put_int(N_SPECTATOR);
                 w.put_int(*client_num);
-                w.put_int(if *is_spectator { 1 } else { 0 });
+                w.put_bool(*is_spectator);
             }
 
             Chan1Server::SetTeam {
@@ -732,7 +732,7 @@ impl Encode for Chan1Server {
             Chan1Server::InvisFlag { flag, invis } => {
                 w.put_int(N_INVISFLAG);
                 w.put_int(*flag);
-                w.put_int(if *invis { 1 } else { 0 });
+                w.put_bool(*invis);
             }
 
             Chan1Server::Bases { bases } => {
@@ -757,7 +757,7 @@ impl Encode for Chan1Server {
                 w.put_int(*base);
                 w.put_string(owner);
                 w.put_string(enemy);
-                w.put_int(if *converted { 1 } else { 0 });
+                w.put_bool(*converted);
                 w.put_int(*ammo);
             }
             Chan1Server::BaseScore { base, team, total } => {

@@ -13,8 +13,8 @@ pub struct PlayerState {
     pub armour: i32,
     pub armour_type: ArmourType,
     pub gun_select: Gun,
-    /// Ammo count for each weapon (typically ordered from SG to PISTOL).
-    pub ammo: Vec<i32>,
+    /// Ammo count for each weapon, ordered SG through PISTOL (6 slots).
+    pub ammo: [i32; 6],
 }
 
 impl PlayerState {
@@ -29,20 +29,20 @@ impl PlayerState {
                 value: armour_type_val,
                 enum_name: "ArmourType",
             })?;
-        let mut state = PlayerState {
+        let gun_select = Gun::try_from(r.get_int()?).unwrap_or(Gun::Fist);
+        let mut ammo = [0i32; 6];
+        for slot in &mut ammo {
+            *slot = r.get_int()?;
+        }
+        Ok(PlayerState {
             life_sequence,
             health,
             max_health,
             armour,
             armour_type,
-            gun_select: Gun::try_from(r.get_int()?).unwrap_or(Gun::Fist),
-            ammo: Vec::with_capacity(7),
-        };
-        // Guns from SG(1) to PISTOL(6) inclusive = 6 ammo slots
-        for _ in 0..6 {
-            state.ammo.push(r.get_int()?);
-        }
-        Ok(state)
+            gun_select,
+            ammo,
+        })
     }
 
     pub(crate) fn encode(&self, w: &mut WriterCore) {

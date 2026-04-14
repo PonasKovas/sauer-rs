@@ -694,7 +694,7 @@ fn test_chan1_server_roundtrip() {
         armour: 50,
         armour_type: ArmourType::Green,
         gun_select: Gun::Rl,
-        ammo: vec![10, 20, 30, 40, 50, 60], // Must be exactly 6 elements (SG to Pistol)
+        ammo: [10, 20, 30, 40, 50, 60], // Must be exactly 6 elements (SG to Pistol)
     };
     assert_roundtrip!(
         R,
