@@ -8,12 +8,12 @@ mod encode_server;
 /// Server -> Client (Channel 2)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Chan2Server {
-    /// Demo playback marker.
+    /// `N_DEMOPACKET` Demo playback marker.
     DemoPacket,
 
-    /// Sent over Channel 2 to stream a recorded demo file to the client.
+    /// `N_SENDDEMO` Sent over Channel 2 to stream a recorded demo file to the client.
     SendDemo { tag: i32, data: Vec<u8> },
 
-    /// Sent over Channel 2 to stream a cooperative edit map file to the client.
+    /// `N_SENDMAP` Sent over Channel 2 to stream a cooperative edit map file to the client.
     SendMap { data: Vec<u8> },
 }
