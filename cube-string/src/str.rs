@@ -365,3 +365,11 @@ impl<'a> IntoIterator for &'a CubeStr {
         self.color_segments()
     }
 }
+
+impl<'a> TryFrom<&'a str> for &'a CubeStr {
+    type Error = ();
+
+    fn try_from(s: &'a str) -> Result<Self, ()> {
+        CubeStr::try_from_utf8(s).ok_or(())
+    }
+}

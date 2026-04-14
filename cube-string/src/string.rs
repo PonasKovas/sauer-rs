@@ -13,6 +13,7 @@
 //! s.push(b'W');
 //! ```
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 use core::fmt;
@@ -23,7 +24,7 @@ use core::ops::{
 
 use crate::raw::{self, COLOR_ESCAPE};
 use crate::str::CubeStr;
-use crate::CubeStringFromUtf8Error;
+use crate::{CubeStringBuilder, CubeStringFromUtf8Error};
 
 fn cube_str_from_bytes(bytes: &[u8]) -> &CubeStr {
     zerocopy::transmute_ref!(bytes)
@@ -88,6 +89,10 @@ mod serde_impl {
 }
 
 impl CubeString {
+    /// Returns a builder for CubeString with colors
+    pub fn builder() -> CubeStringBuilder {
+        CubeStringBuilder::new()
+    }
     /// Creates a new empty `CubeString`.
     ///
     /// # Example
@@ -252,9 +257,17 @@ impl From<&CubeStr> for CubeString {
     }
 }
 
-impl From<&str> for CubeString {
-    fn from(s: &str) -> Self {
-        Self::from_str_lossy(s)
+impl TryFrom<&str> for CubeString {
+    type Error = CubeStringFromUtf8Error;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::from_str(s)
+    }
+}
+
+impl TryFrom<String> for CubeString {
+    type Error = CubeStringFromUtf8Error;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::from_str(&s)
     }
 }
 
