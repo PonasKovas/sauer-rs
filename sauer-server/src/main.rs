@@ -9,13 +9,12 @@ use sauer_proto::{
 };
 use std::sync::Arc;
 
-const MAP: &str = "face-capture";
+const MAP: &str = "glasstest";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let ogz_map = Arc::new(OgzMap::parse(
-        &tokio::fs::read("/home/mykolas/Projects/c++/sauerbraten/packages/base/face-capture.ogz")
-            .await?,
+        &tokio::fs::read("/home/mykolas/.config/sauerbraten/packages/base/glasstest.ogz").await?,
     )?);
 
     let mut host = Host::bind(
