@@ -81,15 +81,19 @@ impl FakePlayer {
         self.last_tick = Instant::now();
 
         let xy_mag = (diff.x.powi(2) + diff.y.powi(2)).sqrt();
-        let norm_x = diff.x / xy_mag;
-        let norm_y = diff.y / xy_mag;
+        if xy_mag > 0.001 {
+            let norm_x = diff.x / xy_mag;
+            let norm_y = diff.y / xy_mag;
+            self.vel.x = norm_x * WALK_SPEED;
+            self.vel.y = norm_y * WALK_SPEED;
+        }
 
-        self.vel.x = norm_x * WALK_SPEED;
-        self.vel.y = norm_y * WALK_SPEED;
         self.vel.z = (-MAX_FALL).max(self.vel.z - GRAVITY * delta);
 
-        // Check if moving to the next position causes a collision
-        let next_pos = self.pos + self.vel;
+        // Convert velocity (units/sec) into a per-frame positional shift
+        let step_delta = self.vel * delta;
+        let next_pos = self.pos + step_delta;
+
         let bbox = BoundingBox::new(
             next_pos.x,
             next_pos.y,
@@ -103,25 +107,22 @@ impl FakePlayer {
                 normal,
                 penetration,
             } => {
-                // 1. Push the player out of the geometry using the normal and penetration depth
-                self.pos += normal * penetration;
+                // 1. We collided at `next_pos`, so we push `next_pos` safely out of the wall.
+                self.pos = next_pos + (normal * penetration);
 
-                // 2. Cancel out velocity pushing *into* the wall to allow sliding
+                // 2. Cancel out velocity pushing *into* the wall so sliding works next frame.
                 let dot = self.vel.dot(normal);
                 if dot < 0.0 {
                     self.vel -= normal * dot;
                 }
-
-                // 3. Apply the corrected sliding velocity
-                self.pos += self.vel;
             }
             CollisionResult::TrappedInside => {
-                // Reject movement entirely or kill player
+                // Reject movement entirely
                 println!("Player is inside a wall!");
             }
             CollisionResult::Free => {
-                // Space is clear, just apply velocity
-                self.pos += self.vel;
+                // Space is clear, adopt the intended position
+                self.pos = next_pos;
             }
         }
     }

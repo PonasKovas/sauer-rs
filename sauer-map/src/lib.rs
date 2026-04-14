@@ -111,10 +111,22 @@ impl Cube {
             length as f32 * sf
         };
 
+        // Sauerbraten's specific vertex mapping expected by the `FV` face array
+        let cc = [
+            [0, 1, 0], // 0
+            [1, 1, 0], // 1
+            [1, 0, 0], // 2
+            [0, 0, 0], // 3
+            [0, 0, 1], // 4
+            [1, 0, 1], // 5
+            [1, 1, 1], // 6
+            [0, 1, 1], // 7
+        ];
+
         for i in 0..8 {
-            let cx = i & 1;
-            let cy = (i >> 1) & 1;
-            let cz = (i >> 2) & 1;
+            let cx = cc[i][0];
+            let cy = cc[i][1];
+            let cz = cc[i][2];
 
             let ex = edge_val(0 + (cy * 2) + cz, cx);
             let ey = edge_val(4 + (cz * 2) + cx, cy);
