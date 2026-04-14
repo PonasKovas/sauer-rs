@@ -1,4 +1,5 @@
 use std::{
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -23,16 +24,24 @@ pub struct PeerSender {
     pub(crate) task_tx: mpsc::Sender<ToTask>,
     /// Backpressure-aware sender used by the `Sink` implementation.
     poll_sender: PollSender<ToTask>,
+    /// The remote address of the peer.
+    pub(crate) addr: SocketAddr,
 }
 
 impl PeerSender {
-    pub(crate) fn new(key: PeerKey, task_tx: mpsc::Sender<ToTask>) -> Self {
+    pub(crate) fn new(key: PeerKey, task_tx: mpsc::Sender<ToTask>, addr: SocketAddr) -> Self {
         let poll_sender = PollSender::new(task_tx.clone());
         Self {
             key,
             task_tx,
             poll_sender,
+            addr,
         }
+    }
+
+    /// Get the remote address of the peer.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
     }
 }
 
@@ -109,6 +118,15 @@ impl Sink<Packet> for PeerSender {
 /// Implements [`Stream<Item = Result<Packet>>`].
 pub struct PeerReceiver {
     pub rx: mpsc::Receiver<PeerMsg>,
+    /// The remote address of the peer.
+    pub(crate) addr: SocketAddr,
+}
+
+impl PeerReceiver {
+    /// Get the remote address of the peer.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
 }
 
 impl Stream for PeerReceiver {
@@ -156,10 +174,11 @@ impl Peer {
         key: PeerKey,
         task_tx: mpsc::Sender<ToTask>,
         rx: mpsc::Receiver<PeerMsg>,
+        addr: SocketAddr,
     ) -> Self {
         Self {
-            sender: PeerSender::new(key, task_tx),
-            receiver: PeerReceiver { rx },
+            sender: PeerSender::new(key, task_tx, addr),
+            receiver: PeerReceiver { rx, addr },
         }
     }
 
@@ -168,9 +187,14 @@ impl Peer {
         (self.sender, self.receiver)
     }
 
-    /// The peer's slot key (for use with advanced [`Host`] APIs).
+    /// The peer's slot key (for use with advanced [`Host`][crate::Host] APIs).
     pub fn key(&self) -> PeerKey {
         self.sender.key
+    }
+
+    /// Get the remote address of the peer.
+    pub fn addr(&self) -> SocketAddr {
+        self.sender.addr
     }
 
     /// Send a packet.

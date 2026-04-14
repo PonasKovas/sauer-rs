@@ -55,7 +55,11 @@ pub use peer::{Peer, PeerReceiver, PeerSender};
 pub use task::PeerKey;
 
 use bytes::Bytes;
-use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
+use std::{
+    net::{SocketAddr, ToSocketAddrs},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{net::UdpSocket, sync::mpsc, time::timeout};
 
 use task::{HostTask, PeerMsg, ToTask};
@@ -150,7 +154,7 @@ impl Default for HostConfig {
 /// interacts via async channels — no manual event loops required.
 pub struct Host {
     /// Receives newly accepted [`Peer`] connections.
-    accept_rx: mpsc::Receiver<(PeerKey, mpsc::Receiver<PeerMsg>)>,
+    accept_rx: mpsc::Receiver<(PeerKey, SocketAddr, mpsc::Receiver<PeerMsg>)>,
     /// Sends control messages to the background task.
     task_tx: mpsc::Sender<ToTask>,
 }
@@ -187,8 +191,8 @@ impl Host {
     ///
     /// Returns `None` when the host task has shut down.
     pub async fn accept(&mut self) -> Option<Peer> {
-        let (key, rx) = self.accept_rx.recv().await?;
-        Some(Peer::new(key, self.task_tx.clone(), rx))
+        let (key, addr, rx) = self.accept_rx.recv().await?;
+        Some(Peer::new(key, self.task_tx.clone(), rx, addr))
     }
 
     /// Connect to a remote ENet server.
@@ -237,12 +241,12 @@ impl Host {
             .map_err(|_| Error::ChannelClosed)?;
 
         // Unwrap the three layers: timeout, oneshot cancellation, inner Result.
-        let (key, rx) = match timeout(connect_timeout, reply_rx).await {
+        let (key, addr, rx) = match timeout(connect_timeout, reply_rx).await {
             Err(_elapsed) => return Err(Error::TimedOut),
             Ok(Err(_canceled)) => return Err(Error::ChannelClosed),
             Ok(Ok(result)) => result?,
         };
 
-        Ok(Peer::new(key, task_tx, rx))
+        Ok(Peer::new(key, task_tx, rx, addr))
     }
 }

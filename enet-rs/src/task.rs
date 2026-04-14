@@ -45,7 +45,7 @@ const MAX_PENDING_SEND: usize = 1024;
 /// `Ok(pkt)` = data packet; `Err(data)` = disconnect event with optional app data.
 pub(crate) type PeerMsg = Result<Packet, Option<u32>>;
 type ConnectReplySender =
-    tokio::sync::oneshot::Sender<Result<(PeerKey, mpsc::Receiver<PeerMsg>), Error>>;
+    tokio::sync::oneshot::Sender<Result<(PeerKey, SocketAddr, mpsc::Receiver<PeerMsg>), Error>>;
 
 // ── Messages: user ↔ task ─────────────────────────────────────────────────────
 
@@ -198,7 +198,7 @@ pub(crate) struct HostTask {
     peers: Vec<Option<PeerEntry>>,
     addr_map: HashMap<SocketAddr, PeerKey>,
 
-    accept_tx: mpsc::Sender<(PeerKey, mpsc::Receiver<PeerMsg>)>,
+    accept_tx: mpsc::Sender<(PeerKey, SocketAddr, mpsc::Receiver<PeerMsg>)>,
     user_rx: mpsc::Receiver<ToTask>,
 
     host_mtu: u32,
@@ -213,7 +213,7 @@ pub(crate) struct HostTask {
 impl HostTask {
     pub fn new(
         socket: std::sync::Arc<UdpSocket>,
-        accept_tx: mpsc::Sender<(PeerKey, mpsc::Receiver<PeerMsg>)>,
+        accept_tx: mpsc::Sender<(PeerKey, SocketAddr, mpsc::Receiver<PeerMsg>)>,
         user_rx: mpsc::Receiver<ToTask>,
         max_peers: usize,
         use_checksum: bool,
@@ -1040,7 +1040,9 @@ impl HostTask {
         }
 
         if let (Some(rx), Some(tx)) = (rx, reply) {
-            let _ = tx.send(Ok((key, rx)));
+            if let Some(peer) = self.peer(key) {
+                let _ = tx.send(Ok((key, peer.addr, rx)));
+            }
         }
     }
 
@@ -1120,8 +1122,10 @@ impl HostTask {
             self.remove_peer(key);
         } else if was_acking_connect {
             if let Some(rx) = rx_for_user {
-                if self.accept_tx.try_send((key, rx)).is_err() {
-                    self.remove_peer(key);
+                if let Some(peer) = self.peer(key) {
+                    if self.accept_tx.try_send((key, peer.addr, rx)).is_err() {
+                        self.remove_peer(key);
+                    }
                 }
             }
         }
