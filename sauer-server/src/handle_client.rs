@@ -1,10 +1,11 @@
 use crate::{Server, plugin::Plugin};
 use anyhow::{Result, bail};
 use bytes::Bytes;
-use cube_string::{Color, CubeString};
+use cube_string::{Color, CubeString, IntoCubeStringLossy};
 use enet_rs::PeerReceiver;
 use sauer_proto::{
     Chan0Client, Chan1Client, Chan1Server, Reader,
+    data::{ArmourType, GameMode, Gun, PlayerAmmo, PlayerState},
     protocol_route::{C2S, Chan0, Chan1},
 };
 use std::{collections::VecDeque, sync::Arc};
@@ -50,7 +51,42 @@ pub(crate) async fn handle_client<P: Plugin>(
 
     info!("{player_name} connected");
 
-    Ok(())
+    server
+        .get_client(cn)
+        .send_chan1(&Chan1Server::Welcome)
+        .await;
+    server
+        .get_client(cn)
+        .send_chan1(&Chan1Server::MapChange {
+            map_name: "complex".lossy_cubestring(),
+            mode: GameMode::CoopEdit,
+            has_items: true,
+        })
+        .await;
+
+    server
+        .get_client(cn)
+        .send_chan1(&Chan1Server::SpawnState {
+            client_num: 0,
+            state: PlayerState {
+                life_sequence: 0,
+                health: 100,
+                max_health: 100,
+                armour: 0,
+                armour_type: ArmourType::Yellow,
+                gun_select: Gun::Rifle,
+                ammo: PlayerAmmo {
+                    rifle: 9999,
+                    ..PlayerAmmo::default()
+                },
+            },
+        })
+        .await;
+
+    loop {
+        let pkt = rx.recv().await?;
+        info!("received: {pkt:?}");
+    }
 }
 
 struct SauerReceiver {
@@ -58,6 +94,7 @@ struct SauerReceiver {
     buffer: VecDeque<Packet>,
 }
 
+#[derive(Debug)]
 enum Packet {
     Chan0(Chan0Client),
     Chan1(Chan1Client),

@@ -1,5 +1,5 @@
 use crate::Server;
-use std::ops::ControlFlow;
+use std::{ops::ControlFlow, sync::Arc};
 
 // if only Try was stable
 pub type Control = ControlFlow<()>;
@@ -9,6 +9,11 @@ pub const BLOCK: Control = ControlFlow::Break(());
 pub trait Plugin: Send + Sync + 'static {
     #![allow(unused)]
 
+    fn init(&self, server: &Arc<Server>) -> impl Future<Output = ()> + Send + Sync {
+        async move { () }
+    }
+
+    /// BLOCKING will disconnect the peer
     fn connected(&self, ctx: Context<'_>) -> impl Future<Output = Control> + Send + Sync {
         async move { PASS }
     }
@@ -22,8 +27,13 @@ pub trait Plugin: Send + Sync + 'static {
 
 #[derive(Copy, Clone)]
 pub struct Context<'a> {
-    pub server: &'a Server,
+    pub server: &'a Arc<Server>,
     pub cn: u32,
+}
+impl<'a> Context<'a> {
+    pub(crate) fn new(server: &'a Arc<Server>, cn: u32) -> Self {
+        Self { server, cn }
+    }
 }
 
 impl Plugin for () {}
