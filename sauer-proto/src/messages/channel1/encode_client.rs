@@ -37,7 +37,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::EditMode { val } => {
                 w.put_int(N_EDITMODE);
-                w.put_int(if *val { 1 } else { 0 });
+                w.put_bool(*val);
             }
             Chan1Client::MapCrc { map_name, crc } => {
                 w.put_int(N_MAPCRC);
@@ -205,7 +205,7 @@ impl Encode for Chan1Client {
             Chan1Client::Spectator { spectator_cn, val } => {
                 w.put_int(N_SPECTATOR);
                 w.put_int(*spectator_cn);
-                w.put_int(if *val { 1 } else { 0 });
+                w.put_bool(*val);
             }
             Chan1Client::SetTeam { client_num, team } => {
                 w.put_int(N_SETTEAM);
@@ -217,7 +217,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::RecordDemo { val } => {
                 w.put_int(N_RECORDDEMO);
-                w.put_int(if *val { 1 } else { 0 });
+                w.put_bool(*val);
             }
             Chan1Client::StopDemo => {
                 w.put_int(N_STOPDEMO);
@@ -248,7 +248,7 @@ impl Encode for Chan1Client {
             } => {
                 w.put_int(N_SETMASTER);
                 w.put_int(*client_num);
-                w.put_int(if *val { 1 } else { 0 });
+                w.put_bool(*val);
                 w.put_string(hash);
             }
             Chan1Client::AddBot { skill } => {
@@ -264,7 +264,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::BotBalance { balance } => {
                 w.put_int(N_BOTBALANCE);
-                w.put_int(if *balance { 1 } else { 0 });
+                w.put_bool(*balance);
             }
             Chan1Client::AuthTry { desc, name } => {
                 w.put_int(N_AUTHTRY);
@@ -285,7 +285,7 @@ impl Encode for Chan1Client {
             }
             Chan1Client::PauseGame { val } => {
                 w.put_int(N_PAUSEGAME);
-                w.put_int(if *val { 1 } else { 0 });
+                w.put_bool(*val);
             }
             Chan1Client::GameSpeed { speed } => {
                 w.put_int(N_GAMESPEED);
@@ -342,7 +342,7 @@ impl Encode for Chan1Client {
                 w.put_int(N_EDITT);
                 sel.encode(w);
                 w.put_int(*tex);
-                w.put_int(if *all_faces { 1 } else { 0 });
+                w.put_bool(*all_faces);
 
                 let extra_len = extra_data.len() as u16;
                 w.put_byte((extra_len & 0xFF) as u8);
@@ -395,7 +395,7 @@ impl Encode for Chan1Client {
                 w.put_int(N_EDITVSLOT);
                 sel.encode(w);
                 w.put_int(*delta);
-                w.put_int(if *all_faces { 1 } else { 0 });
+                w.put_bool(*all_faces);
 
                 let extra_len = extra_data.len() as u16;
                 w.put_byte((extra_len & 0xFF) as u8);

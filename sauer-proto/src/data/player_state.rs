@@ -1,6 +1,6 @@
 use crate::{
     ParseError,
-    data::{ArmourType, Gun},
+    data::{ArmourType, Gun, PlayerAmmo},
     internal::{ReaderCore, WriterCore},
 };
 
@@ -13,8 +13,7 @@ pub struct PlayerState {
     pub armour: i32,
     pub armour_type: ArmourType,
     pub gun_select: Gun,
-    /// Ammo count for each weapon (typically ordered from SG to PISTOL).
-    pub ammo: Vec<i32>,
+    pub ammo: PlayerAmmo,
 }
 
 impl PlayerState {
@@ -29,20 +28,24 @@ impl PlayerState {
                 value: armour_type_val,
                 enum_name: "ArmourType",
             })?;
-        let mut state = PlayerState {
+        let gun_select = Gun::try_from(r.get_int()?).unwrap_or(Gun::Fist);
+        let ammo = PlayerAmmo {
+            shotgun: r.get_int()?,
+            chaingun: r.get_int()?,
+            rocket_launcher: r.get_int()?,
+            rifle: r.get_int()?,
+            grenade_launcher: r.get_int()?,
+            pistol: r.get_int()?,
+        };
+        Ok(PlayerState {
             life_sequence,
             health,
             max_health,
             armour,
             armour_type,
-            gun_select: Gun::try_from(r.get_int()?).unwrap_or(Gun::Fist),
-            ammo: Vec::with_capacity(7),
-        };
-        // Guns from SG(1) to PISTOL(6) inclusive = 6 ammo slots
-        for _ in 0..6 {
-            state.ammo.push(r.get_int()?);
-        }
-        Ok(state)
+            gun_select,
+            ammo,
+        })
     }
 
     pub(crate) fn encode(&self, w: &mut WriterCore) {
@@ -53,8 +56,11 @@ impl PlayerState {
         w.put_int(self.armour_type as i32);
         w.put_int(self.gun_select as i32);
 
-        for ammo_count in &self.ammo {
-            w.put_int(*ammo_count);
-        }
+        w.put_int(self.ammo.shotgun);
+        w.put_int(self.ammo.chaingun);
+        w.put_int(self.ammo.rocket_launcher);
+        w.put_int(self.ammo.rifle);
+        w.put_int(self.ammo.grenade_launcher);
+        w.put_int(self.ammo.pistol);
     }
 }

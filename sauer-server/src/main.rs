@@ -6,7 +6,7 @@ use sauer_map::{BoundingBox, CollisionResult, World};
 use sauer_proto::{
     Chan0Client, Chan0Server, Chan1Client, Chan1Server,
     data::{
-        ArmourType, GameMode, Gun, PhysState, PlayerModel, PlayerPosition, PlayerState,
+        ArmourType, GameMode, Gun, PhysState, PlayerAmmo, PlayerModel, PlayerPosition, PlayerState,
         PositionPhysState, Vector3 as SauerVec3,
     },
 };
@@ -230,7 +230,7 @@ async fn handle_client(mut peer: SauerPeer, ogz: Arc<OgzMap>) -> anyhow::Result<
                             armour: 0,
                             armour_type: ArmourType::Yellow,
                             gun_select: Gun::Fist,
-                            ammo: vec![0, 0, 0],
+                            ammo: PlayerAmmo::default(),
                         },
                     })
                     .await?;
@@ -247,7 +247,7 @@ async fn handle_client(mut peer: SauerPeer, ogz: Arc<OgzMap>) -> anyhow::Result<
                             armour: 0,
                             armour_type: ArmourType::Yellow,
                             gun_select: Gun::Fist,
-                            ammo: vec![0, 0, 0],
+                            ammo: PlayerAmmo::default(),
                         },
                     })
                     .await?;

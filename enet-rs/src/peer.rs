@@ -10,7 +10,7 @@ use tokio_util::sync::PollSender;
 use crate::{
     Packet,
     error::{Error, Result},
-    task::{PeerKey, ToTask},
+    task::{PeerKey, PeerMsg, ToTask},
 };
 
 // ── PeerSender ────────────────────────────────────────────────────────────────
@@ -96,9 +96,6 @@ impl Sink<Packet> for PeerSender {
 }
 
 // ── PeerReceiver ──────────────────────────────────────────────────────────────
-
-/// Internal channel item: `Ok(pkt)` = data, `Err(data)` = disconnect with optional app data.
-type PeerMsg = std::result::Result<Packet, Option<u32>>;
 
 /// The receiving half of a [`Peer`] connection.
 ///

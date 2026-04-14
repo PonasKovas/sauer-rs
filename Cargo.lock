@@ -21,6 +21,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
+
+[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -54,6 +60,7 @@ name = "enet-rs"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "crc32fast",
  "futures",
  "rand",
  "thiserror",
@@ -299,6 +306,7 @@ dependencies = [
 name = "ogz-rs"
 version = "0.1.0"
 dependencies = [
+ "byteorder",
  "cube-string",
  "flate2",
  "num_enum",

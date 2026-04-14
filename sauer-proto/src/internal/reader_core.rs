@@ -93,8 +93,9 @@ impl<'a> ReaderCore<'a> {
     }
 
     pub fn get_float(&mut self) -> Result<f32, ParseError> {
-        let bytes = self.get_bytes(4)?;
-        Ok(f32::from_le_bytes(bytes.try_into().unwrap()))
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(self.get_bytes(4)?);
+        Ok(f32::from_le_bytes(buf))
     }
 
     pub fn get_string(&mut self) -> Result<CubeString, ParseError> {
@@ -111,24 +112,13 @@ impl<'a> ReaderCore<'a> {
     }
 
     pub fn active_client_num(&self, msg_name: &'static str) -> Result<i32, ParseError> {
-        let cn;
-        match &self.active_wrapper {
-            None => cn = None,
-            Some(wrapper) => {
-                // check if expired
-                if self.cursor > wrapper.end_cursor {
-                    cn = None;
-                } else {
-                    cn = Some(wrapper.client_num);
-                }
-            }
-        }
-
-        cn.ok_or({
-            ParseError::MissingClientWrapper {
+        self.active_wrapper
+            .as_ref()
+            .filter(|w| self.cursor <= w.end_cursor)
+            .map(|w| w.client_num)
+            .ok_or(ParseError::MissingClientWrapper {
                 message_type: msg_name,
-            }
-        })
+            })
     }
     pub fn set_client_num(&mut self, client_num: i32, length: usize) {
         self.active_wrapper = Some(ClientWrapperState {

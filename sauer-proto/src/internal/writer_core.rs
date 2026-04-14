@@ -17,20 +17,20 @@ impl WriterCore {
         self.buffer.extend_from_slice(bytes);
     }
 
+    pub fn put_bool(&mut self, b: bool) {
+        self.put_int(i32::from(b));
+    }
+
     /// Sauerbraten variable-length integer compression
     pub fn put_int(&mut self, n: i32) {
         if (-126..=127).contains(&n) {
             self.put_byte(n as u8);
         } else if (-32768..=32767).contains(&n) {
             self.put_byte(0x80);
-            self.put_byte((n & 0xFF) as u8);
-            self.put_byte(((n >> 8) & 0xFF) as u8);
+            self.put_bytes(&(n as i16).to_le_bytes());
         } else {
             self.put_byte(0x81);
-            self.put_byte((n & 0xFF) as u8);
-            self.put_byte(((n >> 8) & 0xFF) as u8);
-            self.put_byte(((n >> 16) & 0xFF) as u8);
-            self.put_byte(((n >> 24) & 0xFF) as u8);
+            self.put_bytes(&n.to_le_bytes());
         }
     }
 
@@ -40,14 +40,10 @@ impl WriterCore {
             self.put_byte(n as u8);
         } else if n <= 0xFFFF {
             self.put_byte(0x80);
-            self.put_byte((n & 0xFF) as u8);
-            self.put_byte(((n >> 8) & 0xFF) as u8);
+            self.put_bytes(&(n as u16).to_le_bytes());
         } else {
             self.put_byte(0x81);
-            self.put_byte((n & 0xFF) as u8);
-            self.put_byte(((n >> 8) & 0xFF) as u8);
-            self.put_byte(((n >> 16) & 0xFF) as u8);
-            self.put_byte(((n >> 24) & 0xFF) as u8);
+            self.put_bytes(&n.to_le_bytes());
         }
     }
 

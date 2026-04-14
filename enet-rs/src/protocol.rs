@@ -3,6 +3,7 @@
 // within this crate but document the protocol and may be used by callers.
 #![allow(dead_code)]
 use bytes::{BufMut, Bytes, BytesMut};
+use crc32fast::Hasher as Crc32Hasher;
 
 // ── Header flags / masks ──────────────────────────────────────────────────────
 pub const HEADER_FLAG_SENT_TIME: u16 = 0x8000;
@@ -565,33 +566,10 @@ impl Command {
 
 // ── CRC-32 ────────────────────────────────────────────────────────────────────
 
-const CRC32_TABLE: [u32; 256] = {
-    let poly: u32 = 0xEDB88320;
-    let mut table = [0u32; 256];
-    let mut i = 0usize;
-    while i < 256 {
-        let mut crc = i as u32;
-        let mut j = 0;
-        while j < 8 {
-            if crc & 1 != 0 {
-                crc = (crc >> 1) ^ poly;
-            } else {
-                crc >>= 1;
-            }
-            j += 1;
-        }
-        table[i] = crc;
-        i += 1;
-    }
-    table
-};
-
 pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc: u32 = 0xFFFF_FFFF;
-    for &b in data {
-        crc = (crc >> 8) ^ CRC32_TABLE[((crc ^ b as u32) & 0xFF) as usize];
-    }
-    !crc
+    let mut hasher = Crc32Hasher::new();
+    hasher.update(data);
+    hasher.finalize()
 }
 
 /// Parse all commands from a datagram's command payload region.
