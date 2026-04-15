@@ -4,7 +4,6 @@ use crate::{
     peer::Peer,
     plugin::{Context, Plugin},
 };
-use dashmap::DashMap;
 use enet_rs::{Host, HostConfig};
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},

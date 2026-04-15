@@ -1,7 +1,7 @@
 use crate::{
-    ParseError,
     data::{Orient, Vector3},
-    internal::{ReaderCore, WriterCore},
+    internal::{DecodeCore, EncodeCore, ReaderCore, WriterCore},
+    ParseError,
 };
 
 /// Cube selection information for cooperative editing geometry modifications.
@@ -18,8 +18,8 @@ pub struct SelInfo {
     pub corner: i32,
 }
 
-impl SelInfo {
-    pub(crate) fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
+impl DecodeCore for SelInfo {
+    fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
         let o = Vector3 {
             x: r.get_int()?,
             y: r.get_int()?,
@@ -48,8 +48,10 @@ impl SelInfo {
             corner: r.get_int()?,
         })
     }
+}
 
-    pub(crate) fn encode(&self, w: &mut WriterCore) {
+impl EncodeCore for SelInfo {
+    fn encode(&self, w: &mut WriterCore) {
         w.put_int(self.o.x);
         w.put_int(self.o.y);
         w.put_int(self.o.z);

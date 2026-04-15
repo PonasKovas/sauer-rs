@@ -7,19 +7,25 @@ pub(crate) mod constants;
 mod reader_core;
 mod writer_core;
 
-pub(crate) trait Decode: Sized {
-    fn decode(msg_type: i32, reader: &mut ReaderCore) -> Result<Self, ParseError>;
+// ---------------------------------------------------------------------------
+// Internal (crate-private) codec traits for sub-packet data structures.
+//
+// These are for types like PlayerState, SelInfo, HitInfo, PlayerPosition --
+// pieces of data that appear *inside* packets but are not standalone messages.
+// ---------------------------------------------------------------------------
+
+pub(crate) trait DecodeCore: Sized {
+    fn decode(reader: &mut ReaderCore) -> Result<Self, ParseError>;
 }
 
-pub(crate) trait Encode {
+pub(crate) trait EncodeCore {
     fn encode(&self, writer: &mut WriterCore);
-    /// Returns Some(client_num) if this message must be inside an N_CLIENT envelope
-    ///
-    /// Only for the top level enums
-    fn requires_client_wrapper(&self) -> Option<i32> {
-        None
-    }
 }
+
+// ---------------------------------------------------------------------------
+// Error-context helpers -- attach packet / field names to errors for better
+// diagnostics while deserializing.
+// ---------------------------------------------------------------------------
 
 pub(crate) trait ParseResultExt<T> {
     fn in_packet(self, packet: &'static str) -> Result<T, ParseError>;

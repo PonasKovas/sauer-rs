@@ -1,13 +1,14 @@
 use super::*;
 use crate::{
-    Chan1Server, ParseError,
     data::{
         AiType, ClientResumeState, ClientState, ClientTokenState, DroppedToken, EditFaceMode,
         EditVarValue, EntityType, FlagState, FlagStateHoldTeam, FlagStateOwner, GameMode, Gun,
         ItemType, MasterClient, MasterMode, PlayerModel, PlayerState, Privilege, SelInfo,
         StolenToken, TokenState, Vector3,
     },
-    internal::{Decode, ParseResultExt, ReaderCore, constants::*},
+    internal::{constants::*, DecodeCore, ParseResultExt, ReaderCore},
+    route::{Chan1, S2C},
+    Decode, ParseError,
 };
 
 fn packet_name(msg_type: i32) -> &'static str {
@@ -95,7 +96,7 @@ fn packet_name(msg_type: i32) -> &'static str {
     }
 }
 
-impl Decode for Chan1Server {
+impl Decode<S2C<Chan1>> for Chan1Server {
     fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
         decode_inner(msg_type, r).in_packet(packet_name(msg_type))
     }
@@ -231,13 +232,13 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         N_SPAWN => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::Spawn(SpawnServer {
-                state: PlayerState::decode(r).in_field("state")?,
+                state: DecodeCore::decode(r).in_field("state")?,
             }),
         })),
 
         N_SPAWNSTATE => Ok(Chan1Server::SpawnState(SpawnState {
             client_num: r.get_int()?,
-            state: PlayerState::decode(r).in_field("state")?,
+            state: DecodeCore::decode(r).in_field("state")?,
         })),
 
         N_SHOTFX => {
@@ -337,7 +338,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
                 let flags = r.get_int()?;
                 let deaths = r.get_int()?;
                 let quad_millis = r.get_int()?;
-                let player_state = PlayerState::decode(r).in_field("player_state")?;
+                let player_state: PlayerState = DecodeCore::decode(r).in_field("player_state")?;
 
                 clients.push(ClientResumeState {
                     client_num: cn,
@@ -407,7 +408,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         }
 
         N_EDITF => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let dir = r.get_int()?;
             let mode_val = r.get_int()?;
             Ok(Chan1Server::Client(Client {
@@ -426,7 +427,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         }
 
         N_EDITT => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let tex = r.get_int()?;
             let all_faces = r.get_int()? != 0;
             let extra_lo = r.get_byte()? as u16;
@@ -447,7 +448,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         N_EDITM => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::EditMat(EditMat {
-                sel: SelInfo::decode(r).in_field("sel")?,
+                sel: DecodeCore::decode(r).in_field("sel")?,
                 mat: r.get_int()?,
                 filter: r.get_int()?,
             }),
@@ -456,33 +457,33 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         N_FLIP => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::Flip(Flip {
-                sel: SelInfo::decode(r).in_field("sel")?,
+                sel: DecodeCore::decode(r).in_field("sel")?,
             }),
         })),
         N_COPY => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::Copy(CopyServer {
-                sel: SelInfo::decode(r).in_field("sel")?,
+                sel: DecodeCore::decode(r).in_field("sel")?,
             }),
         })),
         N_PASTE => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::Paste(PasteServer {
-                sel: SelInfo::decode(r).in_field("sel")?,
+                sel: DecodeCore::decode(r).in_field("sel")?,
             }),
         })),
 
         N_ROTATE => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::Rotate(Rotate {
-                sel: SelInfo::decode(r).in_field("sel")?,
+                sel: DecodeCore::decode(r).in_field("sel")?,
                 dir: r.get_int()?,
             }),
         })),
 
         N_REPLACE => {
             let client_num = r.active_client_num(packet_name(msg_type))?;
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let old_tex = r.get_int()?;
             let new_tex = r.get_int()?;
             let in_sel = r.get_int()?;
@@ -505,13 +506,13 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Server, ParseE
         N_DELCUBE => Ok(Chan1Server::Client(Client {
             client_num: r.active_client_num(packet_name(msg_type))?,
             packet: ClientPacket::DelCube(DelCube {
-                sel: SelInfo::decode(r).in_field("sel")?,
+                sel: DecodeCore::decode(r).in_field("sel")?,
             }),
         })),
 
         N_EDITVSLOT => {
             let client_num = r.active_client_num(packet_name(msg_type))?;
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let delta = r.get_int()?;
             let all_faces = r.get_int()? != 0;
             let extra_lo = r.get_byte()? as u16;

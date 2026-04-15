@@ -1,7 +1,7 @@
 use crate::{
-    ParseError,
     data::{PhysState, Vector3},
-    internal::{ReaderCore, WriterCore, constants::*},
+    internal::{constants::*, DecodeCore, EncodeCore, ReaderCore, WriterCore},
+    ParseError,
 };
 
 /// Packed physstate byte as transmitted in the Pos packet:
@@ -65,8 +65,8 @@ pub struct PlayerPosition {
     pub fall_dir: u16,
 }
 
-impl PlayerPosition {
-    pub(crate) fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
+impl DecodeCore for PlayerPosition {
+    fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
         let client_num = r.get_uint()?;
         let phys_state = PositionPhysState::from_bits(r.get_byte()?);
         let flags = r.get_uint()?;
@@ -122,8 +122,10 @@ impl PlayerPosition {
             fall_dir,
         })
     }
+}
 
-    pub(crate) fn encode(&self, w: &mut WriterCore) {
+impl EncodeCore for PlayerPosition {
+    fn encode(&self, w: &mut WriterCore) {
         w.put_uint(self.client_num);
         w.put_byte(self.phys_state.to_bits());
         w.put_uint(self.flags);

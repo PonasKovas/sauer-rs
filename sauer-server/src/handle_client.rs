@@ -21,7 +21,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 
     server
         .get_client(cn)
-        .send_chan1(&Chan1Server::ServInfo {
+        .send_chan1(ServInfo {
             client_num: cn as i32,
             protocol: sauer_proto::PROTOCOL_VERSION,
             session_id: 0,

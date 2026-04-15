@@ -1,11 +1,12 @@
 use super::*;
 use crate::{
-    Chan1Client, ParseError,
     data::{
-        BaseSpawn, EditFaceMode, EditVarValue, EntityType, FlagSpawn, GameMode, Gun, HitInfo,
-        ItemSpawn, ItemType, MasterMode, PlayerModel, SelInfo, TokenBaseSpawn, Vector3,
+        BaseSpawn, EditFaceMode, EditVarValue, EntityType, FlagSpawn, GameMode, Gun, ItemSpawn,
+        ItemType, MasterMode, PlayerModel, SelInfo, TokenBaseSpawn, Vector3,
     },
-    internal::{Decode, ParseResultExt, ReaderCore, constants::*},
+    internal::{constants::*, DecodeCore, ParseResultExt, ReaderCore},
+    route::{Chan1, C2S},
+    Decode, ParseError,
 };
 
 fn packet_name(msg_type: i32) -> &'static str {
@@ -84,7 +85,7 @@ fn packet_name(msg_type: i32) -> &'static str {
     }
 }
 
-impl Decode for Chan1Client {
+impl Decode<C2S<Chan1>> for Chan1Client {
     fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
         decode_inner(msg_type, r).in_packet(packet_name(msg_type))
     }
@@ -185,7 +186,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             }
             let mut hits = Vec::with_capacity(hits_count as usize);
             for _ in 0..hits_count {
-                hits.push(HitInfo::decode(r).in_field("hit")?);
+                hits.push(DecodeCore::decode(r).in_field("hit")?);
             }
 
             Ok(Chan1Client::Shoot(Shoot {
@@ -215,7 +216,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             }
             let mut hits = Vec::with_capacity(hits_count as usize);
             for _ in 0..hits_count {
-                hits.push(HitInfo::decode(r).in_field("hit")?);
+                hits.push(DecodeCore::decode(r).in_field("hit")?);
             }
 
             Ok(Chan1Client::Explode(Explode {
@@ -464,7 +465,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             }))
         }
         N_EDITF => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let dir = r.get_int()?;
             let mode_val = r.get_int()?;
             Ok(Chan1Client::EditFace(EditFace {
@@ -479,7 +480,7 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             }))
         }
         N_EDITT => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let tex = r.get_int()?;
             let all_faces = r.get_int()? != 0;
 
@@ -496,22 +497,22 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             }))
         }
         N_EDITM => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let mat = r.get_int()?;
             let filter = r.get_int()?;
             Ok(Chan1Client::EditMat(EditMat { sel, mat, filter }))
         }
         N_FLIP => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             Ok(Chan1Client::Flip(Flip { sel }))
         }
         N_ROTATE => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let dir = r.get_int()?;
             Ok(Chan1Client::Rotate(Rotate { sel, dir }))
         }
         N_REPLACE => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let old_tex = r.get_int()?;
             let new_tex = r.get_int()?;
             let in_sel = r.get_int()?;
@@ -530,11 +531,11 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan1Client, ParseE
             }))
         }
         N_DELCUBE => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             Ok(Chan1Client::DelCube(DelCube { sel }))
         }
         N_EDITVSLOT => {
-            let sel = SelInfo::decode(r).in_field("sel")?;
+            let sel: SelInfo = DecodeCore::decode(r).in_field("sel")?;
             let delta = r.get_int()?;
             let all_faces = r.get_int()? != 0;
 

@@ -1,7 +1,7 @@
 use crate::{
-    ParseError,
     data::Vector3,
-    internal::{ReaderCore, WriterCore, constants::*},
+    internal::{constants::*, DecodeCore, EncodeCore, ReaderCore, WriterCore},
+    ParseError,
 };
 
 /// Contains ray/hit information from a weapon shot or explosion.
@@ -14,8 +14,8 @@ pub struct HitInfo {
     pub dir: Vector3<f32>,
 }
 
-impl HitInfo {
-    pub(crate) fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
+impl DecodeCore for HitInfo {
+    fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
         Ok(HitInfo {
             target_cn: r.get_int()?,
             life_sequence: r.get_int()?,
@@ -28,8 +28,10 @@ impl HitInfo {
             },
         })
     }
+}
 
-    pub(crate) fn encode(&self, w: &mut WriterCore) {
+impl EncodeCore for HitInfo {
+    fn encode(&self, w: &mut WriterCore) {
         w.put_int(self.target_cn);
         w.put_int(self.life_sequence);
         w.put_int((self.dist * DMF) as i32);

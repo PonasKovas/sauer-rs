@@ -1,9 +1,9 @@
-//! `sauer-proto` — Sauerbraten network protocol codec.
+//! `sauer-proto` -- Sauerbraten network protocol codec.
 //!
-//! This crate provides typed, zero-copy serialisation and deserialisation for
-//! the [Sauerbraten](http://sauerbraten.org/) (Cube 2) multiplayer network
-//! protocol.  It covers all three ENet channels used by the game as well as the
-//! out-of-band ExtInfo UDP protocol.
+//! This crate provides typed serialisation and deserialisation for the
+//! [Sauerbraten](http://sauerbraten.org/) (Cube 2) multiplayer network
+//! protocol.  It covers all three ENet channels used by the game as well as
+//! the out-of-band ExtInfo UDP protocol.
 //!
 //! # Channels
 //!
@@ -15,14 +15,14 @@
 //!
 //! # Decoding
 //!
-//! Use [`Reader`] as an iterator over messages in a raw ENet packet buffer:
+//! Use [`Reader`] to read a raw ENet packet buffer:
 //!
 //! ```rust
-//! use sauer_proto::{Reader, Chan1Server, protocol_route::{S2C, Chan1}};
+//! use sauer_proto::{Reader, Chan1Server, route::{S2C, Chan1}};
 //!
 //! fn handle_channel1_packet(raw: &[u8]) {
-//!     let reader = Reader::<S2C<Chan1>>::new(raw);
-//!     for msg in reader {
+//!     let mut reader = Reader::<S2C<Chan1>>::new(raw);
+//!     while let Some(msg) = reader.next() {
 //!         match msg.expect("parse error") {
 //!             Chan1Server::ServMsg(servmsg) => println!("server says: {}", servmsg.text),
 //!             Chan1Server::MapChange(map_change) => println!("map: {}", map_change.map_name),
@@ -34,10 +34,11 @@
 //!
 //! # Encoding
 //!
-//! Use [`Writer`] to build an outgoing packet:
+//! Use [`Writer`] to build an outgoing packet.  You can push individual
+//! packet structs directly -- no need to wrap in the channel enum:
 //!
 //! ```rust
-//! use sauer_proto::{Writer, protocol_route::{C2S, Chan1}};
+//! use sauer_proto::{Writer, route::{C2S, Chan1}};
 //! use sauer_proto::channel1::Text;
 //! use cube_string::CubeString;
 //!
@@ -45,19 +46,20 @@
 //!     let mut writer = Writer::<C2S<Chan1>>::new();
 //!     writer.push(&Text {
 //!         text: CubeString::from_str_lossy(text),
-//!     }.into());
+//!     });
 //!     writer.consume()
 //! }
 //! ```
 
-pub mod data;
 mod error;
-pub mod extinfo;
 mod internal;
 mod messages;
-pub mod protocol_route;
 mod reader;
 mod writer;
+
+pub mod data;
+pub mod extinfo;
+pub mod route;
 
 pub use error::ParseError;
 pub use messages::{
@@ -73,12 +75,47 @@ pub use cube_string;
 /// Total number of ENet channels used by the Sauerbraten protocol.
 pub const CHANNEL_COUNT: usize = 3;
 
-/// ENet channel 0 — high-frequency physics and movement updates.
+/// ENet channel 0 -- high-frequency physics and movement updates.
 pub const CHANNEL_POSITIONS: u8 = 0;
-/// ENet channel 1 — reliable game-state messages, chat, and events.
+/// ENet channel 1 -- reliable game-state messages, chat, and events.
 pub const CHANNEL_MESSAGES: u8 = 1;
-/// ENet channel 2 — bulk file transfers (demo downloads, map sends).
+/// ENet channel 2 -- bulk file transfers (demo downloads, map sends).
 pub const CHANNEL_MAPS: u8 = 2;
 
 /// Wire protocol version number sent in the initial [`Chan1Server::ServInfo`] handshake.
 pub const PROTOCOL_VERSION: i32 = 260;
+
+// ---------------------------------------------------------------------------
+// Public codec traits for full, standalone protocol packets.
+//
+// Generic over a *route* marker (e.g. `S2C<Chan1>`, `C2S<Chan0>`) so
+// that the same struct can implement `Encode` for multiple routes if the
+// packet legitimately travels in both directions.
+// ---------------------------------------------------------------------------
+
+/// Serialize a packet onto a wire-format buffer for route `R`.
+///
+/// Implementors are full, standalone protocol messages -- not sub-packet
+/// fragments.  The route generic ensures that only packets valid for a
+/// given direction + channel can be written to a [`Writer`]
+/// bound to that route.
+#[allow(private_interfaces)]
+pub trait Encode<R> {
+    fn encode(&self, writer: &mut internal::WriterCore);
+
+    /// If this packet must be wrapped in an `N_CLIENT` envelope on the wire,
+    /// return `Some(client_num)`.  The [`Writer`] uses this to
+    /// transparently batch client-wrapped messages.
+    fn requires_client_wrapper(&self) -> Option<i32> {
+        None
+    }
+}
+
+/// Deserialize a packet from wire-format bytes for route `R`.
+///
+/// The `msg_type` argument is the integer message-type tag that was already
+/// read from the buffer (the first varint of every message).
+#[allow(private_interfaces)]
+pub trait Decode<R>: Sized {
+    fn decode(msg_type: i32, reader: &mut internal::ReaderCore) -> Result<Self, ParseError>;
+}

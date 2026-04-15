@@ -1,7 +1,7 @@
 use crate::{
-    ParseError,
     data::{ArmourType, Gun, PlayerAmmo},
-    internal::{ReaderCore, WriterCore},
+    internal::{DecodeCore, EncodeCore, ReaderCore, WriterCore},
+    ParseError,
 };
 
 /// Represents the game state of a player/client.
@@ -16,8 +16,8 @@ pub struct PlayerState {
     pub ammo: PlayerAmmo,
 }
 
-impl PlayerState {
-    pub(crate) fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
+impl DecodeCore for PlayerState {
+    fn decode(r: &mut ReaderCore) -> Result<Self, ParseError> {
         let life_sequence = r.get_int()?;
         let health = r.get_int()?;
         let max_health = r.get_int()?;
@@ -47,8 +47,10 @@ impl PlayerState {
             ammo,
         })
     }
+}
 
-    pub(crate) fn encode(&self, w: &mut WriterCore) {
+impl EncodeCore for PlayerState {
+    fn encode(&self, w: &mut WriterCore) {
         w.put_int(self.life_sequence);
         w.put_int(self.health);
         w.put_int(self.max_health);

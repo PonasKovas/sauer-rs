@@ -1,3 +1,5 @@
+#![allow(private_interfaces)]
+
 use crate::data;
 use crate::data::*;
 use cube_string::CubeString;
@@ -31,9 +33,6 @@ macro_rules! impl_from_variant {
     };
 }
 
-// Implements `From` for ClientPacket and directly to Chan1Server as requested.
-// Note: We implement this individually instead of a generic `impl<T: Into<ClientPacket>> From<T> for Chan1Server`
-// to avoid conflicting with the standard library's blanket `From<T> for T` (Compiler Error E0119).
 macro_rules! impl_client_packet {
     ($struct:ident, $variant:ident) => {
         impl From<$struct> for ClientPacket {
@@ -41,14 +40,6 @@ macro_rules! impl_client_packet {
                 Self::$variant(v)
             }
         }
-        // impl From<$struct> for Chan1Server {
-        //     fn from(v: $struct) -> Self {
-        //         Self::Client(Client {
-        //             client_num: -1, // Dummy value when directly converted
-        //             packet: ClientPacket::$variant(v),
-        //         })
-        //     }
-        // }
     };
 }
 
