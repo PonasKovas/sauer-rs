@@ -7,12 +7,6 @@ use crate::internal::{
 use crate::route::{C2S, Chan0, S2C};
 use crate::{Decode, Encode, ParseError};
 
-// =====================================================================
-// CHANNEL 0: PHYSICS AND MOVEMENT (High Frequency)
-// =====================================================================
-
-// -- Packet structs ---------------------------------------------------
-
 /// `N_POS` Constant physical position updates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Position {

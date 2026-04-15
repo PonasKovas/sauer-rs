@@ -1,221 +1,293 @@
+use crate::internal::{
+    SauerRead, SauerWrite,
+    constants::{DMF, DNF},
+};
+use cube_string::CubeString;
 use num_enum::TryFromPrimitive;
 
 mod base_info;
 mod base_spawn;
-mod client_resume_state;
-mod client_token_state;
-mod dropped_token;
 mod edit_var_value;
-mod flag_spawn;
 mod flag_state;
-mod hit_info;
-mod item_spawn;
-mod master_client;
-mod player_ammo;
 mod player_position;
-mod player_state;
-mod sel_info;
-mod stolen_token;
-mod team_info;
-mod token_base_spawn;
-mod token_state;
-mod vector3;
+pub(crate) mod vec3;
 
 pub use base_info::BaseInfo;
 pub use base_spawn::BaseSpawn;
-pub use client_resume_state::{ClientResumeState, ClientState};
-pub use client_token_state::ClientTokenState;
-pub use dropped_token::DroppedToken;
 pub use edit_var_value::EditVarValue;
-pub use flag_spawn::FlagSpawn;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
-pub use hit_info::HitInfo;
-pub use item_spawn::ItemSpawn;
-pub use master_client::{MasterClient, Privilege};
-pub use player_ammo::PlayerAmmo;
 pub use player_position::{PlayerPosition, PositionPhysState};
-pub use player_state::PlayerState;
-pub use sel_info::SelInfo;
-pub use stolen_token::StolenToken;
-pub use team_info::TeamInfo;
-pub use token_base_spawn::TokenBaseSpawn;
-pub use token_state::TokenState;
-pub use vector3::Vector3;
+pub use vec3::Vec3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum Gun {
-    Fist = 0,
-    Sg = 1,
-    Cg = 2,
-    Rl = 3,
-    Rifle = 4,
-    Gl = 5,
-    Pistol = 6,
+macro_rules! make_enum {
+    ($(#[$($attr:meta)*])*
+    [$repr:ty] $name:ident { $( $(#[$($variant_attr:meta)*])* $variant:ident = $num:literal, )+ } ) => {
+        $(#[$($attr)*])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+        #[repr($repr)]
+        pub enum $name {
+            $( $(#[$($variant_attr)*])* $variant = $num, )+
+        }
+
+        impl SauerWrite for $name {
+            fn sauer_write(&self, out: &mut Vec<u8>) {
+                (*self as $repr).sauer_write(out);
+            }
+        }
+        impl SauerRead for $name {
+            fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+                let repr = <$repr>::sauer_read(reader)?;
+
+                Self::try_from(repr)
+                    .map_err(|_| crate::ParseError::InvalidEnumValue {
+                        value: repr,
+                        enum_name: stringify!($name),
+                    })
+            }
+        }
+    };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum ItemType {
-    Shells = 8,
-    Bullets = 9,
-    Rockets = 10,
-    Rounds = 11,
-    Grenades = 12,
-    Cartridges = 13,
-    Health = 14,
-    Boost = 15,
-    GreenArmour = 16,
-    YellowArmour = 17,
-    Quad = 18,
-}
+make_enum!([i32] Gun {
+    Fist = 0, Sg = 1, Cg = 2, Rl = 3, Rifle = 4, Gl = 5, Pistol = 6,
+});
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum MasterMode {
-    Open = 0,
-    Veto = 1,
-    Locked = 2,
-    Private = 3,
-    Password = 4,
-    Auth = 5,
-}
+make_enum!([i32] ItemType {
+    Shells = 8, Bullets = 9, Rockets = 10, Rounds = 11, Grenades = 12,
+    Cartridges = 13, Health = 14, Boost = 15, GreenArmour = 16,
+    YellowArmour = 17, Quad = 18,
+});
 
-/// Player model selection (0-4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum PlayerModel {
-    MrFixit = 0,
-    Snoutx10k = 1,
-    Ogro2 = 2,
-    Inky = 3,
-    CaptainCannon = 4,
-}
+make_enum!([i32] MasterMode {
+    Open = 0, Veto = 1, Locked = 2, Private = 3, Password = 4, Auth = 5,
+});
 
-/// Game mode identifier, including local-only modes (negative values).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum GameMode {
-    Sp = -3,
-    Dmsp = -2,
-    Demo = -1,
-    Ffa = 0,
-    CoopEdit = 1,
-    TeamPlay = 2,
-    Instagib = 3,
-    InstaTeam = 4,
-    Efficiency = 5,
-    EfficTeam = 6,
-    Tactics = 7,
-    TacTeam = 8,
-    Capture = 9,
-    RegenCapture = 10,
-    Ctf = 11,
-    InstaCTF = 12,
-    Protect = 13,
-    InstaProtect = 14,
-    Hold = 15,
-    InstaHold = 16,
-    EfficCTF = 17,
-    EfficProtect = 18,
-    EfficHold = 19,
-    Collect = 20,
-    InstaCollect = 21,
-    EfficCollect = 22,
-}
+make_enum!([i32] PlayerModel {
+    MrFixit = 0, Snoutx10k = 1, Ogro2 = 2, Inky = 3, CaptainCannon = 4,
+});
 
+make_enum!(
+    /// Game mode identifier, including local-only modes (negative values).
+    [i32] GameMode {
+    Sp = -3, Dmsp = -2, Demo = -1, Ffa = 0, CoopEdit = 1, TeamPlay = 2,
+    Instagib = 3, InstaTeam = 4, Efficiency = 5, EfficTeam = 6,
+    Tactics = 7, TacTeam = 8, Capture = 9, RegenCapture = 10, Ctf = 11,
+    InstaCTF = 12, Protect = 13, InstaProtect = 14, Hold = 15,
+    InstaHold = 16, EfficCTF = 17, EfficProtect = 18, EfficHold = 19,
+    Collect = 20, InstaCollect = 21, EfficCollect = 22,
+});
+
+make_enum!(
 /// Server-side AI bot type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum AiType {
-    None = 0,
-    Bot = 1,
-}
+[i32] AiType {
+    None = 0, Bot = 1,
+});
 
+make_enum!(
 /// Player armour type, determining damage reduction percentage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum ArmourType {
+[i32] ArmourType {
     /// Blue armour: 20% damage reduction.
     Blue = 0,
     /// Green armour: 40% damage reduction.
     Green = 1,
     /// Yellow armour: 60% damage reduction.
     Yellow = 2,
-}
+});
 
+make_enum!(
 /// Physical movement/contact state of an entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive, Default)]
-#[repr(u8)]
-pub enum PhysState {
-    #[default]
-    Float = 0,
-    Fall = 1,
-    Slide = 2,
-    Slope = 3,
-    Floor = 4,
-    StepUp = 5,
-    StepDown = 6,
-    Bounce = 7,
-}
+#[derive(Default)]
+[u8] PhysState {
+    #[default] Float = 0, Fall = 1, Slide = 2, Slope = 3, Floor = 4,
+    StepUp = 5, StepDown = 6, Bounce = 7,
+});
 
+make_enum!(
 /// Cube face orientation used in cooperative editing (O_LEFT through O_TOP).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum Orient {
-    Left = 0,
-    Right = 1,
-    Back = 2,
-    Front = 3,
-    Bottom = 4,
-    Top = 5,
-}
+[i32] Orient {
+    Left = 0, Right = 1, Back = 2, Front = 3, Bottom = 4, Top = 5,
+});
 
+make_enum!(
 /// Map entity type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum EntityType {
-    Empty = 0,
-    Light = 1,
-    MapModel = 2,
-    PlayerStart = 3,
-    EnvMap = 4,
-    Particles = 5,
-    MapSound = 6,
-    SpotLight = 7,
-    IShells = 8,
-    IBullets = 9,
-    IRockets = 10,
-    IRounds = 11,
-    IGrenades = 12,
-    ICartridges = 13,
-    IHealth = 14,
-    IBoost = 15,
-    IGreenArmour = 16,
-    IYellowArmour = 17,
-    IQuad = 18,
-    Teleport = 19,
-    TeleDest = 20,
-    Monster = 21,
-    Carrot = 22,
-    JumpPad = 23,
-    Base = 24,
-    RespawnPoint = 25,
-    Box = 26,
-    Barrel = 27,
-    Platform = 28,
-    Elevator = 29,
-    Flag = 30,
-}
+[i32] EntityType {
+    Empty = 0, Light = 1, MapModel = 2, PlayerStart = 3, EnvMap = 4,
+    Particles = 5, MapSound = 6, SpotLight = 7, IShells = 8, IBullets = 9,
+    IRockets = 10, IRounds = 11, IGrenades = 12, ICartridges = 13,
+    IHealth = 14, IBoost = 15, IGreenArmour = 16, IYellowArmour = 17,
+    IQuad = 18, Teleport = 19, TeleDest = 20, Monster = 21, Carrot = 22,
+    JumpPad = 23, Base = 24, RespawnPoint = 25, Box = 26, Barrel = 27,
+    Platform = 28, Elevator = 29, Flag = 30,
+});
 
+make_enum!(
 /// Edit face operation mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-#[repr(i32)]
-pub enum EditFaceMode {
+[i32] EditFaceMode {
     /// Push or pull cube edges.
     Default = 0,
     /// Fill the selected region.
     Fill = 1,
     /// Corner edit mode.
     Corner = 2,
+});
+
+make_enum!([i32] ClientState {
+    Alive = 0, Dead = 1, Spawning = 2, Lagged = 3, Editing = 4, Spectator = 5,
+});
+
+make_enum!([i32] Privilege {
+    None = 0, Auth = 1, Master = 2, Admin = 3,
+});
+
+macro_rules! make_struct {
+    ($(#[$($attr:meta)*])*
+    $name:ident { $( $(#[$($variant_attr:meta)*])* $field:ident : $type:ty $(=> $ser:path, $de:path)? ),+ $(,)? } ) => {
+        $(#[$($attr)*])*
+        #[derive(Debug, Clone, PartialEq)]
+        pub struct $name {
+            $(
+                $(#[$($variant_attr)*])*
+                $field : $type,
+            )+
+        }
+
+        impl SauerWrite for $name {
+            fn sauer_write(&self, out: &mut Vec<u8>) {
+                $(
+                    make_struct!(@serialize self.$field, out $( => $ser )? );
+                )+
+            }
+        }
+        impl SauerRead for $name {
+            fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+                Ok(Self{
+                    $(
+                        $field : make_struct!(@deserialize $type, reader $( => $de )? ),
+                    )+
+                })
+            }
+        }
+    };
+    (@serialize $var:expr, $out:expr) => {
+        $var.sauer_write($out);
+    };
+    (@serialize $var:expr, $out:expr => $ser:path) => {
+        $ser (&$var, $out);
+    };
+    (@deserialize $type:ty, $reader:expr) => {
+        <$type>::sauer_read($reader)?
+    };
+    (@deserialize $type:ty, $reader:expr => $de:path) => {
+        $de($reader)?
+    };
 }
+
+make_struct!(
+/// State for a client resuming a game (e.g., late join).
+ClientResumeState {
+    client_num: i32,
+    state: ClientState,
+    frags: i32,
+    flags: i32,
+    deaths: i32,
+    quad_millis: i32,
+    player_state: PlayerState,
+});
+
+make_struct!(ClientTokenState {
+    client_num: i32,
+    tokens: i32,
+});
+
+make_struct!(DroppedToken {
+    id: i32,
+    team: i32,
+    yaw: i32,
+});
+
+make_struct!(
+/// Information to represent a spawned item in the world.
+ItemSpawn {
+    item_index: i32,
+    item_type: ItemType,
+});
+
+make_struct!(
+/// Represents a master/admin client configuration broadcast to everyone.
+MasterClient {
+    client_num: i32,
+    privilege: Privilege,
+});
+
+make_struct!(
+/// Ammo counts for each weapon slot.
+PlayerAmmo {
+    shotgun: i32,
+    chaingun: i32,
+    rocket_launcher: i32,
+    rifle: i32,
+    grenade_launcher: i32,
+    pistol: i32,
+});
+
+make_struct!(
+/// Represents the game state of a player/client.
+PlayerState {
+    life_sequence: i32,
+    health: i32,
+    max_health: i32,
+    armour: i32,
+    armour_type: ArmourType,
+    gun_select: Gun,
+    ammo: PlayerAmmo,
+});
+
+make_struct!(
+/// Cube selection information for cooperative editing geometry modifications.
+SelInfo {
+    o: Vec3<i32>,
+    s: Vec3<i32>,
+    grid: i32,
+    orient: Orient,
+    cx: i32,
+    cxs: i32,
+    cy: i32,
+    cys: i32,
+    corner: i32,
+});
+
+make_struct!(
+/// Contains ray/hit information from a weapon shot or explosion.
+HitInfo {
+    target_cn: i32,
+    life_sequence: i32,
+    dist: f32,
+    rays: i32,
+    dir: Vec3<f32> => vec3::write_quantized<DNF>, vec3::read_quantized<DNF>,
+});
+
+make_struct!(StolenToken { id: i32, yaw: i32 });
+
+make_struct!(
+/// Stores the number of frags a particular team has.
+TeamInfo {
+    team: CubeString,
+    frags: i32,
+});
+
+make_struct!(TokenBaseSpawn {
+    team: i32,
+    pos: Vec3<f32> => vec3::write_quantized<DMF>, vec3::read_quantized<DMF>,
+});
+
+make_struct!(TokenState {
+    id: i32,
+    team: i32,
+    yaw: i32,
+    pos: Vec3<f32> => vec3::write_quantized<DMF>, vec3::read_quantized<DMF>,
+});
+
+make_struct!(FlagSpawn {
+    team: i32,
+    pos: Vec3<f32> => vec3::write_quantized<DMF>, vec3::read_quantized<DMF>,
+});

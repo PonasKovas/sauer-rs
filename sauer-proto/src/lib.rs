@@ -5,14 +5,6 @@
 //! protocol.  It covers all three ENet channels used by the game as well as
 //! the out-of-band ExtInfo UDP protocol.
 //!
-//! # Channels
-//!
-//! | Constant               | Value | Purpose                              |
-//! |------------------------|-------|--------------------------------------|
-//! | [`CHANNEL_POSITIONS`]  | `0`   | High-frequency physics / movement    |
-//! | [`CHANNEL_MESSAGES`]   | `1`   | Game state, events, chat (reliable)  |
-//! | [`CHANNEL_MAPS`]       | `2`   | Bulk file transfers (demo, map)      |
-//!
 //! # Decoding
 //!
 //! Use [`Reader`] to read a raw ENet packet buffer:
@@ -84,14 +76,6 @@ pub const CHANNEL_MAPS: u8 = 2;
 
 /// Wire protocol version number sent in the initial [`Chan1Server::ServInfo`] handshake.
 pub const PROTOCOL_VERSION: i32 = 260;
-
-// ---------------------------------------------------------------------------
-// Public codec traits for full, standalone protocol packets.
-//
-// Generic over a *route* marker (e.g. `S2C<Chan1>`, `C2S<Chan0>`) so
-// that the same struct can implement `Encode` for multiple routes if the
-// packet legitimately travels in both directions.
-// ---------------------------------------------------------------------------
 
 /// Serialize a packet onto a wire-format buffer for route `R`.
 ///

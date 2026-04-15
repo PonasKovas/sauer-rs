@@ -1,4 +1,7 @@
+/// Quantization scale for world locations.
 pub const DMF: f32 = 16.0;
+/// Quantization scale for normalized vectors.
+pub const DNF: f32 = 100.0;
 
 pub const N_CONNECT: i32 = 0;
 pub const N_SERVINFO: i32 = 1;

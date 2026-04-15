@@ -1,4 +1,4 @@
-use crate::data::Vector3;
+use crate::data::Vec3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlagState {
@@ -11,13 +11,8 @@ pub struct FlagState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FlagStateOwner {
-    Owned {
-        owner: i32,
-    },
-    Dropped {
-        dropped: bool,
-        drop_loc: Vector3<f32>,
-    },
+    Owned { owner: i32 },
+    Dropped { dropped: bool, drop_loc: Vec3<f32> },
 }
 
 #[derive(Debug, Clone, PartialEq)]

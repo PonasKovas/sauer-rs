@@ -1,7 +1,6 @@
-use std::marker::PhantomData;
-
 use crate::Encode;
 use crate::internal::{WriterCore, constants::*};
+use std::marker::PhantomData;
 
 /// Sink-based serializer bound to a specific protocol route.
 ///
