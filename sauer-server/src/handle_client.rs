@@ -4,9 +4,10 @@ use bytes::Bytes;
 use cube_string::{Color, CubeString, IntoCubeStringLossy};
 use enet_rs::PeerReceiver;
 use sauer_proto::{
-    Chan0Client, Chan1Client, Chan1Server, Reader,
+    Chan0Client, Chan1Client, Reader,
+    channel1::{MapChange, ServInfo, SpawnState, Welcome},
     data::{ArmourType, GameMode, Gun, PlayerAmmo, PlayerState},
-    protocol_route::{C2S, Chan0, Chan1},
+    route::{C2S, Chan0, Chan1},
 };
 use std::{collections::VecDeque, sync::Arc};
 use tracing::info;
@@ -21,7 +22,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 
     server
         .get_client(cn)
-        .send_chan1(ServInfo {
+        .send_chan1(&ServInfo {
             client_num: cn as i32,
             protocol: sauer_proto::PROTOCOL_VERSION,
             session_id: 0,
@@ -38,26 +39,17 @@ pub(crate) async fn handle_client<P: Plugin>(
         let pkt = rx.recv().await?;
 
         match pkt {
-            Packet::Chan1(Chan1Client::Connect {
-                name,
-                player_model: _,
-                password_hash: _,
-                auth_desc: _,
-                auth_name: _,
-            }) => break 'outer name,
+            Packet::Chan1(Chan1Client::Connect(connect)) => break 'outer connect.name,
             _ => continue,
         };
     };
 
     info!("{player_name} connected");
 
+    server.get_client(cn).send_chan1(&Welcome).await;
     server
         .get_client(cn)
-        .send_chan1(&Chan1Server::Welcome)
-        .await;
-    server
-        .get_client(cn)
-        .send_chan1(&Chan1Server::MapChange {
+        .send_chan1(&MapChange {
             map_name: "complex".lossy_cubestring(),
             mode: GameMode::CoopEdit,
             has_items: true,
@@ -66,7 +58,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 
     server
         .get_client(cn)
-        .send_chan1(&Chan1Server::SpawnState {
+        .send_chan1(&SpawnState {
             client_num: 0,
             state: PlayerState {
                 life_sequence: 0,
@@ -124,12 +116,14 @@ impl SauerReceiver {
 
             match pkt.channel {
                 sauer_proto::CHANNEL_POSITIONS => {
-                    for msg in Reader::<C2S<Chan0>>::new(&pkt.data) {
+                    let mut reader = Reader::<C2S<Chan0>>::new(&pkt.data);
+                    while let Some(msg) = reader.next() {
                         self.buffer.push_back(Packet::Chan0(msg?));
                     }
                 }
                 sauer_proto::CHANNEL_MESSAGES => {
-                    for msg in Reader::<C2S<Chan1>>::new(&pkt.data) {
+                    let mut reader = Reader::<C2S<Chan1>>::new(&pkt.data);
+                    while let Some(msg) = reader.next() {
                         self.buffer.push_back(Packet::Chan1(msg?));
                     }
                 }
