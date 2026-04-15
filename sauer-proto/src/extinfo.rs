@@ -6,7 +6,7 @@
 use crate::{
     ParseError,
     data::{ClientState, Gun, Privilege},
-    internal::{ReaderCore, WriterCore},
+    internal::{SauerRead, SauerWrite},
 };
 use constants::*;
 use cube_string::CubeString;
@@ -26,37 +26,37 @@ pub enum ExtInfoRequest {
 
 impl ExtInfoRequest {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut w = WriterCore::new();
-        w.put_byte(0);
+        let mut w = Vec::new();
+        w.push(0);
 
         match self {
             Self::Uptime => {
-                w.put_int(EXT_UPTIME);
+                EXT_UPTIME.sauer_write(&mut w);
             }
             Self::PlayerStats { client_number } => {
-                w.put_int(EXT_PLAYERSTATS);
-                w.put_int(client_number.unwrap_or(-1));
+                EXT_PLAYERSTATS.sauer_write(&mut w);
+                client_number.unwrap_or(-1).sauer_write(&mut w);
             }
             Self::TeamScore => {
-                w.put_int(EXT_TEAMSCORE);
+                EXT_TEAMSCORE.sauer_write(&mut w);
             }
         }
 
-        w.buffer
+        w
     }
-    pub fn from_bytes(buf: &[u8]) -> Result<Self, ParseError> {
-        let mut r = ReaderCore::new(buf);
+    pub fn from_bytes(mut buf: &[u8]) -> Result<Self, ParseError> {
+        let r = &mut buf;
 
-        if r.get_int()? != 0 {
+        if i32::sauer_read(r)? != 0 {
             return Err(ParseError::InvalidExtInfo);
         }
 
-        let msg_type = r.get_int()?;
+        let msg_type = i32::sauer_read(r)?;
 
         Ok(match msg_type {
             EXT_UPTIME => Self::Uptime,
             EXT_PLAYERSTATS => {
-                let cn = r.get_int()?;
+                let cn = i32::sauer_read(r)?;
                 Self::PlayerStats {
                     client_number: if cn < 0 { None } else { Some(cn) },
                 }
@@ -111,27 +111,27 @@ pub struct ScoreData {
 }
 impl ExtInfoResponse {
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut w = WriterCore::new();
-        w.put_byte(0);
+        let mut w = Vec::new();
+        w.push(0);
 
         match self {
             Self::Uptime { seconds } => {
-                w.put_int(EXT_UPTIME);
-                w.put_int(EXT_ACK);
-                w.put_int(EXT_VERSION);
-                w.put_int(*seconds);
+                EXT_UPTIME.sauer_write(&mut w);
+                EXT_ACK.sauer_write(&mut w);
+                EXT_VERSION.sauer_write(&mut w);
+                seconds.sauer_write(&mut w);
             }
             Self::PlayerStats { client_number, ok } => {
-                w.put_int(EXT_PLAYERSTATS);
-                w.put_int(client_number.unwrap_or(-1));
-                w.put_int(EXT_ACK);
-                w.put_int(EXT_VERSION);
-                w.put_int(if *ok { EXT_NO_ERROR } else { EXT_ERROR });
+                EXT_PLAYERSTATS.sauer_write(&mut w);
+                client_number.unwrap_or(-1).sauer_write(&mut w);
+                EXT_ACK.sauer_write(&mut w);
+                EXT_VERSION.sauer_write(&mut w);
+                if *ok { EXT_NO_ERROR } else { EXT_ERROR }.sauer_write(&mut w);
             }
             Self::PlayerStatsIds { ids } => {
-                w.put_int(EXT_PLAYERSTATS_RESP_IDS);
+                EXT_PLAYERSTATS_RESP_IDS.sauer_write(&mut w);
                 for id in ids {
-                    w.put_int(*id);
+                    id.sauer_write(&mut w);
                 }
             }
             Self::PlayerStatsStats {
@@ -151,23 +151,23 @@ impl ExtInfoResponse {
                 state,
                 ip,
             } => {
-                w.put_int(EXT_PLAYERSTATS_RESP_STATS);
-                w.put_int(*client_num);
-                w.put_int(*ping);
-                w.put_string(name);
-                w.put_string(team);
-                w.put_int(*frags);
-                w.put_int(*flags);
-                w.put_int(*deaths);
-                w.put_int(*teamkills);
-                w.put_int(*damage);
-                w.put_int(*health);
-                w.put_int(*armour);
-                w.put_int(*gunselect as i32);
-                w.put_int(*privilege as i32);
-                w.put_int(*state as i32);
+                EXT_PLAYERSTATS_RESP_STATS.sauer_write(&mut w);
+                client_num.sauer_write(&mut w);
+                ping.sauer_write(&mut w);
+                name.sauer_write(&mut w);
+                team.sauer_write(&mut w);
+                frags.sauer_write(&mut w);
+                flags.sauer_write(&mut w);
+                deaths.sauer_write(&mut w);
+                teamkills.sauer_write(&mut w);
+                damage.sauer_write(&mut w);
+                health.sauer_write(&mut w);
+                armour.sauer_write(&mut w);
+                (*gunselect as i32).sauer_write(&mut w);
+                (*privilege as i32).sauer_write(&mut w);
+                (*state as i32).sauer_write(&mut w);
                 if let Some(ip) = ip {
-                    w.put_bytes(ip);
+                    w.extend_from_slice(ip);
                 }
             }
             Self::TeamScore {
@@ -175,64 +175,65 @@ impl ExtInfoResponse {
                 remaining_time,
                 scores,
             } => {
-                w.put_int(EXT_TEAMSCORE);
-                w.put_int(EXT_ACK);
-                w.put_int(EXT_VERSION);
-                w.put_int(if scores.is_some() {
+                EXT_TEAMSCORE.sauer_write(&mut w);
+                EXT_ACK.sauer_write(&mut w);
+                EXT_VERSION.sauer_write(&mut w);
+                if scores.is_some() {
                     EXT_NO_ERROR
                 } else {
                     EXT_ERROR
-                });
-                w.put_int(*game_mode);
-                w.put_int(*remaining_time);
+                }
+                .sauer_write(&mut w);
+                game_mode.sauer_write(&mut w);
+                remaining_time.sauer_write(&mut w);
 
                 if let Some(scores) = scores {
                     for score in scores {
-                        w.put_string(&score.team_name);
-                        w.put_int(score.score);
+                        score.team_name.sauer_write(&mut w);
+                        score.score.sauer_write(&mut w);
                     }
-                    w.put_int(-1);
+                    (-1).sauer_write(&mut w);
                 }
             }
         }
 
-        w.buffer
+        w
     }
 
-    pub fn from_bytes(buf: &[u8]) -> Result<Self, ParseError> {
-        let mut r = ReaderCore::new(buf);
+    pub fn from_bytes(mut buf: &[u8]) -> Result<Self, ParseError> {
+        let r = &mut buf;
 
-        if r.get_int()? != 0 {
+        if i32::sauer_read(r)? != 0 {
             return Err(ParseError::InvalidExtInfo);
         }
 
-        let msg_type = r.get_int()?;
+        let msg_type = i32::sauer_read(r)?;
 
         Ok(match msg_type {
             EXT_UPTIME => {
-                if r.get_int()? != EXT_ACK {
+                if i32::sauer_read(r)? != EXT_ACK {
                     return Err(ParseError::InvalidExtInfo);
                 }
-                let version = r.get_int()?;
+                let version = i32::sauer_read(r)?;
                 if version != EXT_VERSION {
                     return Err(ParseError::ExtInfoVersionMismatch(version));
                 }
 
-                let seconds = r.get_int()?;
+                let seconds = i32::sauer_read(r)?;
                 Self::Uptime { seconds }
             }
             EXT_PLAYERSTATS => {
-                let cn = r.get_int()?;
+                let cn = i32::sauer_read(r)?;
 
-                if r.get_int()? != EXT_ACK {
+                if i32::sauer_read(r)? != EXT_ACK {
                     return Err(ParseError::InvalidExtInfo);
                 }
-                let version = r.get_int()?;
+                let version = i32::sauer_read(r)?;
                 if version != EXT_VERSION {
                     return Err(ParseError::ExtInfoVersionMismatch(version));
                 }
 
-                let ok = r.get_int()? == EXT_NO_ERROR;
+                let ok = i32::sauer_read(r)? == EXT_NO_ERROR;
 
                 Self::PlayerStats {
                     client_number: if cn < 0 { None } else { Some(cn) },
@@ -241,30 +242,30 @@ impl ExtInfoResponse {
             }
             EXT_PLAYERSTATS_RESP_IDS => {
                 let mut ids = Vec::new();
-                while r.remaining() > 0 {
-                    ids.push(r.get_int()?);
+                while r.len() > 0 {
+                    ids.push(i32::sauer_read(r)?);
                 }
 
                 Self::PlayerStatsIds { ids }
             }
             EXT_PLAYERSTATS_RESP_STATS => {
-                let client_num = r.get_int()?;
-                let ping = r.get_int()?;
-                let name = r.get_string()?;
-                let team = r.get_string()?;
-                let frags = r.get_int()?;
-                let flags = r.get_int()?;
-                let deaths = r.get_int()?;
-                let teamkills = r.get_int()?;
-                let damage = r.get_int()?;
-                let health = r.get_int()?;
-                let armour = r.get_int()?;
-                let gunselect_val = r.get_int()?;
-                let privilege_val = r.get_int()?;
-                let state_val = r.get_int()?;
+                let client_num = i32::sauer_read(r)?;
+                let ping = i32::sauer_read(r)?;
+                let name = CubeString::sauer_read(r)?;
+                let team = CubeString::sauer_read(r)?;
+                let frags = i32::sauer_read(r)?;
+                let flags = i32::sauer_read(r)?;
+                let deaths = i32::sauer_read(r)?;
+                let teamkills = i32::sauer_read(r)?;
+                let damage = i32::sauer_read(r)?;
+                let health = i32::sauer_read(r)?;
+                let armour = i32::sauer_read(r)?;
+                let gunselect_val = i32::sauer_read(r)?;
+                let privilege_val = i32::sauer_read(r)?;
+                let state_val = i32::sauer_read(r)?;
 
-                let ip = if r.remaining() > 0 {
-                    Some([r.get_byte()?, r.get_byte()?, r.get_byte()?])
+                let ip = if r.len() > 0 {
+                    Some([u8::sauer_read(r)?, u8::sauer_read(r)?, u8::sauer_read(r)?])
                 } else {
                     None
                 };
@@ -303,26 +304,26 @@ impl ExtInfoResponse {
                 }
             }
             EXT_TEAMSCORE => {
-                if r.get_int()? != EXT_ACK {
+                if i32::sauer_read(r)? != EXT_ACK {
                     return Err(ParseError::InvalidExtInfo);
                 }
-                let version = r.get_int()?;
+                let version = i32::sauer_read(r)?;
                 if version != EXT_VERSION {
                     return Err(ParseError::ExtInfoVersionMismatch(version));
                 }
 
-                let error = r.get_int()? != EXT_NO_ERROR;
-                let game_mode = r.get_int()?;
-                let remaining_time = r.get_int()?;
+                let error = i32::sauer_read(r)? != EXT_NO_ERROR;
+                let game_mode = i32::sauer_read(r)?;
+                let remaining_time = i32::sauer_read(r)?;
 
                 let scores = if error {
                     None
                 } else {
                     let mut scores = Vec::new();
 
-                    while r.peek(1).unwrap_or(&[0xFF])[0] != 0xFF {
-                        let team_name = r.get_string()?;
-                        let score = r.get_int()?;
+                    while r.get(1).copied().unwrap_or(0xFF) != 0xFF {
+                        let team_name = CubeString::sauer_read(r)?;
+                        let score = i32::sauer_read(r)?;
 
                         scores.push(ScoreData { team_name, score });
                     }

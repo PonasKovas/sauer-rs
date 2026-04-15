@@ -50,7 +50,7 @@ mod reader;
 mod writer;
 
 pub mod data;
-// pub mod extinfo;
+pub mod extinfo;
 pub mod route;
 
 pub use error::ParseError;
