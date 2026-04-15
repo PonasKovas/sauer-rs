@@ -101,6 +101,9 @@ macro_rules! make_struct {
 }
 
 macro_rules! make_packet_enum {
+    // Getting the actual struct name, based on whether this is a
+    // duplicate variant (like NewMap) and whether its wrapped in Client
+    ////////////////////////////////////////////////////////////////////
     (@structname $variant:ident $client_wrapper:ident $DUPLICATE_STRUCT:ident) => {
         $client_wrapper::<$DUPLICATE_STRUCT>
     };
@@ -111,15 +114,18 @@ macro_rules! make_packet_enum {
         $variant
     };
 
+    ////////////////////////////////////////////////////////////////////
+    //
+    //
+
     // Helper to determine if a variant is wrapped at compile time
     (@is_wrapped ) => { false };
     (@is_wrapped $wrapper:ident) => { true };
 
 
-    // dont implement Encode Decode again for duplicates
-    (@impl_encode_decode $variant:ident, $ROUTE:path, $DUPLICATE_STRUCT:ident) => {
-        // Duplicate struct (e.g. NewMap) already gets its Encode/Decode from the main variant!
-    };
+    // Implementing Encode and Decode for the struct
+    ////////////////////////////////////////////////////////////////////
+    // 1. Unwrapped Base Struct
     (@impl_encode_decode $variant:ident, $ROUTE:path, ) => {
         impl crate::Encode<$ROUTE> for $variant {
             fn encode(&self, out: &mut Vec<u8>) {
@@ -131,11 +137,80 @@ macro_rules! make_packet_enum {
                 if client_number.is_some() {
                     return Err(crate::ParseError::BadClientWrapper);
                 }
-
-                Self::sauer_read(reader)
+                crate::internal::SauerRead::sauer_read(reader)
             }
         }
     };
+
+    // 2. Wrapped Base Struct
+    (@impl_encode_decode $variant:ident, $ROUTE:path, $client_wrapper:ident, ) => {
+        impl crate::Encode<$ROUTE> for $client_wrapper<$variant> {
+            fn encode(&self, out: &mut Vec<u8>) {
+                // Call the private trait, ensuring $variant doesn't need to impl Encode
+                crate::internal::SauerWrite::sauer_write(&self.packet, out);
+            }
+            fn requires_client_wrapper(&self) -> Option<i32> {
+                Some(self.client_num)
+            }
+        }
+        impl crate::Decode<$ROUTE> for $client_wrapper<$variant> {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
+                match client_number {
+                    None => {
+                        let mut temp = *reader;
+                        let msg_id = <i32 as crate::internal::SauerRead>::sauer_read(&mut temp)?;
+                        Err(crate::ParseError::MissingClientWrapper {
+                            message_type: crate::internal::msg_id_to_name(msg_id),
+                        })
+                    }
+                    Some(client_num) => Ok(Self {
+                        client_num,
+                        // Call the private trait here too
+                        packet: <$variant as crate::internal::SauerRead>::sauer_read(reader)?,
+                    }),
+                }
+            }
+        }
+    };
+
+    // 3. Unwrapped Duplicate Struct
+    (@impl_encode_decode $variant:ident, $ROUTE:path, , $DUPLICATE_STRUCT:ident) => {
+        // Do nothing. The base struct already implements Encode/Decode for this route!
+    };
+
+    // 4. Wrapped Duplicate Struct (e.g. NewMap)
+    (@impl_encode_decode $variant:ident, $ROUTE:path, $client_wrapper:ident, $DUPLICATE_STRUCT:ident) => {
+        impl crate::Encode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
+            fn encode(&self, out: &mut Vec<u8>) {
+                crate::internal::SauerWrite::sauer_write(&self.packet, out);
+            }
+            fn requires_client_wrapper(&self) -> Option<i32> {
+                Some(self.client_num)
+            }
+        }
+        impl crate::Decode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
+                match client_number {
+                    None => {
+                        let mut temp = *reader;
+                        let msg_id = <i32 as crate::internal::SauerRead>::sauer_read(&mut temp)?;
+                        Err(crate::ParseError::MissingClientWrapper {
+                            message_type: crate::internal::msg_id_to_name(msg_id),
+                        })
+                    }
+                    Some(client_num) => Ok(Self {
+                        client_num,
+                        packet: <$DUPLICATE_STRUCT as crate::internal::SauerRead>::sauer_read(reader)?,
+                    }),
+                }
+            }
+        }
+    };
+    ////////////////////////////////////////////////////////////////////
+    //
+    //
+
+    // API arm
     (
         $(#[$($attr:meta)*])*
         [ $ROUTE:ty ]
@@ -172,7 +247,7 @@ macro_rules! make_packet_enum {
                 }
             }
 
-            make_packet_enum!(@impl_encode_decode $variant, $ROUTE, $( $($DUPLICATE_STRUCT)? )?);
+            make_packet_enum!(@impl_encode_decode $variant, $ROUTE, $( $client_wrapper , $( $DUPLICATE_STRUCT )? )?  );
         };)+
 
         impl crate::Encode<$ROUTE> for $name {

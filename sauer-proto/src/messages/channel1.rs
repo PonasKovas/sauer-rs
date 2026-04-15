@@ -1,11 +1,8 @@
-use crate::Decode;
-use crate::Encode;
 use crate::ParseError;
 use crate::data;
 use crate::data::*;
 use crate::error::ParseResultExt;
 use crate::internal::macros::{make_packet_enum, make_struct};
-use crate::internal::msg_id_to_name;
 use crate::internal::read_slice;
 use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
 use crate::route::{C2S, Chan1, S2C};
@@ -177,31 +174,6 @@ make_packet_enum!(
 pub struct Client<T> {
     pub client_num: i32,
     pub packet: T,
-}
-impl<R, T: Encode<R>> Encode<R> for Client<T> {
-    fn encode(&self, out: &mut Vec<u8>) {
-        self.packet.encode(out);
-    }
-    fn requires_client_wrapper(&self) -> Option<i32> {
-        Some(self.client_num)
-    }
-}
-impl<R, T: Decode<R>> Decode<R> for Client<T> {
-    fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
-        // Peek the tag for error context reporting
-        let mut temp_reader = *reader;
-        let msg_id = i32::sauer_read(&mut temp_reader)?;
-
-        match client_number {
-            None => Err(ParseError::MissingClientWrapper {
-                message_type: msg_id_to_name(msg_id),
-            }),
-            Some(client_num) => Ok(Self {
-                client_num,
-                packet: T::decode(reader, None)?, // Ensure T isn't wrapped twice
-            }),
-        }
-    }
 }
 
 // =====================================================================
