@@ -12,6 +12,12 @@ macro_rules! make_enum {
             $( $(#[$($variant_attr)*])* $variant = $num, )+
         }
 
+        const _: () = {
+        #[allow(unused)]
+        use crate::internal::{SauerWrite, SauerRead};
+        #[allow(unused)]
+        use crate::error::EnumConvertResultExt;
+
         impl SauerWrite for $name {
             fn sauer_write(&self, out: &mut Vec<u8>) {
                 (*self as $repr).sauer_write(out);
@@ -21,10 +27,11 @@ macro_rules! make_enum {
             fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
                 let repr = <$repr>::sauer_read(reader)?;
 
-                use crate::error::EnumConvertResultExt;
                 Self::try_from(repr).in_enum(stringify!($name))
             }
         }
+
+        };
     };
 }
 
@@ -47,6 +54,12 @@ macro_rules! make_struct {
             )*
         }
 
+        const _: () = {
+        #[allow(unused)]
+        use crate::internal::{SauerWrite, SauerRead};
+        #[allow(unused)]
+        use crate::error::ParseResultExt;
+
         impl SauerWrite for $name {
             fn sauer_write(&self, out: &mut Vec<u8>) {
                 $( $TAG.sauer_write(out); )?
@@ -61,9 +74,6 @@ macro_rules! make_struct {
                     crate::internal::check_tag(reader, $TAG)?;
                 )?
 
-                #[allow(unused)]
-                use crate::error::ParseResultExt;
-
                 Ok(Self{
                     $(
                         $field : make_struct!(@deserialize $type, reader $( => $de )? )
@@ -73,6 +83,8 @@ macro_rules! make_struct {
                 })
             }
         }
+
+        };
     };
     (@serialize $var:expr, $out:expr) => {
         $var.sauer_write($out);
@@ -108,17 +120,21 @@ macro_rules! make_packet_enum {
             )+
         }
 
+        const _: () = {
+        #[allow(unused)]
+        use crate::internal::{SauerWrite, SauerRead};
+
         $(
             impl From<$variant> for $name {
                 fn from(v: $variant) -> Self {
                     Self::$variant(v)
                 }
             }
-            impl Encode<$ROUTE> for $variant {}
-            impl Decode<$ROUTE> for $variant {
-                fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
+            impl crate::Encode<$ROUTE> for $variant {}
+            impl crate::Decode<$ROUTE> for $variant {
+                fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
                     if client_number.is_some() {
-                        return Err(ParseError::BadClientWrapper);
+                        return Err(crate::ParseError::BadClientWrapper);
                     }
 
                     Self::sauer_read(reader)
@@ -136,30 +152,32 @@ macro_rules! make_packet_enum {
             }
         }
         impl SauerRead for $name {
-            fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+            fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
                 let msg_type = i32::sauer_read(reader)?;
 
                 Ok(match msg_type {
                     $(
                         $TAG => Self::$variant($variant::sauer_read(reader)?),
                     )+
-                    other => return Err(ParseError::UnknownMessageType {
+                    other => return Err(crate::ParseError::UnknownMessageType {
                         route: stringify!($ROUTE),
                         id: other,
                     }),
                 })
             }
         }
-        impl Encode<$ROUTE> for $name {}
-        impl Decode<$ROUTE> for $name {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
+        impl crate::Encode<$ROUTE> for $name {}
+        impl crate::Decode<$ROUTE> for $name {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
                 if client_number.is_some() {
-                    return Err(ParseError::BadClientWrapper);
+                    return Err(crate::ParseError::BadClientWrapper);
                 }
 
                 Self::sauer_read(reader)
             }
         }
+
+        };
     };
 }
 

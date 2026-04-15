@@ -57,7 +57,7 @@ pub use error::ParseError;
 pub use messages::{
     channel0::{self, Chan0Client, Chan0Server},
     // channel1::{self, Chan1Client, Chan1Server},
-    // channel2::{self, Chan2Server},
+    channel2::{self, Chan2Server},
 };
 pub use reader::Reader;
 pub use writer::Writer;

@@ -1,5 +1,4 @@
 use crate::internal::{
-    SauerRead, SauerWrite,
     constants::{DMF, DNF},
     macros::{make_enum, make_struct},
 };

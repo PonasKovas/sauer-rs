@@ -1,9 +1,8 @@
-use crate::data::*;
 use crate::error::EnumConvertResultExt;
 use crate::internal::macros::{make_packet_enum, make_struct};
 use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
 use crate::route::{C2S, Chan0, S2C};
-use crate::{Decode, Encode, ParseError};
+use crate::{ParseError, data::*};
 
 make_packet_enum!(
 /// Server -> Client (Channel 0)
@@ -158,7 +157,7 @@ impl SauerWrite for Position {
     }
 }
 impl SauerRead for Position {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
         check_tag(reader, N_POS)?;
 
         let client_num = u32::sauer_read(reader)?;
