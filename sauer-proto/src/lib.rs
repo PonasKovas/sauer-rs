@@ -64,8 +64,6 @@ pub use writer::Writer;
 
 pub use cube_string;
 
-use crate::internal::{SauerRead, SauerWrite};
-
 /// Total number of ENet channels used by the Sauerbraten protocol.
 pub const CHANNEL_COUNT: usize = 3;
 
@@ -85,8 +83,9 @@ pub const PROTOCOL_VERSION: i32 = 260;
 /// fragments.  The route generic ensures that only packets valid for a
 /// given direction + channel can be written to a [`Writer`]
 /// bound to that route.
-#[allow(private_bounds)]
-pub trait Encode<R>: SauerWrite {
+pub trait Encode<R> {
+    #[doc(hidden)]
+    fn encode(&self, out: &mut Vec<u8>);
     /// If this packet must be wrapped in an `N_CLIENT` envelope on the wire,
     /// return `Some(client_num)`.  The [`Writer`] uses this to
     /// transparently batch client-wrapped messages.
@@ -97,8 +96,7 @@ pub trait Encode<R>: SauerWrite {
 }
 
 /// Deserialize a packet from wire-format bytes for route `R`.
-#[allow(private_bounds)]
-pub trait Decode<R>: SauerRead + Sized {
+pub trait Decode<R>: Sized {
     #[doc(hidden)]
     fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError>;
 }

@@ -1,8 +1,11 @@
+use crate::Decode;
+use crate::Encode;
 use crate::ParseError;
 use crate::data;
 use crate::data::*;
 use crate::error::ParseResultExt;
 use crate::internal::macros::{make_packet_enum, make_struct};
+use crate::internal::msg_id_to_name;
 use crate::internal::read_slice;
 use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
 use crate::route::{C2S, Chan1, S2C};
@@ -68,7 +71,30 @@ make_packet_enum!(
     [N_DROPTOKENS] DropTokens,
     [N_STEALTOKENS] StealTokens,
     [N_DEPOSITTOKENS] DepositTokensServer,
-    // [N_CLIENT] Client,
+
+    [N_SOUND] Sound [N_CLIENT Client],
+    [N_TEXT] Text [N_CLIENT Client],
+    [N_SWITCHNAME] SwitchName [N_CLIENT Client],
+    [N_SWITCHMODEL] SwitchModel [N_CLIENT Client],
+    [N_SPAWN] SpawnServer [N_CLIENT Client],
+    [N_GUNSELECT] GunSelect [N_CLIENT Client],
+    [N_TAUNT] Taunt [N_CLIENT Client],
+    [N_REMIP] Remip [N_CLIENT Client],
+    [N_EDITENT] EditEntServer [N_CLIENT Client],
+    [N_EDITVAR] EditVar [N_CLIENT Client],
+    [N_CLIENTPING] ClientPing [N_CLIENT Client],
+    [N_EDITMODE] EditModeServer [N_CLIENT Client],
+    [N_EDITF] EditFace [N_CLIENT Client],
+    [N_EDITT] EditTex [N_CLIENT Client],
+    [N_EDITM] EditMat [N_CLIENT Client],
+    [N_FLIP] Flip [N_CLIENT Client],
+    [N_COPY] CopyServer [N_CLIENT Client],
+    [N_PASTE] PasteServer [N_CLIENT Client],
+    [N_ROTATE] Rotate [N_CLIENT Client],
+    [N_REPLACE] Replace [N_CLIENT Client],
+    [N_DELCUBE] DelCube [N_CLIENT Client],
+    [N_EDITVSLOT] EditVSlot [N_CLIENT Client],
+    [N_NEWMAP] NewMapClient [N_CLIENT Client] [DUPLICATE NewMap],
 });
 
 make_packet_enum!(
@@ -146,32 +172,36 @@ make_packet_enum!(
     [N_DEPOSITTOKENS] DepositTokensClient,
 });
 
-/// `N_CLIENT` wrapped messages
+/// `N_CLIENT` Wrapper
 #[derive(Debug, Clone, PartialEq)]
-pub enum ClientPacket {
-    Sound(Sound),
-    Text(Text),
-    SwitchName(SwitchName),
-    SwitchModel(SwitchModel),
-    Spawn(SpawnServer),
-    GunSelect(GunSelect),
-    Taunt(Taunt),
-    Remip(Remip),
-    EditEnt(EditEntServer),
-    EditVar(EditVar),
-    ClientPing(ClientPing),
-    EditMode(EditModeServer),
-    EditFace(EditFace),
-    EditTex(EditTex),
-    EditMat(EditMat),
-    Flip(Flip),
-    Copy(CopyServer),
-    Paste(PasteServer),
-    Rotate(Rotate),
-    Replace(Replace),
-    DelCube(DelCube),
-    EditVSlot(EditVSlot),
-    NewMap(NewMap),
+pub struct Client<T> {
+    pub client_num: i32,
+    pub packet: T,
+}
+impl<R, T: Encode<R>> Encode<R> for Client<T> {
+    fn encode(&self, out: &mut Vec<u8>) {
+        self.packet.encode(out);
+    }
+    fn requires_client_wrapper(&self) -> Option<i32> {
+        Some(self.client_num)
+    }
+}
+impl<R, T: Decode<R>> Decode<R> for Client<T> {
+    fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
+        // Peek the tag for error context reporting
+        let mut temp_reader = *reader;
+        let msg_id = i32::sauer_read(&mut temp_reader)?;
+
+        match client_number {
+            None => Err(ParseError::MissingClientWrapper {
+                message_type: msg_id_to_name(msg_id),
+            }),
+            Some(client_num) => Ok(Self {
+                client_num,
+                packet: T::decode(reader, None)?, // Ensure T isn't wrapped twice
+            }),
+        }
+    }
 }
 
 // =====================================================================
@@ -523,25 +553,6 @@ make_struct!(
 // =====================================================================
 // SERVER-SPECIFIC STRUCTS
 // =====================================================================
-
-/// `N_CLIENT` Wrapper
-#[derive(Debug, Clone, PartialEq)]
-pub struct Client {
-    pub client_num: i32,
-    pub packet: ClientPacket,
-}
-impl SauerWrite for Client {
-    fn sauer_write(&self, _out: &mut Vec<u8>) {
-        // Will be implemented dynamically
-        todo!()
-    }
-}
-impl SauerRead for Client {
-    fn sauer_read(_reader: &mut &[u8]) -> Result<Self, ParseError> {
-        // Will be implemented dynamically
-        todo!()
-    }
-}
 
 make_struct!(
 /// `N_DEMOPACKET` Demo playback marker.

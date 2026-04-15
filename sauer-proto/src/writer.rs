@@ -55,9 +55,9 @@ impl<R> Writer<R> {
 
         // Write to the appropriate buffer
         if self.current_wrapper_client.is_some() {
-            msg.sauer_write(&mut self.wrapper);
+            msg.encode(&mut self.wrapper);
         } else {
-            msg.sauer_write(&mut self.main);
+            msg.encode(&mut self.main);
         }
     }
 
