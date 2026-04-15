@@ -868,6 +868,13 @@ impl SauerRead for SendDemoList {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
         check_tag(reader, N_SENDDEMOLIST)?;
         let count = i32::sauer_read(reader)?;
+        if count < 0 || count > 1024 {
+            return Err(ParseError::ValueOutOfRange {
+                field: "demo_count",
+                value: count,
+                max: 1024,
+            });
+        }
         let mut demos = Vec::with_capacity(count as usize);
         for _ in 0..count {
             demos.push(CubeString::sauer_read(reader)?);

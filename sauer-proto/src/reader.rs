@@ -63,7 +63,10 @@ impl<'a, R> Reader<'a, R> {
             let len = u32::sauer_read(&mut temp_slice)
                 .in_field("length")
                 .in_struct("N_CLIENT")?;
-            let end_addr = temp_slice.as_ptr() as usize + len as usize;
+
+            // Only allow the envelope to extend up to the end of our current slice
+            let clamped_len = (len as usize).min(temp_slice.len());
+            let end_addr = temp_slice.as_ptr() as usize + clamped_len as usize;
 
             self.active_wrapper = Some(ClientWrapperState {
                 client_num: cn,
