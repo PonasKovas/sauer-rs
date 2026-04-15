@@ -14,6 +14,11 @@ pub struct Server {
 }
 
 impl Server {
+    fn new() -> Self {
+        Self {
+            clients: DashMap::new(),
+        }
+    }
     pub fn get_client(&self, client_number: u32) -> dashmap::mapref::one::Ref<'_, u32, Peer> {
         match self.clients.get(&client_number) {
             Some(x) => x,

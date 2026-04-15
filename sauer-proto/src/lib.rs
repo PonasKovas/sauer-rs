@@ -13,17 +13,6 @@
 //! | [`CHANNEL_MESSAGES`]   | `1`   | Game state, events, chat (reliable)  |
 //! | [`CHANNEL_MAPS`]       | `2`   | Bulk file transfers (demo, map)      |
 //!
-//! # Protocol Routes
-//!
-//! The [`protocol_route`] module exposes four concrete route types that tie a
-//! channel and direction together:
-//!
-//! * [`protocol_route::S2C`]`<`[`protocol_route::Chan0`]`>` – server → client, channel 0
-//! * [`protocol_route::C2S`]`<`[`protocol_route::Chan0`]`>` – client → server, channel 0
-//! * [`protocol_route::S2C`]`<`[`protocol_route::Chan1`]`>` – server → client, channel 1
-//! * [`protocol_route::C2S`]`<`[`protocol_route::Chan1`]`>` – client → server, channel 1
-//! * [`protocol_route::S2C`]`<`[`protocol_route::Chan2`]`>` – server → client, channel 2
-//!
 //! # Decoding
 //!
 //! Use [`Reader`] as an iterator over messages in a raw ENet packet buffer:
@@ -35,8 +24,8 @@
 //!     let reader = Reader::<S2C<Chan1>>::new(raw);
 //!     for msg in reader {
 //!         match msg.expect("parse error") {
-//!             Chan1Server::ServMsg { text } => println!("server says: {text}"),
-//!             Chan1Server::MapChange { map_name, .. } => println!("map: {map_name}"),
+//!             Chan1Server::ServMsg(servmsg) => println!("server says: {}", servmsg.text),
+//!             Chan1Server::MapChange(map_change) => println!("map: {}", map_change.map_name),
 //!             _ => {}
 //!         }
 //!     }
@@ -48,14 +37,15 @@
 //! Use [`Writer`] to build an outgoing packet:
 //!
 //! ```rust
-//! use sauer_proto::{Writer, Chan1Client, protocol_route::{C2S, Chan1}};
+//! use sauer_proto::{Writer, protocol_route::{C2S, Chan1}};
+//! use sauer_proto::channel1::Text;
 //! use cube_string::CubeString;
 //!
 //! fn make_chat_packet(text: &str) -> Vec<u8> {
 //!     let mut writer = Writer::<C2S<Chan1>>::new();
-//!     writer.push(&Chan1Client::Text {
+//!     writer.push(&Text {
 //!         text: CubeString::from_str_lossy(text),
-//!     });
+//!     }.into());
 //!     writer.consume()
 //! }
 //! ```
@@ -70,7 +60,11 @@ mod reader;
 mod writer;
 
 pub use error::ParseError;
-pub use messages::{channel0::*, channel1::*, channel2::*};
+pub use messages::{
+    channel0::{self, Chan0Client, Chan0Server},
+    channel1::{self, Chan1Client, Chan1Server},
+    channel2::{self, Chan2Server},
+};
 pub use reader::Reader;
 pub use writer::Writer;
 

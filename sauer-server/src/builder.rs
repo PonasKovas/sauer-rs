@@ -63,9 +63,7 @@ impl<P: Plugin> ServerBuilder<P> {
         .await?;
 
         let plugin = Arc::new(self.plugin);
-        let server = Arc::new(Server {
-            clients: DashMap::new(),
-        });
+        let server = Arc::new(Server::new());
 
         let mut next_cn = 0;
 

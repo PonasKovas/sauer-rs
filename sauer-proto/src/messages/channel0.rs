@@ -16,24 +16,67 @@ pub enum Chan0Server {
     DemoPacket,
 
     /// `N_POS` Constant physical position updates.
-    Position { pos: PlayerPosition },
+    Position(Position),
 
     /// `N_TELEPORT` Sent to immediately teleport a player.
-    Teleport { client_num: i32, tp: i32, td: i32 },
+    Teleport(Teleport),
 
     /// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
-    JumpPad { client_num: i32, jp: i32 },
+    JumpPad(JumpPad),
 }
 
 /// Client -> Server (Channel 0)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Chan0Client {
     /// `N_POS` Standard physical position update sent constantly.
-    Position { pos: PlayerPosition },
+    Position(Position),
 
     /// `N_TELEPORT` Broadcasts the client teleporting.
-    Teleport { client_num: i32, tp: i32, td: i32 },
+    Teleport(Teleport),
 
     /// `N_JUMPPAD` Broadcasts the client hitting a jump pad.
-    JumpPad { client_num: i32, jp: i32 },
+    JumpPad(JumpPad),
+}
+
+// =====================================================================
+// EXTRACTED ENUM VARIANTS
+// =====================================================================
+
+/// `N_POS` Constant physical position updates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Position {
+    pub pos: PlayerPosition,
+}
+
+impl From<Position> for Chan0Server {
+    fn from(v: Position) -> Self {
+        Self::Position(v)
+    }
+}
+
+/// `N_TELEPORT` Sent to immediately teleport a player.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Teleport {
+    pub client_num: i32,
+    pub tp: i32,
+    pub td: i32,
+}
+
+impl From<Teleport> for Chan0Server {
+    fn from(v: Teleport) -> Self {
+        Self::Teleport(v)
+    }
+}
+
+/// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JumpPad {
+    pub client_num: i32,
+    pub jp: i32,
+}
+
+impl From<JumpPad> for Chan0Server {
+    fn from(v: JumpPad) -> Self {
+        Self::JumpPad(v)
+    }
 }

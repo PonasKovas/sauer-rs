@@ -1,3 +1,4 @@
+use super::*;
 use crate::{
     Chan2Server, ParseError,
     internal::{Decode, ParseResultExt, ReaderCore, constants::*},
@@ -24,11 +25,11 @@ fn decode_inner(msg_type: i32, r: &mut ReaderCore) -> Result<Chan2Server, ParseE
         N_SENDDEMO => {
             let tag = r.get_int()?;
             let data = r.get_bytes(r.remaining())?.to_vec();
-            Ok(Chan2Server::SendDemo { tag, data })
+            Ok(Chan2Server::SendDemo(SendDemo { tag, data }))
         }
         N_SENDMAP => {
             let data = r.get_bytes(r.remaining())?.to_vec();
-            Ok(Chan2Server::SendMap { data })
+            Ok(Chan2Server::SendMap(SendMap { data }))
         }
         _ => Err(ParseError::UnknownMessageType {
             channel: 2,

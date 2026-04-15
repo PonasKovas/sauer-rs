@@ -6,20 +6,20 @@ use crate::{
 impl Encode for Chan0Client {
     fn encode(&self, w: &mut WriterCore) {
         match self {
-            Chan0Client::Position { pos } => {
+            Chan0Client::Position(v) => {
                 w.put_int(N_POS);
-                pos.encode(w);
+                v.pos.encode(w);
             }
-            Chan0Client::Teleport { client_num, tp, td } => {
+            Chan0Client::Teleport(v) => {
                 w.put_int(N_TELEPORT);
-                w.put_int(*client_num);
-                w.put_int(*tp);
-                w.put_int(*td);
+                w.put_int(v.client_num);
+                w.put_int(v.tp);
+                w.put_int(v.td);
             }
-            Chan0Client::JumpPad { client_num, jp } => {
+            Chan0Client::JumpPad(v) => {
                 w.put_int(N_JUMPPAD);
-                w.put_int(*client_num);
-                w.put_int(*jp);
+                w.put_int(v.client_num);
+                w.put_int(v.jp);
             }
         }
     }
