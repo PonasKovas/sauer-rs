@@ -1,6 +1,7 @@
 use crate::ParseError;
 use crate::data;
 use crate::data::*;
+use crate::error::EnumConvertResultExt;
 use crate::error::ParseResultExt;
 use crate::internal::macros::{make_packet_enum, make_struct};
 use crate::internal::read_slice;
@@ -902,11 +903,7 @@ impl SauerRead for CurrentMaster {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
         check_tag(reader, N_CURRENTMASTER)?;
         let mm_val = i32::sauer_read(reader)?;
-        let master_mode =
-            MasterMode::try_from(mm_val).map_err(|_| ParseError::InvalidEnumValue {
-                value: mm_val,
-                enum_name: "MasterMode",
-            })?;
+        let master_mode = MasterMode::try_from(mm_val).in_enum("MasterMode")?;
         let mut clients = Vec::new();
         loop {
             // peek if -1
@@ -1936,12 +1933,7 @@ impl SauerRead for BasesClient {
             let ammotype = if ammotype_val == 0 {
                 None
             } else {
-                Some(ItemType::try_from(ammotype_val).map_err(|_| {
-                    ParseError::InvalidEnumValue {
-                        value: ammotype_val,
-                        enum_name: "ItemType",
-                    }
-                })?)
+                Some(ItemType::try_from(ammotype_val).in_enum("ItemType")?)
             };
             bases.push(BaseSpawn {
                 ammotype,
