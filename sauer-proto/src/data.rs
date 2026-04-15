@@ -1,52 +1,24 @@
 use crate::internal::{
     SauerRead, SauerWrite,
     constants::{DMF, DNF},
+    macros::{make_enum, make_struct},
 };
 use cube_string::CubeString;
 use num_enum::TryFromPrimitive;
 
 mod base_info;
 mod base_spawn;
+mod direction;
 mod edit_var_value;
 mod flag_state;
-mod player_position;
 pub(crate) mod vec3;
 
 pub use base_info::BaseInfo;
 pub use base_spawn::BaseSpawn;
+pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
-pub use player_position::{PlayerPosition, PositionPhysState};
 pub use vec3::Vec3;
-
-macro_rules! make_enum {
-    ($(#[$($attr:meta)*])*
-    [$repr:ty] $name:ident { $( $(#[$($variant_attr:meta)*])* $variant:ident = $num:literal, )+ } ) => {
-        $(#[$($attr)*])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
-        #[repr($repr)]
-        pub enum $name {
-            $( $(#[$($variant_attr)*])* $variant = $num, )+
-        }
-
-        impl SauerWrite for $name {
-            fn sauer_write(&self, out: &mut Vec<u8>) {
-                (*self as $repr).sauer_write(out);
-            }
-        }
-        impl SauerRead for $name {
-            fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
-                let repr = <$repr>::sauer_read(reader)?;
-
-                Self::try_from(repr)
-                    .map_err(|_| crate::ParseError::InvalidEnumValue {
-                        value: repr,
-                        enum_name: stringify!($name),
-                    })
-            }
-        }
-    };
-}
 
 make_enum!([i32] Gun {
     Fist = 0, Sg = 1, Cg = 2, Rl = 3, Rifle = 4, Gl = 5, Pistol = 6,
@@ -139,47 +111,20 @@ make_enum!([i32] Privilege {
     None = 0, Auth = 1, Master = 2, Admin = 3,
 });
 
-macro_rules! make_struct {
-    ($(#[$($attr:meta)*])*
-    $name:ident { $( $(#[$($variant_attr:meta)*])* $field:ident : $type:ty $(=> $ser:path, $de:path)? ),+ $(,)? } ) => {
-        $(#[$($attr)*])*
-        #[derive(Debug, Clone, PartialEq)]
-        pub struct $name {
-            $(
-                $(#[$($variant_attr)*])*
-                $field : $type,
-            )+
-        }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+#[repr(i8)]
+pub enum Movement {
+    Back = -1,
+    None = 0,
+    Forward = 1,
+}
 
-        impl SauerWrite for $name {
-            fn sauer_write(&self, out: &mut Vec<u8>) {
-                $(
-                    make_struct!(@serialize self.$field, out $( => $ser )? );
-                )+
-            }
-        }
-        impl SauerRead for $name {
-            fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
-                Ok(Self{
-                    $(
-                        $field : make_struct!(@deserialize $type, reader $( => $de )? ),
-                    )+
-                })
-            }
-        }
-    };
-    (@serialize $var:expr, $out:expr) => {
-        $var.sauer_write($out);
-    };
-    (@serialize $var:expr, $out:expr => $ser:path) => {
-        $ser (&$var, $out);
-    };
-    (@deserialize $type:ty, $reader:expr) => {
-        <$type>::sauer_read($reader)?
-    };
-    (@deserialize $type:ty, $reader:expr => $de:path) => {
-        $de($reader)?
-    };
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+#[repr(i8)]
+pub enum Strafe {
+    Left = -1,
+    None = 0,
+    Right = 1,
 }
 
 make_struct!(
@@ -263,7 +208,7 @@ HitInfo {
     life_sequence: i32,
     dist: f32,
     rays: i32,
-    dir: Vec3<f32> => vec3::write_quantized<DNF>, vec3::read_quantized<DNF>,
+    dir: Vec3<f32> => vec3::write_quantized::<DNF>, vec3::read_quantized::<DNF>,
 });
 
 make_struct!(StolenToken { id: i32, yaw: i32 });
@@ -277,17 +222,17 @@ TeamInfo {
 
 make_struct!(TokenBaseSpawn {
     team: i32,
-    pos: Vec3<f32> => vec3::write_quantized<DMF>, vec3::read_quantized<DMF>,
+    pos: Vec3<f32> => vec3::write_quantized::<DMF>, vec3::read_quantized::<DMF>,
 });
 
 make_struct!(TokenState {
     id: i32,
     team: i32,
     yaw: i32,
-    pos: Vec3<f32> => vec3::write_quantized<DMF>, vec3::read_quantized<DMF>,
+    pos: Vec3<f32> => vec3::write_quantized::<DMF>, vec3::read_quantized::<DMF>,
 });
 
 make_struct!(FlagSpawn {
     team: i32,
-    pos: Vec3<f32> => vec3::write_quantized<DMF>, vec3::read_quantized<DMF>,
+    pos: Vec3<f32> => vec3::write_quantized::<DMF>, vec3::read_quantized::<DMF>,
 });

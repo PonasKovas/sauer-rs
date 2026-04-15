@@ -69,7 +69,7 @@ impl SauerWrite for u32 {
             out.extend_from_slice(&(*self as u16).to_le_bytes());
         } else {
             out.push(0x81);
-            out.extend_from_slice(&*self.to_le_bytes());
+            out.extend_from_slice(&self.to_le_bytes());
         }
     }
 }
@@ -90,7 +90,7 @@ impl SauerRead for u32 {
 
 impl SauerWrite for f32 {
     fn sauer_write(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&*self.to_le_bytes());
+        out.extend_from_slice(&self.to_le_bytes());
     }
 }
 impl SauerRead for f32 {
@@ -104,6 +104,11 @@ impl SauerWrite for &CubeStr {
     fn sauer_write(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(self);
         out.push(0);
+    }
+}
+impl SauerWrite for CubeString {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        (&**self).sauer_write(out);
     }
 }
 impl SauerRead for CubeString {

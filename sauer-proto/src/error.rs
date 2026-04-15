@@ -1,3 +1,4 @@
+use num_enum::TryFromPrimitive;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -5,16 +6,17 @@ pub enum ParseError {
     #[error("Unexpected end of buffer while reading {expected} bytes")]
     UnexpectedEof { expected: usize },
 
-    #[error("Unknown message type on channel {channel}: wire id {id}")]
-    UnknownMessageType { channel: usize, id: i32 },
+    #[error("Unknown message type on route {route}: wire id {id}")]
+    UnknownMessageType { route: &'static str, id: i32 },
 
     #[error(
-        "Wrong message type: expected wire id {expected} for `{expected_name}`, but got wire id {actual}"
+        "Wrong message type: expected wire id {expected} `{expected_name}`, but got wire id {actual} `{actual_name}`"
     )]
     WrongMessageType {
         expected: i32,
         expected_name: &'static str,
         actual: i32,
+        actual_name: &'static str,
     },
 
     #[error("Invalid enum value {value} for type `{enum_name}`")]
@@ -28,6 +30,9 @@ pub enum ParseError {
 
     #[error("Illegal double client wrapper")]
     DoubleClientWrapper,
+
+    #[error("This packet cant be wrapped in N_CLIENT")]
+    BadClientWrapper,
 
     #[error("Value {value} out of range for `{field}` (max {max})")]
     ValueOutOfRange {
@@ -81,6 +86,22 @@ impl<T> ParseResultExt<T> for Result<T, ParseError> {
         self.map_err(|e| ParseError::InField {
             field,
             source: Box::new(e),
+        })
+    }
+}
+
+pub(crate) trait EnumConvertResultExt<T> {
+    fn in_enum(self, enum_name: &'static str) -> Result<T, ParseError>;
+}
+
+impl<T: TryFromPrimitive> EnumConvertResultExt<T> for Result<T, num_enum::TryFromPrimitiveError<T>>
+where
+    T::Primitive: Into<i32>,
+{
+    fn in_enum(self, enum_name: &'static str) -> Result<T, ParseError> {
+        self.map_err(|e| ParseError::InvalidEnumValue {
+            value: e.number.into(),
+            enum_name,
         })
     }
 }

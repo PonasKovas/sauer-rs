@@ -11,18 +11,18 @@ pub struct Vec3<T> {
     pub z: T,
 }
 
-pub(crate) fn read_quantized<const Q: usize>(reader: &mut &[u8]) -> Result<Vec3<f32>, ParseError> {
+pub(crate) fn read_quantized<const Q: u32>(reader: &mut &[u8]) -> Result<Vec3<f32>, ParseError> {
     Ok(Vec3 {
-        x: i32::sauer_read(reader)? as f32 / Q,
-        y: i32::sauer_read(reader)? as f32 / Q,
-        z: i32::sauer_read(reader)? as f32 / Q,
+        x: i32::sauer_read(reader)? as f32 / Q as f32,
+        y: i32::sauer_read(reader)? as f32 / Q as f32,
+        z: i32::sauer_read(reader)? as f32 / Q as f32,
     })
 }
 
-pub(crate) fn write_quantized<const Q: usize>(val: &Vec3<f32>, out: &mut Vec<u8>) {
-    ((val.x * Q) as f32).sauer_write(out);
-    ((val.y * Q) as f32).sauer_write(out);
-    ((val.z * Q) as f32).sauer_write(out);
+pub(crate) fn write_quantized<const Q: u32>(val: &Vec3<f32>, out: &mut Vec<u8>) {
+    (val.x * Q as f32).sauer_write(out);
+    (val.y * Q as f32).sauer_write(out);
+    (val.z * Q as f32).sauer_write(out);
 }
 
 impl SauerWrite for Vec3<i32> {

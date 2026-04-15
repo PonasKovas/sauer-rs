@@ -1,5 +1,5 @@
 use crate::Encode;
-use crate::internal::{WriterCore, constants::*};
+use crate::internal::{SauerWrite, constants::*};
 use std::marker::PhantomData;
 
 /// Sink-based serializer bound to a specific protocol route.
@@ -7,13 +7,10 @@ use std::marker::PhantomData;
 /// Push individual packet structs that implement [`Encode<R>`] and then call
 /// [`consume`](Writer::consume) to get the final byte buffer.
 ///
-/// The `N_CLIENT` envelope is handled transparently: if a packet's
-/// [`requires_client_wrapper`](Encode::requires_client_wrapper) returns
-/// `Some(cn)`, it will be wrapped automatically, and consecutive packets for
-/// the same client are batched into a single envelope.
+/// The `N_CLIENT` envelope is handled transparently.
 pub struct Writer<R> {
-    main: WriterCore,
-    wrapper: WriterCore,
+    main: Vec<u8>,
+    wrapper: Vec<u8>,
     current_wrapper_client: Option<i32>,
     _phantom: PhantomData<R>,
 }
@@ -21,8 +18,8 @@ pub struct Writer<R> {
 impl<R> Writer<R> {
     pub fn new() -> Self {
         Self {
-            main: WriterCore::new(),
-            wrapper: WriterCore::new(),
+            main: Vec::new(),
+            wrapper: Vec::new(),
             current_wrapper_client: None,
             _phantom: PhantomData,
         }
@@ -30,13 +27,14 @@ impl<R> Writer<R> {
 
     fn flush_wrapper(&mut self) {
         if let Some(cn) = self.current_wrapper_client
-            && !self.wrapper.buffer.is_empty()
+            && !self.wrapper.is_empty()
         {
-            self.main.put_int(N_CLIENT);
-            self.main.put_int(cn);
-            self.main.put_uint(self.wrapper.buffer.len() as u32);
-            self.main.put_bytes(&self.wrapper.buffer);
-            self.wrapper.buffer.clear();
+            N_CLIENT.sauer_write(&mut self.main);
+            cn.sauer_write(&mut self.main);
+            let len = self.wrapper.len() as u32;
+            len.sauer_write(&mut self.main);
+            self.main.extend_from_slice(&self.wrapper);
+            self.wrapper.clear();
         }
         self.current_wrapper_client = None;
     }
@@ -57,16 +55,16 @@ impl<R> Writer<R> {
 
         // Write to the appropriate buffer
         if self.current_wrapper_client.is_some() {
-            msg.encode(&mut self.wrapper);
+            msg.sauer_write(&mut self.wrapper);
         } else {
-            msg.encode(&mut self.main);
+            msg.sauer_write(&mut self.main);
         }
     }
 
     /// Finalize and return the raw byte buffer.
     pub fn consume(mut self) -> Vec<u8> {
         self.flush_wrapper();
-        self.main.buffer
+        self.main
     }
 }
 

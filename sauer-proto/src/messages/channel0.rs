@@ -1,339 +1,329 @@
-#![allow(private_interfaces)]
-
 use crate::data::*;
-use crate::internal::{
-    DecodeCore, EncodeCore, ParseResultExt, ReaderCore, WriterCore, constants::*,
-};
+use crate::error::EnumConvertResultExt;
+use crate::internal::macros::make_struct;
+use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
 use crate::route::{C2S, Chan0, S2C};
 use crate::{Decode, Encode, ParseError};
+
+macro_rules! make_packet_enum {
+    (
+        $(#[$($attr:meta)*])*
+        [ $ROUTE:ty ]
+        $name:ident {
+            $(
+                $(#[$($variant_attr:meta)*])*
+                [$TAG:path] $variant:ident
+            ),+
+            $(,)?
+        }
+    ) => {
+        $(#[$($attr)*])*
+        #[derive(Debug, Clone, PartialEq)]
+        pub enum $name {
+            $(
+                $(#[$($variant_attr)*])* $variant($variant),
+            )+
+        }
+
+        $(
+            impl From<$variant> for $name {
+                fn from(v: $variant) -> Self {
+                    Self::$variant(v)
+                }
+            }
+            impl Encode<$ROUTE> for $variant {}
+            impl Decode<$ROUTE> for $variant {
+                fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
+                    if client_number.is_some() {
+                        return Err(ParseError::BadClientWrapper);
+                    }
+
+                    Self::sauer_read(reader)
+                }
+            }
+        )+
+
+        impl SauerWrite for $name {
+            fn sauer_write(&self, out: &mut Vec<u8>) {
+                match self {
+                    $(
+                        Self::$variant(v) => v.sauer_write(out),
+                    )+
+                }
+            }
+        }
+        impl SauerRead for $name {
+            fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+                let msg_type = i32::sauer_read(reader)?;
+
+                Ok(match msg_type {
+                    $(
+                        $TAG => Self::$variant($variant::sauer_read(reader)?),
+                    )+
+                    other => return Err(ParseError::UnknownMessageType {
+                        route: stringify!($ROUTE),
+                        id: other,
+                    }),
+                })
+            }
+        }
+        impl Encode<$ROUTE> for $name {}
+        impl Decode<$ROUTE> for $name {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
+                if client_number.is_some() {
+                    return Err(ParseError::BadClientWrapper);
+                }
+
+                Self::sauer_read(reader)
+            }
+        }
+    };
+}
+
+make_packet_enum!(
+/// Server -> Client (Channel 0)
+[S2C<Chan0>] Chan0Server {
+    /// `N_DEMOPACKET` Demo playback marker.
+    [N_DEMOPACKET] DemoPacket,
+    /// `N_POS` Constant physical position updates.
+    [N_POS] Position,
+    /// `N_TELEPORT` Sent to immediately teleport a player.
+    [N_TELEPORT] Teleport,
+    /// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
+    [N_JUMPPAD] JumpPad,
+});
+
+make_packet_enum!(
+/// Client -> Server (Channel 0)
+[C2S<Chan0>] Chan0Client {
+    /// `N_POS` Standard physical position update sent constantly.
+    [N_POS] Position,
+    /// `N_TELEPORT` Broadcasts the client teleporting.
+    [N_TELEPORT] Teleport,
+    /// `N_JUMPPAD` Broadcasts the client hitting a jump pad.
+    [N_JUMPPAD] JumpPad,
+});
 
 /// `N_POS` Constant physical position updates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Position {
-    pub pos: PlayerPosition,
+    pub client_num: u32,
+    pub phys_state: PhysState,
+    /// Least significant bit of current life sequence (to make sure this packet is not from a previous life)
+    pub life_seq_parity: bool,
+    pub move_dir: Movement,
+    pub strafe: Strafe,
+    pub touches_gameclip: bool,
+    pub pos: Vec3<f32>,
+    pub dir: Direction,
+    pub roll: i8,
+    pub vel_speed: u16,
+    pub vel_dir: Direction,
+    pub fall_mag: u16,
+    pub fall_dir: Direction,
 }
 
+make_struct!(
 /// `N_TELEPORT` Sent to immediately teleport a player.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Teleport {
-    pub client_num: i32,
-    pub tp: i32,
-    pub td: i32,
-}
+[N_TELEPORT] Teleport {
+    client_num: i32,
+    tp: i32,
+    td: i32,
+});
 
+make_struct!(
 /// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
-#[derive(Clone, Debug, PartialEq)]
-pub struct JumpPad {
-    pub client_num: i32,
-    pub jp: i32,
-}
+[N_JUMPPAD] JumpPad {
+    client_num: i32,
+    jp: i32,
+});
 
+make_struct!(
 /// `N_DEMOPACKET` Demo playback marker (server only).
-#[derive(Clone, Debug, PartialEq)]
-pub struct DemoPacket;
+[N_DEMOPACKET] DemoPacket {}
+);
 
-// -- Encode impls for individual structs ------------------------------
+impl SauerWrite for Position {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        N_POS.sauer_write(out);
 
-fn encode_position(v: &Position, w: &mut WriterCore) {
-    w.put_int(N_POS);
-    v.pos.encode(w);
-}
+        self.client_num.sauer_write(out);
 
-fn encode_teleport(v: &Teleport, w: &mut WriterCore) {
-    w.put_int(N_TELEPORT);
-    w.put_int(v.client_num);
-    w.put_int(v.tp);
-    w.put_int(v.td);
-}
+        // Pack phys_state, life sequence, and movement into 1 byte
+        let phys_state_val = (self.phys_state as u8) & 0x07;
+        let life_seq_val = if self.life_seq_parity { 1 } else { 0 };
+        let move_val = (self.move_dir as i8 as u8) & 0x03;
+        let strafe_val = (self.strafe as i8 as u8) & 0x03;
 
-fn encode_jumppad(v: &JumpPad, w: &mut WriterCore) {
-    w.put_int(N_JUMPPAD);
-    w.put_int(v.client_num);
-    w.put_int(v.jp);
-}
+        let phys_byte = phys_state_val | (life_seq_val << 3) | (move_val << 4) | (strafe_val << 6);
+        phys_byte.sauer_write(out);
 
-fn decode_position(r: &mut ReaderCore) -> Result<Position, ParseError> {
-    Ok(Position {
-        pos: PlayerPosition::decode(r).in_field("pos")?,
-    })
-}
+        // Compute flags
+        let mut flags: u32 = 0;
+        let o_x = (self.pos.x * DMF as f32) as i32;
+        let o_y = (self.pos.y * DMF as f32) as i32;
+        let o_z = (self.pos.z * DMF as f32) as i32;
 
-fn decode_teleport(r: &mut ReaderCore) -> Result<Teleport, ParseError> {
-    Ok(Teleport {
-        client_num: r.get_int()?,
-        tp: r.get_int()?,
-        td: r.get_int()?,
-    })
-}
-
-fn decode_jumppad(r: &mut ReaderCore) -> Result<JumpPad, ParseError> {
-    Ok(JumpPad {
-        client_num: r.get_int()?,
-        jp: r.get_int()?,
-    })
-}
-
-// -- Position: valid on both S2C<Chan0> and C2S<Chan0> ----------------
-
-impl Encode<S2C<Chan0>> for Position {
-    fn encode(&self, w: &mut WriterCore) {
-        encode_position(self, w);
-    }
-}
-impl Encode<C2S<Chan0>> for Position {
-    fn encode(&self, w: &mut WriterCore) {
-        encode_position(self, w);
-    }
-}
-impl Decode<S2C<Chan0>> for Position {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_POS {
-            return Err(ParseError::WrongMessageType {
-                expected: N_POS,
-                expected_name: "Position",
-                actual: msg_type,
-            });
+        if o_x < 0 || o_x > 0xFFFF {
+            flags |= 1 << 0;
         }
-        decode_position(r).in_packet("Position")
-    }
-}
-impl Decode<C2S<Chan0>> for Position {
-    #[allow(private_interfaces)]
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_POS {
-            return Err(ParseError::WrongMessageType {
-                expected: N_POS,
-                expected_name: "Position",
-                actual: msg_type,
-            });
+        if o_y < 0 || o_y > 0xFFFF {
+            flags |= 1 << 1;
         }
-        decode_position(r).in_packet("Position")
-    }
-}
-
-// -- Teleport: valid on both S2C<Chan0> and C2S<Chan0> ----------------
-
-impl Encode<S2C<Chan0>> for Teleport {
-    fn encode(&self, w: &mut WriterCore) {
-        encode_teleport(self, w);
-    }
-}
-impl Encode<C2S<Chan0>> for Teleport {
-    fn encode(&self, w: &mut WriterCore) {
-        encode_teleport(self, w);
-    }
-}
-impl Decode<S2C<Chan0>> for Teleport {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_TELEPORT {
-            return Err(ParseError::WrongMessageType {
-                expected: N_TELEPORT,
-                expected_name: "Teleport",
-                actual: msg_type,
-            });
+        if o_z < 0 || o_z > 0xFFFF {
+            flags |= 1 << 2;
         }
-        decode_teleport(r).in_packet("Teleport")
-    }
-}
-impl Decode<C2S<Chan0>> for Teleport {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_TELEPORT {
-            return Err(ParseError::WrongMessageType {
-                expected: N_TELEPORT,
-                expected_name: "Teleport",
-                actual: msg_type,
-            });
+
+        if self.vel_speed > 0xFF {
+            flags |= 1 << 3;
         }
-        decode_teleport(r).in_packet("Teleport")
-    }
-}
 
-// -- JumpPad: valid on both S2C<Chan0> and C2S<Chan0> -----------------
+        if self.fall_mag > 0 {
+            flags |= 1 << 4;
+            if self.fall_mag > 0xFF {
+                flags |= 1 << 5;
+            }
 
-impl Encode<S2C<Chan0>> for JumpPad {
-    fn encode(&self, w: &mut WriterCore) {
-        encode_jumppad(self, w);
-    }
-}
-impl Encode<C2S<Chan0>> for JumpPad {
-    fn encode(&self, w: &mut WriterCore) {
-        encode_jumppad(self, w);
-    }
-}
-impl Decode<S2C<Chan0>> for JumpPad {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_JUMPPAD {
-            return Err(ParseError::WrongMessageType {
-                expected: N_JUMPPAD,
-                expected_name: "JumpPad",
-                actual: msg_type,
-            });
+            // Engine defaults straight down as pitch = -90, yaw = 0
+            if self.fall_dir.yaw != 0 || self.fall_dir.pitch != -90 {
+                flags |= 1 << 6;
+            }
         }
-        decode_jumppad(r).in_packet("JumpPad")
-    }
-}
-impl Decode<C2S<Chan0>> for JumpPad {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_JUMPPAD {
-            return Err(ParseError::WrongMessageType {
-                expected: N_JUMPPAD,
-                expected_name: "JumpPad",
-                actual: msg_type,
-            });
+
+        if self.touches_gameclip {
+            flags |= 1 << 7;
         }
-        decode_jumppad(r).in_packet("JumpPad")
-    }
-}
 
-// -- DemoPacket: server only ------------------------------------------
+        flags.sauer_write(out);
 
-impl Encode<S2C<Chan0>> for DemoPacket {
-    fn encode(&self, w: &mut WriterCore) {
-        w.put_int(N_DEMOPACKET);
-    }
-}
-impl Decode<S2C<Chan0>> for DemoPacket {
-    fn decode(msg_type: i32, _r: &mut ReaderCore) -> Result<Self, ParseError> {
-        if msg_type != N_DEMOPACKET {
-            return Err(ParseError::WrongMessageType {
-                expected: N_DEMOPACKET,
-                expected_name: "DemoPacket",
-                actual: msg_type,
-            });
+        // Manually serialize positions
+        for o in [o_x, o_y, o_z] {
+            (o as u8).sauer_write(out);
+            ((o >> 8) as u8).sauer_write(out);
+            if o < 0 || o > 0xFFFF {
+                ((o >> 16) as u8).sauer_write(out);
+            }
         }
-        Ok(DemoPacket)
-    }
-}
 
-// =====================================================================
-// ENUMS (for dynamic / iterator-based reading)
-// =====================================================================
+        self.dir.sauer_write(out);
 
-/// Server -> Client (Channel 0)
-#[derive(Debug, Clone, PartialEq)]
-pub enum Chan0Server {
-    /// `N_DEMOPACKET` Demo playback marker.
-    DemoPacket(DemoPacket),
-    /// `N_POS` Constant physical position updates.
-    Position(Position),
-    /// `N_TELEPORT` Sent to immediately teleport a player.
-    Teleport(Teleport),
-    /// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
-    JumpPad(JumpPad),
-}
+        // Bias roll by +90 before wire
+        let biased_roll = (self.roll as i16 + 90).clamp(0, 180) as u8;
+        biased_roll.sauer_write(out);
 
-/// Client -> Server (Channel 0)
-#[derive(Debug, Clone, PartialEq)]
-pub enum Chan0Client {
-    /// `N_POS` Standard physical position update sent constantly.
-    Position(Position),
-    /// `N_TELEPORT` Broadcasts the client teleporting.
-    Teleport(Teleport),
-    /// `N_JUMPPAD` Broadcasts the client hitting a jump pad.
-    JumpPad(JumpPad),
-}
+        // Velocity speed (1 or 2 bytes)
+        (self.vel_speed as u8).sauer_write(out);
+        if self.vel_speed > 0xFF {
+            ((self.vel_speed >> 8) as u8).sauer_write(out);
+        }
 
-// -- From impls -------------------------------------------------------
+        self.vel_dir.sauer_write(out);
 
-impl From<Position> for Chan0Server {
-    fn from(v: Position) -> Self {
-        Self::Position(v)
-    }
-}
-impl From<Teleport> for Chan0Server {
-    fn from(v: Teleport) -> Self {
-        Self::Teleport(v)
-    }
-}
-impl From<JumpPad> for Chan0Server {
-    fn from(v: JumpPad) -> Self {
-        Self::JumpPad(v)
-    }
-}
-impl From<DemoPacket> for Chan0Server {
-    fn from(v: DemoPacket) -> Self {
-        Self::DemoPacket(v)
-    }
-}
+        // Fall handling
+        if self.fall_mag > 0 {
+            (self.fall_mag as u8).sauer_write(out);
+            if self.fall_mag > 0xFF {
+                ((self.fall_mag >> 8) as u8).sauer_write(out);
+            }
 
-impl From<Position> for Chan0Client {
-    fn from(v: Position) -> Self {
-        Self::Position(v)
-    }
-}
-impl From<Teleport> for Chan0Client {
-    fn from(v: Teleport) -> Self {
-        Self::Teleport(v)
-    }
-}
-impl From<JumpPad> for Chan0Client {
-    fn from(v: JumpPad) -> Self {
-        Self::JumpPad(v)
-    }
-}
-
-// -- Enum Encode / Decode for S2C<Chan0> (Chan0Server) ----------------
-
-impl Encode<S2C<Chan0>> for Chan0Server {
-    fn encode(&self, w: &mut WriterCore) {
-        match self {
-            Chan0Server::DemoPacket(v) => Encode::<S2C<Chan0>>::encode(v, w),
-            Chan0Server::Position(v) => Encode::<S2C<Chan0>>::encode(v, w),
-            Chan0Server::Teleport(v) => Encode::<S2C<Chan0>>::encode(v, w),
-            Chan0Server::JumpPad(v) => Encode::<S2C<Chan0>>::encode(v, w),
+            if self.fall_dir.yaw != 0 || self.fall_dir.pitch != -90 {
+                self.fall_dir.sauer_write(out);
+            }
         }
     }
 }
+impl SauerRead for Position {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+        check_tag(reader, N_POS)?;
 
-impl Decode<S2C<Chan0>> for Chan0Server {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        match msg_type {
-            N_DEMOPACKET => Ok(Chan0Server::DemoPacket(DemoPacket)),
-            N_POS => decode_position(r)
-                .map(Chan0Server::Position)
-                .in_packet("Position"),
-            N_TELEPORT => decode_teleport(r)
-                .map(Chan0Server::Teleport)
-                .in_packet("Teleport"),
-            N_JUMPPAD => decode_jumppad(r)
-                .map(Chan0Server::JumpPad)
-                .in_packet("JumpPad"),
-            _ => Err(ParseError::UnknownMessageType {
-                channel: 0,
-                id: msg_type,
-            }),
+        let client_num = u32::sauer_read(reader)?;
+
+        let phys_byte = u8::sauer_read(reader)?;
+
+        let phys_state = PhysState::try_from(phys_byte & 0x07).in_enum("PhysState")?;
+        let life_seq_parity = (phys_byte & (1 << 3)) != 0;
+
+        // Double shift does automatic Two's Complement sign-extension: (3 -> -1)
+        let move_dir =
+            Movement::try_from((((phys_byte >> 4) & 0x03) as i8) << 6 >> 6).in_enum("Movement")?;
+        let strafe =
+            Strafe::try_from((((phys_byte >> 6) & 0x03) as i8) << 6 >> 6).in_enum("Strafe")?;
+
+        let flags = u32::sauer_read(reader)?;
+        let touches_gameclip = (flags & (1 << 7)) != 0;
+
+        // Manually deserialize positions
+        let mut pos_arr = [0.0; 3];
+        for i in 0..3 {
+            let b0 = u8::sauer_read(reader)? as i32;
+            let b1 = u8::sauer_read(reader)? as i32;
+            let mut val = b0 | (b1 << 8);
+
+            if (flags & (1 << i)) != 0 {
+                let b2 = u8::sauer_read(reader)? as i32;
+                val |= b2 << 16;
+                // Sign extend 24-bit -> 32-bit integer
+                if (val & 0x80_00_00) != 0 {
+                    val |= -16777216; // identical to 0xFF_00_00_00
+                }
+            }
+            pos_arr[i] = (val as f32) / DMF as f32;
         }
-    }
-}
+        let pos = Vec3 {
+            x: pos_arr[0],
+            y: pos_arr[1],
+            z: pos_arr[2],
+        };
 
-// -- Enum Encode / Decode for C2S<Chan0> (Chan0Client) ----------------
+        let dir = Direction::sauer_read(reader)?;
 
-impl Encode<C2S<Chan0>> for Chan0Client {
-    fn encode(&self, w: &mut WriterCore) {
-        match self {
-            Chan0Client::Position(v) => Encode::<C2S<Chan0>>::encode(v, w),
-            Chan0Client::Teleport(v) => Encode::<C2S<Chan0>>::encode(v, w),
-            Chan0Client::JumpPad(v) => Encode::<C2S<Chan0>>::encode(v, w),
-        }
-    }
-}
+        let roll_byte = u8::sauer_read(reader)?;
+        let roll = (roll_byte as i16 - 90) as i8; // Unbias roll
 
-impl Decode<C2S<Chan0>> for Chan0Client {
-    fn decode(msg_type: i32, r: &mut ReaderCore) -> Result<Self, ParseError> {
-        match msg_type {
-            N_POS => decode_position(r)
-                .map(Chan0Client::Position)
-                .in_packet("Position"),
-            N_TELEPORT => decode_teleport(r)
-                .map(Chan0Client::Teleport)
-                .in_packet("Teleport"),
-            N_JUMPPAD => decode_jumppad(r)
-                .map(Chan0Client::JumpPad)
-                .in_packet("JumpPad"),
-            _ => Err(ParseError::UnknownMessageType {
-                channel: 0,
-                id: msg_type,
-            }),
-        }
+        let vel_b0 = u8::sauer_read(reader)?;
+        let vel_speed = if (flags & (1 << 3)) != 0 {
+            let vel_b1 = u8::sauer_read(reader)?;
+            u16::from_le_bytes([vel_b0, vel_b1])
+        } else {
+            vel_b0 as u16
+        };
+
+        let vel_dir = Direction::sauer_read(reader)?;
+
+        let (fall_mag, fall_dir) = if (flags & (1 << 4)) != 0 {
+            let fall_b0 = u8::sauer_read(reader)?;
+            let mag = if (flags & (1 << 5)) != 0 {
+                let fall_b1 = u8::sauer_read(reader)?;
+                u16::from_le_bytes([fall_b0, fall_b1])
+            } else {
+                fall_b0 as u16
+            };
+
+            let dir = if (flags & (1 << 6)) != 0 {
+                Direction::sauer_read(reader)?
+            } else {
+                Direction { yaw: 0, pitch: -90 }
+            };
+
+            (mag, dir)
+        } else {
+            (0, Direction { yaw: 0, pitch: -90 })
+        };
+
+        Ok(Self {
+            client_num,
+            phys_state,
+            life_seq_parity,
+            move_dir,
+            strafe,
+            touches_gameclip,
+            pos,
+            dir,
+            roll,
+            vel_speed,
+            vel_dir,
+            fall_mag,
+            fall_dir,
+        })
     }
 }

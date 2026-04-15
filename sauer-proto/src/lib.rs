@@ -50,19 +50,21 @@ mod reader;
 mod writer;
 
 pub mod data;
-pub mod extinfo;
+// pub mod extinfo;
 pub mod route;
 
 pub use error::ParseError;
 pub use messages::{
     channel0::{self, Chan0Client, Chan0Server},
-    channel1::{self, Chan1Client, Chan1Server},
-    channel2::{self, Chan2Server},
+    // channel1::{self, Chan1Client, Chan1Server},
+    // channel2::{self, Chan2Server},
 };
 pub use reader::Reader;
 pub use writer::Writer;
 
 pub use cube_string;
+
+use crate::internal::{SauerRead, SauerWrite};
 
 /// Total number of ENet channels used by the Sauerbraten protocol.
 pub const CHANNEL_COUNT: usize = 3;
@@ -83,13 +85,12 @@ pub const PROTOCOL_VERSION: i32 = 260;
 /// fragments.  The route generic ensures that only packets valid for a
 /// given direction + channel can be written to a [`Writer`]
 /// bound to that route.
-#[allow(private_interfaces)]
-pub trait Encode<R> {
-    fn encode(&self, writer: &mut internal::WriterCore);
-
+#[allow(private_bounds)]
+pub trait Encode<R>: SauerWrite {
     /// If this packet must be wrapped in an `N_CLIENT` envelope on the wire,
     /// return `Some(client_num)`.  The [`Writer`] uses this to
     /// transparently batch client-wrapped messages.
+    #[doc(hidden)]
     fn requires_client_wrapper(&self) -> Option<i32> {
         None
     }
@@ -99,7 +100,8 @@ pub trait Encode<R> {
 ///
 /// The `msg_type` argument is the integer message-type tag that was already
 /// read from the buffer (the first varint of every message).
-#[allow(private_interfaces)]
-pub trait Decode<R>: Sized {
-    fn decode(msg_type: i32, reader: &mut internal::ReaderCore) -> Result<Self, ParseError>;
+#[allow(private_bounds)]
+pub trait Decode<R>: SauerRead + Sized {
+    #[doc(hidden)]
+    fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError>;
 }
