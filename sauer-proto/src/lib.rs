@@ -97,9 +97,6 @@ pub trait Encode<R>: SauerWrite {
 }
 
 /// Deserialize a packet from wire-format bytes for route `R`.
-///
-/// The `msg_type` argument is the integer message-type tag that was already
-/// read from the buffer (the first varint of every message).
 #[allow(private_bounds)]
 pub trait Decode<R>: SauerRead + Sized {
     #[doc(hidden)]

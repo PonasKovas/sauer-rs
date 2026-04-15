@@ -25,9 +25,6 @@ pub enum ParseError {
     #[error("Message `{message_type}` requires an N_CLIENT envelope, but none was active")]
     MissingClientWrapper { message_type: &'static str },
 
-    #[error("String parsing error: {0}")]
-    InvalidString(String),
-
     #[error("Illegal double client wrapper")]
     DoubleClientWrapper,
 
@@ -50,9 +47,9 @@ pub enum ParseError {
     #[error("unknown extinfo message type {0}")]
     InvalidExtInfoType(i32),
 
-    #[error("while parsing packet `{packet}`: {source}")]
-    InPacket {
-        packet: &'static str,
+    #[error("while parsing structure `{name}`: {source}")]
+    InStruct {
+        name: &'static str,
         #[source]
         source: Box<ParseError>,
     },
@@ -71,14 +68,14 @@ pub enum ParseError {
 // ---------------------------------------------------------------------------
 
 pub(crate) trait ParseResultExt<T> {
-    fn in_packet(self, packet: &'static str) -> Result<T, ParseError>;
+    fn in_struct(self, name: &'static str) -> Result<T, ParseError>;
     fn in_field(self, field: &'static str) -> Result<T, ParseError>;
 }
 
 impl<T> ParseResultExt<T> for Result<T, ParseError> {
-    fn in_packet(self, packet: &'static str) -> Result<T, ParseError> {
-        self.map_err(|e| ParseError::InPacket {
-            packet,
+    fn in_struct(self, name: &'static str) -> Result<T, ParseError> {
+        self.map_err(|e| ParseError::InStruct {
+            name,
             source: Box::new(e),
         })
     }

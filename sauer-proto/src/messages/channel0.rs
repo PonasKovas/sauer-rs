@@ -1,84 +1,9 @@
 use crate::data::*;
 use crate::error::EnumConvertResultExt;
-use crate::internal::macros::make_struct;
+use crate::internal::macros::{make_packet_enum, make_struct};
 use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
 use crate::route::{C2S, Chan0, S2C};
 use crate::{Decode, Encode, ParseError};
-
-macro_rules! make_packet_enum {
-    (
-        $(#[$($attr:meta)*])*
-        [ $ROUTE:ty ]
-        $name:ident {
-            $(
-                $(#[$($variant_attr:meta)*])*
-                [$TAG:path] $variant:ident
-            ),+
-            $(,)?
-        }
-    ) => {
-        $(#[$($attr)*])*
-        #[derive(Debug, Clone, PartialEq)]
-        pub enum $name {
-            $(
-                $(#[$($variant_attr)*])* $variant($variant),
-            )+
-        }
-
-        $(
-            impl From<$variant> for $name {
-                fn from(v: $variant) -> Self {
-                    Self::$variant(v)
-                }
-            }
-            impl Encode<$ROUTE> for $variant {}
-            impl Decode<$ROUTE> for $variant {
-                fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
-                    if client_number.is_some() {
-                        return Err(ParseError::BadClientWrapper);
-                    }
-
-                    Self::sauer_read(reader)
-                }
-            }
-        )+
-
-        impl SauerWrite for $name {
-            fn sauer_write(&self, out: &mut Vec<u8>) {
-                match self {
-                    $(
-                        Self::$variant(v) => v.sauer_write(out),
-                    )+
-                }
-            }
-        }
-        impl SauerRead for $name {
-            fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-                let msg_type = i32::sauer_read(reader)?;
-
-                Ok(match msg_type {
-                    $(
-                        $TAG => Self::$variant($variant::sauer_read(reader)?),
-                    )+
-                    other => return Err(ParseError::UnknownMessageType {
-                        route: stringify!($ROUTE),
-                        id: other,
-                    }),
-                })
-            }
-        }
-        impl Encode<$ROUTE> for $name {}
-        impl Decode<$ROUTE> for $name {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError> {
-                if client_number.is_some() {
-                    return Err(ParseError::BadClientWrapper);
-                }
-
-                Self::sauer_read(reader)
-            }
-        }
-    };
-}
 
 make_packet_enum!(
 /// Server -> Client (Channel 0)

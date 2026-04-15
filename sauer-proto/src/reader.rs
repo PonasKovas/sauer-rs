@@ -59,10 +59,10 @@ impl<'a, R> Reader<'a, R> {
 
             let cn = i32::sauer_read(&mut temp_slice)
                 .in_field("client_num")
-                .in_packet("N_CLIENT")?;
+                .in_struct("N_CLIENT")?;
             let len = u32::sauer_read(&mut temp_slice)
                 .in_field("length")
-                .in_packet("N_CLIENT")?;
+                .in_struct("N_CLIENT")?;
             let end_addr = temp_slice.as_ptr() as usize + len as usize;
 
             self.active_wrapper = Some(ClientWrapperState {
