@@ -507,6 +507,7 @@ impl SauerRead for ItemList {
             // peek if -1
             let mut temp_reader = *reader;
             if i32::sauer_read(&mut temp_reader)? < 0 {
+                *reader = temp_reader;
                 break;
             }
 
@@ -703,6 +704,7 @@ impl SauerRead for Resume {
             // peek if -1
             let mut temp_reader = *reader;
             if i32::sauer_read(&mut temp_reader)? < 0 {
+                *reader = temp_reader;
                 break;
             }
             clients.push(ClientResumeState::sauer_read(reader)?);
@@ -910,6 +912,7 @@ impl SauerRead for CurrentMaster {
             // peek if -1
             let mut temp_reader = *reader;
             if i32::sauer_read(&mut temp_reader)? < 0 {
+                *reader = temp_reader;
                 break;
             }
 
@@ -1058,12 +1061,29 @@ impl SauerWrite for InitFlagsServer {
         for f in &self.flags {
             f.version.sauer_write(out);
             f.spawn_index.sauer_write(out);
-            if let FlagStateOwner::Owned { owner } = &f.owner {
-                owner.sauer_write(out);
-            } else {
-                (-1i32).sauer_write(out);
-            }
+
+            // putint(p, f.owner);
+            let owner_val = match &f.owner {
+                FlagStateOwner::Owned { owner } => *owner,
+                FlagStateOwner::Dropped { .. } => -1,
+            };
+            owner_val.sauer_write(out);
+
+            // putint(p, f.invistime ? 1 : 0);
             (if f.invis { 1i32 } else { 0i32 }).sauer_write(out);
+
+            // if(f.owner<0)
+            if let FlagStateOwner::Dropped { dropped, drop_loc } = &f.owner {
+                // putint(p, f.droptime ? 1 : 0);
+                (if *dropped { 1i32 } else { 0i32 }).sauer_write(out);
+
+                // if(f.droptime) { ... }
+                if *dropped {
+                    data::vec3::write_quantized::<DMF>(drop_loc, out);
+                }
+            }
+
+            // if(m_hold) ...
             if let Some(hold) = &f.hold {
                 match hold {
                     FlagStateHoldTeam::None => (-1i32).sauer_write(out),
@@ -1094,14 +1114,23 @@ impl SauerRead for InitFlagsServer {
             let spawn_index = i32::sauer_read(reader)?;
             let owner_id = i32::sauer_read(reader)?;
             let invis = i32::sauer_read(reader)? != 0;
+
             let owner = if owner_id < 0 {
-                FlagStateOwner::Dropped {
-                    dropped: i32::sauer_read(reader)? != 0,
-                    drop_loc: data::vec3::read_quantized::<DMF>(reader)?,
-                }
+                let dropped = i32::sauer_read(reader)? != 0;
+                let drop_loc = if dropped {
+                    data::vec3::read_quantized::<DMF>(reader)?
+                } else {
+                    data::Vec3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    }
+                };
+                FlagStateOwner::Dropped { dropped, drop_loc }
             } else {
                 FlagStateOwner::Owned { owner: owner_id }
             };
+
             let hold = if reader.is_empty() {
                 None
             } else {
@@ -1115,6 +1144,7 @@ impl SauerRead for InitFlagsServer {
                     }
                 })
             };
+
             flags.push(FlagState {
                 version,
                 spawn_index,
@@ -1226,6 +1256,7 @@ impl SauerRead for InitTokensServer {
             // peek if -1
             let mut temp_reader = *reader;
             if i32::sauer_read(&mut temp_reader)? < 0 {
+                *reader = temp_reader;
                 break;
             }
 
@@ -1304,6 +1335,7 @@ impl SauerRead for DropTokens {
             // peek if -1
             let mut temp_reader = *reader;
             if i32::sauer_read(&mut temp_reader)? < 0 {
+                *reader = temp_reader;
                 break;
             }
 
@@ -1357,6 +1389,7 @@ impl SauerRead for StealTokens {
             // peek if -1
             let mut temp_reader = *reader;
             if i32::sauer_read(&mut temp_reader)? < 0 {
+                *reader = temp_reader;
                 break;
             }
 

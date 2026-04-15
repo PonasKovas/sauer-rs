@@ -50,7 +50,7 @@ macro_rules! make_struct {
         pub struct $name {
             $(
                 $(#[$($variant_attr)*])*
-                $field : $type,
+                pub $field : $type,
             )*
         }
 

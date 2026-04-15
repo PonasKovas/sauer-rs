@@ -46,7 +46,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 
     info!("{player_name} connected");
 
-    server.get_client(cn).send_chan1(&Welcome).await;
+    server.get_client(cn).send_chan1(&Welcome {}).await;
     server
         .get_client(cn)
         .send_chan1(&MapChange {
@@ -69,7 +69,11 @@ pub(crate) async fn handle_client<P: Plugin>(
                 gun_select: Gun::Rifle,
                 ammo: PlayerAmmo {
                     rifle: 9999,
-                    ..PlayerAmmo::default()
+                    shotgun: 0,
+                    chaingun: 0,
+                    rocket_launcher: 0,
+                    grenade_launcher: 0,
+                    pistol: 0,
                 },
             },
         })

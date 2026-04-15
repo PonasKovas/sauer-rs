@@ -17,13 +17,12 @@ impl SauerRead for u8 {
 
 impl SauerWrite for bool {
     fn sauer_write(&self, out: &mut Vec<u8>) {
-        (*self as u8).sauer_write(out);
+        (if *self { 1i32 } else { 0i32 }).sauer_write(out);
     }
 }
 impl SauerRead for bool {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        let b = u8::sauer_read(reader)?;
-
+        let b = i32::sauer_read(reader)?;
         Ok(b != 0)
     }
 }
