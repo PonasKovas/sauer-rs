@@ -40,8 +40,8 @@ pub trait Plugin: Send + Sync + 'static {
     #![allow(unused)]
 
     /// On server initialization
-    fn init(&self, server: &Arc<Server>) -> impl Future<Output = ()> + Send + Sync {
-        async move { () }
+    fn init(&self, server: &mut Server) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
     }
 
     /// On new peer connection
@@ -158,21 +158,26 @@ macro_rules! make_packet_handlers_for_tuple {
 impl Plugin for () {}
 
 impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
+    async fn init(&self, server: &mut Server) {
+        // run the right (newer) plugin, and the left - older
+        self.1.init(server).await;
+        self.0.init(server).await
+    }
     async fn connected(&self, ctx: Context<'_>) -> Control {
-        // run the left (previous) plugin
-        self.0.connected(ctx).await?;
-        self.1.connected(ctx).await
+        // run the right (newer) plugin, and the left - older
+        self.1.connected(ctx).await?;
+        self.0.connected(ctx).await
     }
     async fn disconnected(&self, ctx: Context<'_>) -> Control {
-        // run the left (previous) plugin
-        self.0.disconnected(ctx).await?;
-        self.1.disconnected(ctx).await
+        // run the right (newer) plugin, and the left - older
+        self.1.disconnected(ctx).await?;
+        self.0.disconnected(ctx).await
     }
 
     async fn map(&self, ctx: Context<'_>, p: &Bytes) -> Control {
-        // run the left (previous) plugin
-        self.0.map(ctx, p).await?;
-        self.1.map(ctx, p).await
+        // run the right (newer) plugin, and the left - older
+        self.1.map(ctx, p).await?;
+        self.0.map(ctx, p).await
     }
 
     make_packet_handlers_for_tuple! {

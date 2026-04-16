@@ -62,7 +62,10 @@ impl<P: Plugin> ServerBuilder<P> {
         .await?;
 
         let plugin = Arc::new(self.plugin);
-        let server = Arc::new(Server::new());
+        let mut server = Server::new();
+        plugin.init(&mut server).await;
+
+        let server = Arc::new(server);
 
         let mut next_cn = 0;
 

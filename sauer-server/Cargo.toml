@@ -21,3 +21,4 @@ tracing.workspace = true
 dashmap.workspace = true
 bytes.workspace = true
 rand.workspace = true
+anymap.workspace = true

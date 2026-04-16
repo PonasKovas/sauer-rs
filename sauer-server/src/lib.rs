@@ -13,12 +13,14 @@ pub use builder::ServerBuilder;
 
 pub struct Server {
     clients: DashMap<u32, Peer>,
+    pub extra: anymap::Map<dyn anymap::any::Any + Send + Sync>,
 }
 
 impl Server {
     fn new() -> Self {
         Self {
             clients: DashMap::new(),
+            extra: anymap::Map::new(),
         }
     }
     pub fn get_client(&self, client_number: u32) -> dashmap::mapref::one::Ref<'_, u32, Peer> {
