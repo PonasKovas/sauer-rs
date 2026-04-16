@@ -1,6 +1,7 @@
 use crate::internal::{
     constants::{DMF, DNF},
     macros::{make_enum, make_struct},
+    primitives::{read_varint_float, write_varint_float},
 };
 use cube_string::CubeString;
 use num_enum::TryFromPrimitive;
@@ -205,7 +206,7 @@ make_struct!(
 HitInfo {
     target_cn: i32,
     life_sequence: i32,
-    dist: f32,
+    dist: f32 => write_varint_float::<DMF>, read_varint_float::<DMF>,
     rays: i32,
     dir: Vec3<f32> => vec3::write_quantized::<DNF>, vec3::read_quantized::<DNF>,
 });

@@ -147,6 +147,17 @@ impl SauerRead for CubeString {
     }
 }
 
+// DMF quantized float as varint
+pub(crate) fn read_varint_float<const Q: u32>(reader: &mut &[u8]) -> Result<f32, ParseError> {
+    Ok(i32::sauer_read(reader)? as f32 / Q as f32)
+}
+pub(crate) fn write_varint_float<const Q: u32>(val: &f32, out: &mut Vec<u8>) {
+    ((*val * Q as f32) as i32).sauer_write(out);
+}
+
+// SEQUENCES
+////////////////////////////
+
 // Bytes without any length prefix or terminator
 pub(crate) fn read_all_remaining(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
     Ok(reader.to_vec())
