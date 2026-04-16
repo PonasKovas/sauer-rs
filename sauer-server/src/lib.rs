@@ -1,13 +1,14 @@
 use dashmap::DashMap;
 use peer::Peer;
 
-mod base;
+mod base_plugin;
 mod builder;
 mod handle_client;
 mod peer;
 pub mod plugin;
 pub mod utils;
 
+pub use base_plugin::BasePlugin;
 pub use builder::ServerBuilder;
 
 pub struct Server {

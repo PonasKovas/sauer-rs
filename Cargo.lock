@@ -544,6 +544,7 @@ dependencies = [
  "enet-rs",
  "glam",
  "ogz-rs",
+ "rand",
  "sauer-map",
  "sauer-proto",
  "tokio",
