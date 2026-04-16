@@ -7,7 +7,11 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use rand::Rng;
-use tokio::{net::UdpSocket, sync::mpsc, time};
+use tokio::{
+    net::UdpSocket,
+    sync::mpsc::{self, error::TrySendError},
+    time,
+};
 use tracing::warn;
 
 use crate::{
@@ -40,6 +44,8 @@ const MAX_FRAGMENT_BYTES_PER_PEER: usize = 16 * 1024 * 1024; // 16 MiB
 
 /// Maximum number of reliable packets queued in `pending_send` when the window is full.
 const MAX_PENDING_SEND: usize = 1024;
+/// Maximum bytes queued across all channels for out-of-order reliable packets.
+const MAX_INCOMING_RELIABLE_QUEUE_BYTES_PER_PEER: usize = 16 * 1024 * 1024; // 16 MiB
 
 /// Item type sent through the per-peer delivery channel.
 /// `Ok(pkt)` = data packet; `Err(data)` = disconnect event with optional app data.
@@ -136,6 +142,8 @@ struct PeerEntry {
     /// Total bytes currently committed to in-progress fragment reassembly buffers.
     /// Checked before allocating new buffers to prevent per-peer memory exhaustion.
     fragment_bytes_in_flight: usize,
+    /// Total bytes currently queued in out-of-order reliable receive queues across all channels.
+    incoming_reliable_queue_bytes: usize,
 
     /// Timestamp of the start of the current throttle measurement interval.
     packet_throttle_epoch: u32,
@@ -202,6 +210,8 @@ pub(crate) struct HostTask {
     user_rx: mpsc::Receiver<ToTask>,
 
     host_mtu: u32,
+    host_channel_count: u8,
+    duplicate_peers: usize,
     incoming_bandwidth: u32,
     outgoing_bandwidth: u32,
     use_checksum: bool,
@@ -216,6 +226,8 @@ impl HostTask {
         accept_tx: mpsc::Sender<(PeerKey, SocketAddr, mpsc::Receiver<PeerMsg>)>,
         user_rx: mpsc::Receiver<ToTask>,
         max_peers: usize,
+        host_channel_count: u8,
+        duplicate_peers: usize,
         use_checksum: bool,
         incoming_bandwidth: u32,
         outgoing_bandwidth: u32,
@@ -229,6 +241,8 @@ impl HostTask {
             accept_tx,
             user_rx,
             host_mtu: MTU_DEFAULT,
+            host_channel_count: host_channel_count.max(1),
+            duplicate_peers: duplicate_peers.max(1),
             incoming_bandwidth,
             outgoing_bandwidth,
             use_checksum,
@@ -243,6 +257,15 @@ impl HostTask {
 
     fn alloc_slot(&self) -> Option<usize> {
         self.peers.iter().position(|s| s.is_none())
+    }
+
+    fn count_peers_for_ip(&self, addr: SocketAddr) -> usize {
+        let ip = addr.ip();
+        self.peers
+            .iter()
+            .flatten()
+            .filter(|p| p.addr.ip() == ip)
+            .count()
     }
 
     fn peer(&self, key: PeerKey) -> Option<&PeerEntry> {
@@ -384,6 +407,7 @@ impl HostTask {
             outgoing_reliable: BTreeMap::new(),
             pending_send: VecDeque::new(),
             fragment_bytes_in_flight: 0,
+            incoming_reliable_queue_bytes: 0,
             packet_throttle_epoch: 0,
             rtt_at_throttle_epoch: DEFAULT_RTT_MS,
             to_user: tx,
@@ -460,7 +484,8 @@ impl HostTask {
         // Skip the check for CMD_CONNECT: it is a new connection attempt and carries
         // a fresh session ID that won't match the existing peer's recorded session.
         // We peek at the first command byte (low 4 bits = type) to detect this case.
-        let first_cmd_type = slice.first().map(|b| b & 0x0F);
+        let first_cmd_offset = if self.use_checksum { 4 } else { 0 };
+        let first_cmd_type = slice.get(first_cmd_offset).map(|b| b & 0x0F);
         let is_connect_datagram = first_cmd_type == Some(CMD_CONNECT);
         if !is_connect_datagram {
             if let Some(k) = key {
@@ -483,6 +508,20 @@ impl HostTask {
             let connect_id = key
                 .and_then(|k| self.peer(k))
                 .map(|p| p.connect_id)
+                .or_else(|| {
+                    if first_cmd_type == Some(CMD_CONNECT) {
+                        // For initial CONNECT (unknown peer), extract connect_id from the command payload.
+                        // Layout after checksum: [cmd hdr:4][connect body:44], connect_id at body offset 36.
+                        let cmd = &slice[4..];
+                        if cmd.len() >= 44 {
+                            Some(u32::from_be_bytes([cmd[40], cmd[41], cmd[42], cmd[43]]))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or(0);
             let hdr_len = raw.len() - slice.len(); // bytes consumed by header
             let mut scratch = Vec::with_capacity(raw.len());
@@ -605,10 +644,20 @@ impl HostTask {
                         if ch as usize >= p.channels.len() {
                             return;
                         }
-                        p.channels[ch as usize].receive_reliable(seq, sr.data)
+                        let mut queued_bytes = p.incoming_reliable_queue_bytes;
+                        let ready = p.channels[ch as usize].receive_reliable(
+                            seq,
+                            sr.data,
+                            &mut queued_bytes,
+                            MAX_INCOMING_RELIABLE_QUEUE_BYTES_PER_PEER,
+                        );
+                        p.incoming_reliable_queue_bytes = queued_bytes;
+                        ready
                     };
-                    for data in ready {
-                        self.deliver(k, Packet::reliable(data, ch));
+                    for data in ready.1 {
+                        if !self.deliver(k, Packet::reliable(data, ch)) {
+                            break;
+                        }
                     }
                 }
             }
@@ -633,7 +682,7 @@ impl HostTask {
                         p.channels[ch as usize].receive_unreliable(su.unreliable_seq, su.data)
                     };
                     if let Some(data) = accepted {
-                        self.deliver(k, Packet::unreliable(data, ch));
+                        let _ = self.deliver(k, Packet::unreliable(data, ch));
                     }
                 }
             }
@@ -657,7 +706,7 @@ impl HostTask {
                         p.unsequenced_window.check_and_set(su.unsequenced_group)
                     };
                     if accepted {
-                        self.deliver(k, Packet::unsequenced(su.data));
+                        let _ = self.deliver(k, Packet::unsequenced(su.data));
                     }
                 }
             }
@@ -765,21 +814,26 @@ impl HostTask {
                     .or_insert_with(|| {
                         FragmentBuffer::new(sf.total_length as usize, sf.fragment_count)
                     });
+                if buf.fragment_count != sf.fragment_count || buf.total_length != sf.total_length as usize
+                {
+                    return;
+                }
                 buf.receive(sf.fragment_number, sf.fragment_offset as usize, &sf.data)
             };
 
             if done {
-                // Release the per-peer memory budget.
-                p.fragment_bytes_in_flight = p
-                    .fragment_bytes_in_flight
-                    .saturating_sub(sf.total_length as usize);
-
                 let frag_count = sf.fragment_count;
-                let assembled = p.channels[ch as usize]
+                let assembled_buf = p.channels[ch as usize]
                     .fragment_buffers
                     .remove(&sf.start_seq)
-                    .unwrap()
-                    .finish();
+                    .unwrap();
+
+                // Release the per-peer memory budget using the value stored when the buffer was created.
+                p.fragment_bytes_in_flight = p
+                    .fragment_bytes_in_flight
+                    .saturating_sub(assembled_buf.total_length);
+
+                let assembled = assembled_buf.finish();
 
                 // Re-borrow channel now that fragment_buffers entry is removed.
                 let chan = &mut p.channels[ch as usize];
@@ -789,22 +843,30 @@ impl HostTask {
                     // sender consumed frag_count sequence numbers (start_seq..start_seq+frag_count-1).
                     // Advance frag_count-1 more so the next expected seq is start_seq+frag_count,
                     // then drain any packets in the queue that are now reachable.
-                    let mut ready = chan.receive_reliable(sf.start_seq, assembled);
-                    if !ready.is_empty() && frag_count > 1 {
+                    let mut queued_bytes = p.incoming_reliable_queue_bytes;
+                    let mut ready = chan.receive_reliable(
+                        sf.start_seq,
+                        assembled,
+                        &mut queued_bytes,
+                        MAX_INCOMING_RELIABLE_QUEUE_BYTES_PER_PEER,
+                    );
+                    if !ready.1.is_empty() && frag_count > 1 {
                         chan.incoming_reliable_seq = chan
                             .incoming_reliable_seq
                             .wrapping_add((frag_count - 1) as u16);
                         loop {
                             let next = chan.incoming_reliable_seq.wrapping_add(1);
                             if let Some(d) = chan.incoming_reliable_queue.remove(&next) {
+                                queued_bytes = queued_bytes.saturating_sub(d.len());
                                 chan.incoming_reliable_seq = next;
-                                ready.push(d);
+                                ready.1.push(d);
                             } else {
                                 break;
                             }
                         }
                     }
-                    ready
+                    p.incoming_reliable_queue_bytes = queued_bytes;
+                    ready.1
                 } else {
                     // Apply the same sequence ordering check as non-fragmented unreliable packets.
                     match chan.receive_unreliable(sf.start_seq, assembled) {
@@ -823,20 +885,29 @@ impl HostTask {
             } else {
                 SendMode::Unreliable
             };
-            self.deliver(
+            if !self.deliver(
                 key,
                 Packet {
                     data,
                     channel: ch,
                     mode,
                 },
-            );
+            ) {
+                break;
+            }
         }
     }
 
-    fn deliver(&self, key: PeerKey, pkt: Packet) {
-        if let Some(p) = self.peer(key) {
-            let _ = p.to_user.try_send(Ok(pkt));
+    fn deliver(&mut self, key: PeerKey, pkt: Packet) -> bool {
+        let Some(tx) = self.peer(key).map(|p| p.to_user.clone()) else {
+            return false;
+        };
+        match tx.try_send(Ok(pkt)) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) | Err(TrySendError::Closed(_)) => {
+                self.remove_peer(key);
+                false
+            }
         }
     }
 
@@ -858,6 +929,10 @@ impl HostTask {
                 let _ = p.to_user.try_send(Err(None));
             }
             self.remove_peer(old_key);
+        }
+        if self.count_peers_for_ip(from) >= self.duplicate_peers {
+            self.send_raw_disconnect(&connect, from, now_ms).await;
+            return;
         }
         let slot = match self.alloc_slot() {
             Some(s) => s,
@@ -909,7 +984,8 @@ impl HostTask {
             .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
         let ch = connect
             .channel_count
-            .clamp(1, protocol::MAX_CHANNELS as u32) as u8;
+            .clamp(1, self.host_channel_count as u32)
+            .min(protocol::MAX_CHANNELS as u32) as u8;
 
         let mut entry = PeerEntry {
             addr: from,
@@ -934,6 +1010,7 @@ impl HostTask {
             outgoing_reliable: BTreeMap::new(),
             pending_send: VecDeque::new(),
             fragment_bytes_in_flight: 0,
+            incoming_reliable_queue_bytes: 0,
             packet_throttle_epoch: 0,
             rtt_at_throttle_epoch: DEFAULT_RTT_MS,
             to_user: tx,

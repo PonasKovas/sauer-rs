@@ -53,8 +53,9 @@ impl<P: Plugin> ServerBuilder<P> {
             self.bind_addr,
             HostConfig {
                 max_peers: self.max_peers,
+                duplicate_peers: 8,
                 channel_count: sauer_proto::CHANNEL_COUNT as u8,
-                use_checksum: false,
+                use_checksum: true,
                 incoming_bandwidth: 0,
                 outgoing_bandwidth: 0,
             },

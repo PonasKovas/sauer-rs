@@ -13,8 +13,10 @@ const MAX_INCOMING_RELIABLE_QUEUE: usize = 4096;
 
 #[derive(Debug)]
 pub struct FragmentBuffer {
+    pub total_length: usize,
     pub fragment_count: u32,
     pub received: u32,
+    pub received_payload_bytes: usize,
     pub buf: Vec<u8>,
     /// Bitmask: bit i set = fragment i arrived.
     pub mask: Vec<u64>,
@@ -24,8 +26,10 @@ impl FragmentBuffer {
     pub fn new(total_length: usize, fragment_count: u32) -> Self {
         let mask_len = (fragment_count as usize).div_ceil(64);
         Self {
+            total_length,
             fragment_count,
             received: 0,
+            received_payload_bytes: 0,
             buf: vec![0u8; total_length],
             mask: vec![0u64; mask_len],
         }
@@ -61,9 +65,13 @@ impl FragmentBuffer {
 
         self.mask[word] |= 1 << bit;
         self.received += 1;
+        let Some(new_payload_bytes) = self.received_payload_bytes.checked_add(data.len()) else {
+            return false;
+        };
+        self.received_payload_bytes = new_payload_bytes;
         self.buf[offset..end].copy_from_slice(data);
 
-        self.received == self.fragment_count
+        self.received == self.fragment_count && self.received_payload_bytes == self.total_length
     }
 
     pub fn finish(self) -> Bytes {
@@ -122,7 +130,13 @@ impl Channel {
     }
 
     /// Receive a reliable in-order delivery. Returns in-order messages that are now deliverable.
-    pub fn receive_reliable(&mut self, seq: u16, data: Bytes) -> Vec<Bytes> {
+    pub fn receive_reliable(
+        &mut self,
+        seq: u16,
+        data: Bytes,
+        queued_bytes: &mut usize,
+        max_queued_bytes: usize,
+    ) -> (bool, Vec<Bytes>) {
         let expected = self.incoming_reliable_seq.wrapping_add(1);
 
         if seq == expected {
@@ -132,25 +146,33 @@ impl Channel {
             loop {
                 let next = self.incoming_reliable_seq.wrapping_add(1);
                 if let Some(d) = self.incoming_reliable_queue.remove(&next) {
+                    *queued_bytes = queued_bytes.saturating_sub(d.len());
                     self.incoming_reliable_seq = next;
                     out.push(d);
                 } else {
                     break;
                 }
             }
-            out
+            (true, out)
         } else if seq_lt(expected, seq) {
             // Buffer only if within the receive window and below the queue size cap.
             let window: u16 = FREE_RELIABLE_WINDOWS * RELIABLE_WINDOW_SIZE;
             if seq.wrapping_sub(expected) <= window
                 && self.incoming_reliable_queue.len() < MAX_INCOMING_RELIABLE_QUEUE
+                && !self.incoming_reliable_queue.contains_key(&seq)
             {
-                self.incoming_reliable_queue.insert(seq, data);
+                if let Some(new_total) = queued_bytes.checked_add(data.len()) {
+                    if new_total <= max_queued_bytes {
+                        self.incoming_reliable_queue.insert(seq, data);
+                        *queued_bytes = new_total;
+                        return (true, vec![]);
+                    }
+                }
             }
-            vec![]
+            (false, vec![])
         } else {
-            // Old duplicate — discard
-            vec![]
+            // Old duplicate — discard but consider it received for ACK behavior.
+            (true, vec![])
         }
     }
 

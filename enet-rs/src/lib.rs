@@ -124,9 +124,11 @@ impl Packet {
 pub struct HostConfig {
     /// Maximum number of simultaneous peers (default: 64).
     pub max_peers: usize,
+    /// Maximum simultaneous peers sharing a single source IP (default: 8).
+    pub duplicate_peers: usize,
     /// Number of channels per peer (default: 2).
     pub channel_count: u8,
-    /// Whether to compute and verify CRC-32 checksums (default: false).
+    /// Whether to compute and verify CRC-32 checksums (default: true).
     pub use_checksum: bool,
     /// Incoming bandwidth limit in bytes/sec (0 = unlimited).
     pub incoming_bandwidth: u32,
@@ -138,8 +140,9 @@ impl Default for HostConfig {
     fn default() -> Self {
         Self {
             max_peers: 64,
+            duplicate_peers: 8,
             channel_count: 2,
-            use_checksum: false,
+            use_checksum: true,
             incoming_bandwidth: 0,
             outgoing_bandwidth: 0,
         }
@@ -178,6 +181,8 @@ impl Host {
             accept_tx,
             task_rx,
             config.max_peers,
+            config.channel_count,
+            config.duplicate_peers,
             config.use_checksum,
             config.incoming_bandwidth,
             config.outgoing_bandwidth,
@@ -224,7 +229,7 @@ impl Host {
         let (task_tx, task_rx) = mpsc::channel(1024);
         let task = HostTask::new(
             socket, accept_tx, task_rx, 1, // only one peer
-            false, 0, // no incoming bandwidth limit for client
+            channel_count.max(1), 1, true, 0, // no incoming bandwidth limit for client
             0, // no outgoing bandwidth limit for client
         );
         tokio::spawn(task.run());
