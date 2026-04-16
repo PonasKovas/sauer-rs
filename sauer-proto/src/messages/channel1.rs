@@ -4,8 +4,15 @@ use crate::data::*;
 use crate::error::EnumConvertResultExt;
 use crate::error::ParseResultExt;
 use crate::internal::macros::{make_packet_enum, make_struct};
-use crate::internal::read_slice;
-use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
+use crate::internal::{
+    SauerRead, SauerWrite, check_tag,
+    constants::*,
+    primitives::{
+        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data, read_varint_pref_data,
+        read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq, write_short_pref_data,
+        write_varint_pref_data, write_varint_pref_seq,
+    },
+};
 use crate::route::{C2S, Chan1, S2C};
 use cube_string::CubeString;
 
@@ -168,6 +175,7 @@ make_packet_enum!(
     [N_INITTOKENS] InitTokensClient,
     [N_TAKETOKEN] TakeTokenClient,
     [N_DEPOSITTOKENS] DepositTokensClient,
+    [N_TAUNT] Taunt,
 });
 
 /// `N_CLIENT` Wrapper
@@ -241,37 +249,26 @@ impl SauerWrite for EditVar {
 }
 impl SauerRead for EditVar {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_EDITVAR)?;
-        let var_type = i32::sauer_read(reader)
-            .in_field("type")
-            .in_struct("N_EDITVAR")?;
-        let name = CubeString::sauer_read(reader)
-            .in_field("name")
-            .in_struct("N_EDITVAR")?;
-        let val = match var_type {
-            0 => EditVarValue::Int(
-                i32::sauer_read(reader)
-                    .in_field("val")
-                    .in_struct("N_EDITVAR")?,
-            ),
-            1 => EditVarValue::Float(
-                f32::sauer_read(reader)
-                    .in_field("val")
-                    .in_struct("N_EDITVAR")?,
-            ),
-            2 => EditVarValue::String(
-                CubeString::sauer_read(reader)
-                    .in_field("val")
-                    .in_struct("N_EDITVAR")?,
-            ),
-            _ => {
-                return Err(ParseError::InvalidEnumValue {
-                    value: var_type,
-                    enum_name: "EditVarValue",
-                });
-            }
-        };
-        Ok(Self { name, val })
+        fn inner(reader: &mut &[u8]) -> Result<EditVar, ParseError> {
+            check_tag(reader, N_EDITVAR)?;
+            let var_type = i32::sauer_read(reader).in_field("type")?;
+            let name = CubeString::sauer_read(reader).in_field("name")?;
+            let val = match var_type {
+                0 => EditVarValue::Int(i32::sauer_read(reader).in_field("val")?),
+                1 => EditVarValue::Float(f32::sauer_read(reader).in_field("val")?),
+                2 => EditVarValue::String(CubeString::sauer_read(reader).in_field("val")?),
+                _ => {
+                    return Err(ParseError::InvalidEnumValue {
+                        value: var_type,
+                        enum_name: "EditVarValue",
+                    });
+                }
+            };
+
+            Ok(EditVar { name, val })
+        }
+
+        inner(reader).in_struct("N_EDITVAR")
     }
 }
 
@@ -289,56 +286,14 @@ make_struct!(
     mode: EditFaceMode,
 });
 
+make_struct!(
 /// `N_EDITT` Coop Edit: Texture Modification.
-#[derive(Debug, Clone, PartialEq)]
-pub struct EditTex {
-    pub sel: SelInfo,
-    pub tex: i32,
-    pub all_faces: bool,
-    pub extra_data: Vec<u8>,
-}
-impl SauerWrite for EditTex {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_EDITT.sauer_write(out);
-        self.sel.sauer_write(out);
-        self.tex.sauer_write(out);
-        self.all_faces.sauer_write(out);
-        let extra_len = self.extra_data.len() as u16;
-        (extra_len as u8).sauer_write(out);
-        ((extra_len >> 8) as u8).sauer_write(out);
-        out.extend_from_slice(&self.extra_data);
-    }
-}
-impl SauerRead for EditTex {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_EDITT)?;
-        let sel = SelInfo::sauer_read(reader)
-            .in_field("sel")
-            .in_struct("N_EDITT")?;
-        let tex = i32::sauer_read(reader)
-            .in_field("tex")
-            .in_struct("N_EDITT")?;
-        let all_faces = bool::sauer_read(reader)
-            .in_field("all_faces")
-            .in_struct("N_EDITT")?;
-        let lo = u8::sauer_read(reader)
-            .in_field("extra_lo")
-            .in_struct("N_EDITT")? as u16;
-        let hi = u8::sauer_read(reader)
-            .in_field("extra_hi")
-            .in_struct("N_EDITT")? as u16;
-        let extra_len = (lo | (hi << 8)) as usize;
-
-        let extra_data = read_slice(reader, extra_len)?.to_vec();
-
-        Ok(Self {
-            sel,
-            tex,
-            all_faces,
-            extra_data,
-        })
-    }
-}
+[N_EDITT] EditTex {
+    sel: SelInfo,
+    tex: i32,
+    all_faces: bool,
+    extra_data: Vec<u8> => write_short_pref_data, read_short_pref_data,
+});
 
 make_struct!(
 /// `N_EDITM` Coop Edit: Material Modification.
@@ -361,62 +316,15 @@ make_struct!(
     dir: i32,
 });
 
+make_struct!(
 /// `N_REPLACE` Coop Edit: Replace texture.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Replace {
-    pub sel: SelInfo,
-    pub old_tex: i32,
-    pub new_tex: i32,
-    pub in_sel: i32,
-    pub extra_data: Vec<u8>,
-}
-impl SauerWrite for Replace {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_REPLACE.sauer_write(out);
-        self.sel.sauer_write(out);
-        self.old_tex.sauer_write(out);
-        self.new_tex.sauer_write(out);
-        self.in_sel.sauer_write(out);
-        let extra_len = self.extra_data.len() as u16;
-        (extra_len as u8).sauer_write(out);
-        ((extra_len >> 8) as u8).sauer_write(out);
-        out.extend_from_slice(&self.extra_data);
-    }
-}
-impl SauerRead for Replace {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_REPLACE)?;
-        let sel = SelInfo::sauer_read(reader)
-            .in_field("sel")
-            .in_struct("N_REPLACE")?;
-        let old_tex = i32::sauer_read(reader)
-            .in_field("old_tex")
-            .in_struct("N_REPLACE")?;
-        let new_tex = i32::sauer_read(reader)
-            .in_field("new_tex")
-            .in_struct("N_REPLACE")?;
-        let in_sel = i32::sauer_read(reader)
-            .in_field("in_sel")
-            .in_struct("N_REPLACE")?;
-        let lo = u8::sauer_read(reader)
-            .in_field("extra_lo")
-            .in_struct("N_REPLACE")? as u16;
-        let hi = u8::sauer_read(reader)
-            .in_field("extra_hi")
-            .in_struct("N_REPLACE")? as u16;
-        let extra_len = (lo | (hi << 8)) as usize;
-
-        let extra_data = read_slice(reader, extra_len)?.to_vec();
-
-        Ok(Self {
-            sel,
-            old_tex,
-            new_tex,
-            in_sel,
-            extra_data,
-        })
-    }
-}
+[N_REPLACE] Replace {
+    sel: SelInfo,
+    old_tex: i32,
+    new_tex: i32,
+    in_sel: i32,
+    extra_data: Vec<u8> => write_short_pref_data, read_short_pref_data,
+});
 
 make_struct!(
 /// `N_DELCUBE` Coop Edit: Delete a cube.
@@ -424,56 +332,14 @@ make_struct!(
     sel: SelInfo,
 });
 
+make_struct!(
 /// `N_EDITVSLOT` Coop Edit: Modify texture V-Slots.
-#[derive(Debug, Clone, PartialEq)]
-pub struct EditVSlot {
-    pub sel: SelInfo,
-    pub delta: i32,
-    pub all_faces: bool,
-    pub extra_data: Vec<u8>,
-}
-impl SauerWrite for EditVSlot {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_EDITVSLOT.sauer_write(out);
-        self.sel.sauer_write(out);
-        self.delta.sauer_write(out);
-        self.all_faces.sauer_write(out);
-        let extra_len = self.extra_data.len() as u16;
-        (extra_len as u8).sauer_write(out);
-        ((extra_len >> 8) as u8).sauer_write(out);
-        out.extend_from_slice(&self.extra_data);
-    }
-}
-impl SauerRead for EditVSlot {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_EDITVSLOT)?;
-        let sel = SelInfo::sauer_read(reader)
-            .in_field("sel")
-            .in_struct("N_EDITVSLOT")?;
-        let delta = i32::sauer_read(reader)
-            .in_field("delta")
-            .in_struct("N_EDITVSLOT")?;
-        let all_faces = bool::sauer_read(reader)
-            .in_field("all_faces")
-            .in_struct("N_EDITVSLOT")?;
-        let lo = u8::sauer_read(reader)
-            .in_field("extra_lo")
-            .in_struct("N_EDITVSLOT")? as u16;
-        let hi = u8::sauer_read(reader)
-            .in_field("extra_hi")
-            .in_struct("N_EDITVSLOT")? as u16;
-        let extra_len = (lo | (hi << 8)) as usize;
-
-        let extra_data = read_slice(reader, extra_len)?.to_vec();
-
-        Ok(Self {
-            sel,
-            delta,
-            all_faces,
-            extra_data,
-        })
-    }
-}
+[N_EDITVSLOT] EditVSlot {
+    sel: SelInfo,
+    delta: i32,
+    all_faces: bool,
+    extra_data: Vec<u8> => write_short_pref_data, read_short_pref_data,
+});
 
 make_struct!(
 /// `N_REMIP` Coop Edit: Lighting/mips recalculation.
@@ -486,37 +352,11 @@ make_struct!(
     size: i32,
 });
 
+make_struct!(
 /// `N_ITEMLIST` Bulk sends the items available on a map (synchronization).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ItemList {
-    pub items: Vec<data::ItemSpawn>,
-}
-impl SauerWrite for ItemList {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_ITEMLIST.sauer_write(out);
-        for item in &self.items {
-            item.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for ItemList {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_ITEMLIST)?;
-        let mut items = Vec::new();
-        loop {
-            // peek if -1
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? < 0 {
-                *reader = temp_reader;
-                break;
-            }
-
-            items.push(data::ItemSpawn::sauer_read(reader)?);
-        }
-        Ok(Self { items })
-    }
-}
+[N_ITEMLIST] ItemList {
+    items: Vec<data::ItemSpawn> => write_neg_term_seq, read_neg_term_seq,
+});
 
 make_struct!(
 /// `N_SERVCMD` Raw server command.
@@ -652,67 +492,17 @@ make_struct!(
     team_frags: i32,
 });
 
+make_struct!(
 /// `N_TEAMINFO` Transmits team scores (frags).
-#[derive(Debug, Clone, PartialEq)]
-pub struct TeamInfo {
-    pub teams: Vec<data::TeamInfo>,
-}
-impl SauerWrite for TeamInfo {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_TEAMINFO.sauer_write(out);
-        for team in &self.teams {
-            team.sauer_write(out);
-        }
-        0u8.sauer_write(out); // Empty string terminator
-    }
-}
-impl SauerRead for TeamInfo {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_TEAMINFO)?;
-        let mut teams = Vec::new();
-        loop {
-            // peek if 0
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? <= 0 {
-                break;
-            }
+[N_TEAMINFO] TeamInfo {
+    teams: Vec<data::TeamInfo> => write_nonpos_term_seq, read_nonpos_term_seq,
+});
 
-            teams.push(data::TeamInfo::sauer_read(reader)?);
-        }
-        Ok(Self { teams })
-    }
-}
-
+make_struct!(
 /// `N_RESUME` Sent during a late join to tell the connecting client about the state of all players.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Resume {
-    pub clients: Vec<ClientResumeState>,
-}
-impl SauerWrite for Resume {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_RESUME.sauer_write(out);
-        for c in &self.clients {
-            c.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for Resume {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_RESUME)?;
-        let mut clients = Vec::new();
-        loop {
-            // peek if -1
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? < 0 {
-                *reader = temp_reader;
-                break;
-            }
-            clients.push(ClientResumeState::sauer_read(reader)?);
-        }
-        Ok(Self { clients })
-    }
-}
+[N_RESUME] Resume {
+    clients: Vec<ClientResumeState> => write_neg_term_seq, read_neg_term_seq,
+});
 
 make_struct!(
 /// `N_ITEMSPAWN` Notifies that an item has spawned on the map.
@@ -727,110 +517,29 @@ make_struct!(
     client_num: i32,
 });
 
+make_struct!(
 /// `N_CLIPBOARD` Pushes map clipboard data (for cooperative editing) to the client.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClipboardServer {
-    pub client_num: i32,
-    pub unpack_len: i32,
-    pub pack_len: i32,
-    pub data: Vec<u8>,
-}
-impl SauerWrite for ClipboardServer {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_CLIPBOARD.sauer_write(out);
-        self.client_num.sauer_write(out);
-        self.unpack_len.sauer_write(out);
-        self.pack_len.sauer_write(out);
-        out.extend_from_slice(&self.data);
-    }
-}
-impl SauerRead for ClipboardServer {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_CLIPBOARD)?;
-        let client_num = i32::sauer_read(reader)?;
-        let unpack_len = i32::sauer_read(reader)?;
-        let pack_len = i32::sauer_read(reader)?;
-        let len = if pack_len > 0 { pack_len as usize } else { 0 };
-        let data = read_slice(reader, len)?.to_vec();
+[N_CLIPBOARD] ClipboardServer {
+    client_num: i32,
+    unpack_len: i32,
+    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+});
 
-        Ok(Self {
-            client_num,
-            unpack_len,
-            pack_len,
-            data,
-        })
-    }
-}
-
+make_struct!(
 /// `N_UNDO` Sends geometry undo data to the client.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UndoServer {
-    pub client_num: i32,
-    pub unpack_len: i32,
-    pub pack_len: i32,
-    pub data: Vec<u8>,
-}
-impl SauerWrite for UndoServer {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_UNDO.sauer_write(out);
-        self.client_num.sauer_write(out);
-        self.unpack_len.sauer_write(out);
-        self.pack_len.sauer_write(out);
-        out.extend_from_slice(&self.data);
-    }
-}
-impl SauerRead for UndoServer {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_UNDO)?;
-        let client_num = i32::sauer_read(reader)?;
-        let unpack_len = i32::sauer_read(reader)?;
-        let pack_len = i32::sauer_read(reader)?;
-        let len = if pack_len > 0 { pack_len as usize } else { 0 };
-        let data = read_slice(reader, len)?.to_vec();
+[N_UNDO] UndoServer {
+    client_num: i32,
+    unpack_len: i32,
+    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+});
 
-        Ok(Self {
-            client_num,
-            unpack_len,
-            pack_len,
-            data,
-        })
-    }
-}
-
+make_struct!(
 /// `N_REDO` Sends geometry redo data to the client.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RedoServer {
-    pub client_num: i32,
-    pub unpack_len: i32,
-    pub pack_len: i32,
-    pub data: Vec<u8>,
-}
-impl SauerWrite for RedoServer {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_REDO.sauer_write(out);
-        self.client_num.sauer_write(out);
-        self.unpack_len.sauer_write(out);
-        self.pack_len.sauer_write(out);
-        out.extend_from_slice(&self.data);
-    }
-}
-impl SauerRead for RedoServer {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_REDO)?;
-        let client_num = i32::sauer_read(reader)?;
-        let unpack_len = i32::sauer_read(reader)?;
-        let pack_len = i32::sauer_read(reader)?;
-        let len = if pack_len > 0 { pack_len as usize } else { 0 };
-        let data = read_slice(reader, len)?.to_vec();
-
-        Ok(Self {
-            client_num,
-            unpack_len,
-            pack_len,
-            data,
-        })
-    }
-}
+[N_REDO] RedoServer {
+    client_num: i32,
+    unpack_len: i32,
+    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+});
 
 make_struct!(
 /// `N_PONG` Basic ping packet sent to measure round-trip time.
@@ -850,38 +559,11 @@ make_struct!(
     text: CubeString,
 });
 
+make_struct!(
 /// `N_SENDDEMOLIST` Replicates the list of available demos back to the client.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SendDemoList {
-    pub demos: Vec<CubeString>,
-}
-impl SauerWrite for SendDemoList {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_SENDDEMOLIST.sauer_write(out);
-        (self.demos.len() as i32).sauer_write(out);
-        for demo in &self.demos {
-            demo.sauer_write(out);
-        }
-    }
-}
-impl SauerRead for SendDemoList {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_SENDDEMOLIST)?;
-        let count = i32::sauer_read(reader)?;
-        if count < 0 || count > 1024 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "demo_count",
-                value: count,
-                max: 1024,
-            });
-        }
-        let mut demos = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            demos.push(CubeString::sauer_read(reader)?);
-        }
-        Ok(Self { demos })
-    }
-}
+[N_SENDDEMOLIST] SendDemoList {
+    demos: Vec<CubeString> => write_varint_pref_seq, read_varint_pref_seq::<1024, _>, // max 1024 demos
+});
 
 make_struct!(
 /// `N_DEMOPLAYBACK` Informs the client that the server has started or stopped demo playback.
@@ -890,44 +572,12 @@ make_struct!(
     client_num: i32,
 });
 
+make_struct!(
 /// `N_CURRENTMASTER` Notifies clients of the current master mode and list of clients with privileges.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CurrentMaster {
-    pub master_mode: MasterMode,
-    pub clients: Vec<MasterClient>,
-}
-impl SauerWrite for CurrentMaster {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_CURRENTMASTER.sauer_write(out);
-        (self.master_mode as i32).sauer_write(out);
-        for c in &self.clients {
-            c.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for CurrentMaster {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_CURRENTMASTER)?;
-        let mm_val = i32::sauer_read(reader)?;
-        let master_mode = MasterMode::try_from(mm_val).in_enum("MasterMode")?;
-        let mut clients = Vec::new();
-        loop {
-            // peek if -1
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? < 0 {
-                *reader = temp_reader;
-                break;
-            }
-
-            clients.push(MasterClient::sauer_read(reader)?);
-        }
-        Ok(Self {
-            master_mode,
-            clients,
-        })
-    }
-}
+[N_CURRENTMASTER] CurrentMaster {
+    master_mode: MasterMode,
+    clients: Vec<MasterClient> => write_neg_term_seq, read_neg_term_seq,
+});
 
 make_struct!(
 /// `N_MASTERMODE` Updates the global Master Mode.
@@ -982,38 +632,11 @@ make_struct!(
     team: CubeString,
 });
 
+make_struct!(
 /// `N_BASES` Sends the list of capture bases for the current map (Capture / Regen Capture).
-#[derive(Debug, Clone, PartialEq)]
-pub struct BasesServer {
-    pub bases: Vec<data::BaseInfo>,
-}
-impl SauerWrite for BasesServer {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_BASES.sauer_write(out);
-        (self.bases.len() as i32).sauer_write(out);
-        for b in &self.bases {
-            b.sauer_write(out);
-        }
-    }
-}
-impl SauerRead for BasesServer {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_BASES)?;
-        let num_bases = i32::sauer_read(reader)?;
-        if num_bases < 0 || num_bases > 256 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "num_bases",
-                value: num_bases,
-                max: 256,
-            });
-        }
-        let mut bases = Vec::with_capacity(num_bases as usize);
-        for _ in 0..num_bases {
-            bases.push(data::BaseInfo::sauer_read(reader)?);
-        }
-        Ok(Self { bases })
-    }
-}
+[N_BASES] BasesServer {
+    bases: Vec<data::BaseInfo> => write_varint_pref_seq, read_varint_pref_seq::<256, _>, // max 256 bases
+});
 
 make_struct!(
 /// `N_BASEINFO` Updates the state of a single capture base.
@@ -1049,6 +672,8 @@ make_struct!(
     ammotype: ItemType,
     ammo: i32,
 });
+
+// TODO stateful parsing
 
 /// `N_INITFLAGS` Sends initial flag states to joining clients (CTF modes).
 #[derive(Debug, Clone, PartialEq)]
@@ -1102,62 +727,66 @@ impl SauerWrite for InitFlagsServer {
 }
 impl SauerRead for InitFlagsServer {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_INITFLAGS)?;
-        let scores = [i32::sauer_read(reader)?, i32::sauer_read(reader)?];
-        let num_flags = i32::sauer_read(reader)?;
-        if num_flags < 0 || num_flags > 256 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "num_flags",
-                value: num_flags,
-                max: 256,
-            });
-        }
-        let mut flags = Vec::with_capacity(num_flags as usize);
-        for _ in 0..num_flags {
-            let version = i32::sauer_read(reader)?;
-            let spawn_index = i32::sauer_read(reader)?;
-            let owner_id = i32::sauer_read(reader)?;
-            let invis = i32::sauer_read(reader)? != 0;
-
-            let owner = if owner_id < 0 {
-                let dropped = i32::sauer_read(reader)? != 0;
-                let drop_loc = if dropped {
-                    data::vec3::read_quantized::<DMF>(reader)?
-                } else {
-                    data::Vec3 {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                    }
-                };
-                FlagStateOwner::Dropped { dropped, drop_loc }
-            } else {
-                FlagStateOwner::Owned { owner: owner_id }
-            };
-
-            let hold = if reader.is_empty() {
-                None
-            } else {
-                let team = i32::sauer_read(reader)?;
-                Some(if team < 0 {
-                    FlagStateHoldTeam::None
-                } else {
-                    FlagStateHoldTeam::Team {
-                        team,
-                        hold_time: i32::sauer_read(reader)?,
-                    }
+        fn inner(reader: &mut &[u8]) -> Result<InitFlagsServer, ParseError> {
+            check_tag(reader, N_INITFLAGS)?;
+            let scores = [i32::sauer_read(reader)?, i32::sauer_read(reader)?];
+            let num_flags = i32::sauer_read(reader)?;
+            if num_flags < 0 || num_flags > 256 {
+                return Err(ParseError::ValueOutOfRange {
+                    value: num_flags,
+                    max: 256,
                 })
-            };
+                .in_field("num_flags");
+            }
+            let mut flags = Vec::with_capacity(num_flags as usize);
+            for _ in 0..num_flags {
+                let version = i32::sauer_read(reader)?;
+                let spawn_index = i32::sauer_read(reader)?;
+                let owner_id = i32::sauer_read(reader)?;
+                let invis = i32::sauer_read(reader)? != 0;
 
-            flags.push(FlagState {
-                version,
-                spawn_index,
-                owner,
-                invis,
-                hold,
-            });
+                let owner = if owner_id < 0 {
+                    let dropped = i32::sauer_read(reader)? != 0;
+                    let drop_loc = if dropped {
+                        data::vec3::read_quantized::<DMF>(reader)?
+                    } else {
+                        data::Vec3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        }
+                    };
+                    FlagStateOwner::Dropped { dropped, drop_loc }
+                } else {
+                    FlagStateOwner::Owned { owner: owner_id }
+                };
+
+                let hold = if reader.is_empty() {
+                    None
+                } else {
+                    let team = i32::sauer_read(reader)?;
+                    Some(if team < 0 {
+                        FlagStateHoldTeam::None
+                    } else {
+                        FlagStateHoldTeam::Team {
+                            team,
+                            hold_time: i32::sauer_read(reader)?,
+                        }
+                    })
+                };
+
+                flags.push(FlagState {
+                    version,
+                    spawn_index,
+                    owner,
+                    invis,
+                    hold,
+                });
+            }
+            Ok(InitFlagsServer { scores, flags })
         }
-        Ok(Self { scores, flags })
+
+        inner(reader).in_struct("N_INITFLAGS")
     }
 }
 
@@ -1217,62 +846,13 @@ make_struct!(
     invis: bool,
 });
 
+make_struct!(
 /// `N_INITTOKENS` Sends initial token states to joining clients (Collect mode).
-#[derive(Debug, Clone, PartialEq)]
-pub struct InitTokensServer {
-    pub scores: [i32; 2],
-    pub tokens: Vec<TokenState>,
-    pub client_tokens: Vec<ClientTokenState>,
-}
-impl SauerWrite for InitTokensServer {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_INITTOKENS.sauer_write(out);
-        self.scores[0].sauer_write(out);
-        self.scores[1].sauer_write(out);
-        (self.tokens.len() as i32).sauer_write(out);
-        for t in &self.tokens {
-            t.sauer_write(out);
-        }
-        for ct in &self.client_tokens {
-            ct.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for InitTokensServer {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_INITTOKENS)?;
-        let scores = [i32::sauer_read(reader)?, i32::sauer_read(reader)?];
-        let num_tokens = i32::sauer_read(reader)?;
-        if num_tokens < 0 || num_tokens > 256 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "num_tokens",
-                value: num_tokens,
-                max: 256,
-            });
-        }
-        let mut tokens = Vec::with_capacity(num_tokens as usize);
-        for _ in 0..num_tokens {
-            tokens.push(TokenState::sauer_read(reader)?);
-        }
-        let mut client_tokens = Vec::new();
-        loop {
-            // peek if -1
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? < 0 {
-                *reader = temp_reader;
-                break;
-            }
-
-            client_tokens.push(ClientTokenState::sauer_read(reader)?);
-        }
-        Ok(Self {
-            scores,
-            tokens,
-            client_tokens,
-        })
-    }
-}
+[N_INITTOKENS] InitTokensServer {
+    scores: [i32; 2],
+    tokens: Vec<TokenState> => write_varint_pref_seq, read_varint_pref_seq::<256, _>, // max 256
+    client_tokens: Vec<ClientTokenState> => write_neg_term_seq, read_neg_term_seq,
+});
 
 make_struct!(
 /// `N_TAKETOKEN` A player collected a token.
@@ -1282,134 +862,31 @@ make_struct!(
     total: i32,
 });
 
+make_struct!(
 /// `N_EXPIRETOKENS` Notifies that specific tokens have expired.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExpireTokens {
-    pub tokens: Vec<i32>,
-}
-impl SauerWrite for ExpireTokens {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_EXPIRETOKENS.sauer_write(out);
-        for &t in &self.tokens {
-            t.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for ExpireTokens {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_EXPIRETOKENS)?;
-        let mut tokens = Vec::new();
-        loop {
-            let id = i32::sauer_read(reader)?;
-            if id < 0 {
-                break;
-            }
-            tokens.push(id);
-        }
-        Ok(Self { tokens })
-    }
-}
+[N_EXPIRETOKENS] ExpireTokens {
+    tokens: Vec<i32> => write_neg_term_seq, read_neg_term_seq,
+});
 
+make_struct!(
 /// `N_DROPTOKENS` A player dropped their held tokens.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DropTokens {
-    pub client_num: i32,
-    pub drop_loc: Vec3<f32>,
-    pub tokens: Vec<DroppedToken>,
-}
-impl SauerWrite for DropTokens {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_DROPTOKENS.sauer_write(out);
-        self.client_num.sauer_write(out);
-        data::vec3::write_quantized::<DMF>(&self.drop_loc, out);
-        for t in &self.tokens {
-            t.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for DropTokens {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_DROPTOKENS)?;
-        let client_num = i32::sauer_read(reader)?;
-        let drop_loc = data::vec3::read_quantized::<DMF>(reader)?;
-        let mut tokens = Vec::new();
-        loop {
-            // peek if -1
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? < 0 {
-                *reader = temp_reader;
-                break;
-            }
+[N_DROPTOKENS] DropTokens {
+    client_num: i32,
+    drop_loc: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
+    tokens: Vec<DroppedToken> => write_neg_term_seq, read_neg_term_seq,
+});
 
-            tokens.push(DroppedToken::sauer_read(reader)?);
-        }
-        Ok(Self {
-            client_num,
-            drop_loc,
-            tokens,
-        })
-    }
-}
-
+make_struct!(
 /// `N_STEALTOKENS` A player stole tokens from the enemy team.
-#[derive(Debug, Clone, PartialEq)]
-pub struct StealTokens {
-    pub client_num: i32,
-    pub team: i32,
-    pub basenum: i32,
-    pub enemy_team: i32,
-    pub score: i32,
-    pub drop_loc: Vec3<f32>,
-    pub tokens: Vec<StolenToken>,
-}
-impl SauerWrite for StealTokens {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_STEALTOKENS.sauer_write(out);
-        self.client_num.sauer_write(out);
-        self.team.sauer_write(out);
-        self.basenum.sauer_write(out);
-        self.enemy_team.sauer_write(out);
-        self.score.sauer_write(out);
-        data::vec3::write_quantized::<DMF>(&self.drop_loc, out);
-        for t in &self.tokens {
-            t.sauer_write(out);
-        }
-        (-1i32).sauer_write(out);
-    }
-}
-impl SauerRead for StealTokens {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_STEALTOKENS)?;
-        let client_num = i32::sauer_read(reader)?;
-        let team = i32::sauer_read(reader)?;
-        let basenum = i32::sauer_read(reader)?;
-        let enemy_team = i32::sauer_read(reader)?;
-        let score = i32::sauer_read(reader)?;
-        let drop_loc = data::vec3::read_quantized::<DMF>(reader)?;
-        let mut tokens = Vec::new();
-        loop {
-            // peek if -1
-            let mut temp_reader = *reader;
-            if i32::sauer_read(&mut temp_reader)? < 0 {
-                *reader = temp_reader;
-                break;
-            }
-
-            tokens.push(StolenToken::sauer_read(reader)?);
-        }
-        Ok(Self {
-            client_num,
-            team,
-            basenum,
-            enemy_team,
-            score,
-            drop_loc,
-            tokens,
-        })
-    }
-}
+[N_STEALTOKENS] StealTokens {
+    client_num: i32,
+    team: i32,
+    basenum: i32,
+    enemy_team: i32,
+    score: i32,
+    drop_loc: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
+    tokens: Vec<StolenToken> => write_neg_term_seq, read_neg_term_seq,
+});
 
 make_struct!(
 /// `N_DEPOSITTOKENS` A player deposited tokens at a base.
@@ -1537,103 +1014,24 @@ make_struct!(
 [N_SUICIDE] Suicide {}
 );
 
+make_struct!(
 /// `N_SHOOT` The client fired a weapon.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Shoot {
-    pub id: i32,
-    pub gun: Gun,
-    pub from: Vec3<f32>,
-    pub to: Vec3<f32>,
-    pub hits: Vec<HitInfo>,
-}
-impl SauerWrite for Shoot {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_SHOOT.sauer_write(out);
-        self.id.sauer_write(out);
-        (self.gun as i32).sauer_write(out);
-        data::vec3::write_quantized::<DMF>(&self.from, out);
-        data::vec3::write_quantized::<DMF>(&self.to, out);
-        (self.hits.len() as i32).sauer_write(out);
-        for h in &self.hits {
-            h.sauer_write(out);
-        }
-    }
-}
-impl SauerRead for Shoot {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_SHOOT)?;
-        let id = i32::sauer_read(reader)?;
-        let gun = Gun::try_from(i32::sauer_read(reader)?).unwrap_or(Gun::Fist);
-        let from = data::vec3::read_quantized::<DMF>(reader)?;
-        let to = data::vec3::read_quantized::<DMF>(reader)?;
-        let hits_count = i32::sauer_read(reader)?;
-        if hits_count < 0 || hits_count > 128 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "hits_count",
-                value: hits_count,
-                max: 128,
-            });
-        }
-        let mut hits = Vec::with_capacity(hits_count as usize);
-        for _ in 0..hits_count {
-            hits.push(HitInfo::sauer_read(reader)?);
-        }
-        Ok(Self {
-            id,
-            gun,
-            from,
-            to,
-            hits,
-        })
-    }
-}
+[N_SHOOT] Shoot {
+    id: i32,
+    gun: Gun,
+    from: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
+    to: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
+    hits: Vec<HitInfo> => write_varint_pref_seq, read_varint_pref_seq::<128, _>, // max 128
+});
 
+make_struct!(
 /// `N_EXPLODE` Projectile explosion triggered by the client.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Explode {
-    pub millis: i32,
-    pub gun: Gun,
-    pub id: i32,
-    pub hits: Vec<HitInfo>,
-}
-impl SauerWrite for Explode {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_EXPLODE.sauer_write(out);
-        self.millis.sauer_write(out);
-        (self.gun as i32).sauer_write(out);
-        self.id.sauer_write(out);
-        (self.hits.len() as i32).sauer_write(out);
-        for h in &self.hits {
-            h.sauer_write(out);
-        }
-    }
-}
-impl SauerRead for Explode {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_EXPLODE)?;
-        let millis = i32::sauer_read(reader)?;
-        let gun = Gun::try_from(i32::sauer_read(reader)?).unwrap_or(Gun::Fist);
-        let id = i32::sauer_read(reader)?;
-        let hits_count = i32::sauer_read(reader)?;
-        if hits_count < 0 || hits_count > 128 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "hits_count",
-                value: hits_count,
-                max: 128,
-            });
-        }
-        let mut hits = Vec::with_capacity(hits_count as usize);
-        for _ in 0..hits_count {
-            hits.push(HitInfo::sauer_read(reader)?);
-        }
-        Ok(Self {
-            millis,
-            gun,
-            id,
-            hits,
-        })
-    }
-}
+[N_EXPLODE] Explode {
+    millis: i32,
+    gun: Gun,
+    id: i32,
+    hits: Vec<HitInfo> => write_varint_pref_seq, read_varint_pref_seq::<128, _>, // max 128
+});
 
 make_struct!(
 /// `N_ITEMPICKUP` The client requested to pick up an item.
@@ -1815,98 +1213,26 @@ make_struct!(
 [N_PASTE] PasteClient {}
 );
 
+make_struct!(
 /// `N_CLIPBOARD` Coop Edit: Uploads raw clipboard geometry data.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClipboardClient {
-    pub unpack_len: i32,
-    pub pack_len: i32,
-    pub data: Vec<u8>,
-}
-impl SauerWrite for ClipboardClient {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_CLIPBOARD.sauer_write(out);
-        self.unpack_len.sauer_write(out);
-        self.pack_len.sauer_write(out);
-        out.extend_from_slice(&self.data);
-    }
-}
-impl SauerRead for ClipboardClient {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_CLIPBOARD)?;
-        let unpack_len = i32::sauer_read(reader)?;
-        let pack_len = i32::sauer_read(reader)?;
-        let len = if pack_len > 0 { pack_len as usize } else { 0 };
-        let data = read_slice(reader, len)?.to_vec();
+[N_CLIPBOARD] ClipboardClient {
+    unpack_len: i32,
+    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+});
 
-        Ok(Self {
-            unpack_len,
-            pack_len,
-            data,
-        })
-    }
-}
-
+make_struct!(
 /// `N_UNDO` Coop Edit: Undo event.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UndoClient {
-    pub unpack_len: i32,
-    pub pack_len: i32,
-    pub data: Vec<u8>,
-}
-impl SauerWrite for UndoClient {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_UNDO.sauer_write(out);
-        self.unpack_len.sauer_write(out);
-        self.pack_len.sauer_write(out);
-        out.extend_from_slice(&self.data);
-    }
-}
-impl SauerRead for UndoClient {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_UNDO)?;
-        let unpack_len = i32::sauer_read(reader)?;
-        let pack_len = i32::sauer_read(reader)?;
-        let len = if pack_len > 0 { pack_len as usize } else { 0 };
-        let data = read_slice(reader, len)?.to_vec();
+[N_UNDO] UndoClient {
+    unpack_len: i32,
+    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+});
 
-        Ok(Self {
-            unpack_len,
-            pack_len,
-            data,
-        })
-    }
-}
-
+make_struct!(
 /// `N_REDO` Coop Edit: Redo event.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RedoClient {
-    pub unpack_len: i32,
-    pub pack_len: i32,
-    pub data: Vec<u8>,
-}
-impl SauerWrite for RedoClient {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_REDO.sauer_write(out);
-        self.unpack_len.sauer_write(out);
-        self.pack_len.sauer_write(out);
-        out.extend_from_slice(&self.data);
-    }
-}
-impl SauerRead for RedoClient {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_REDO)?;
-        let unpack_len = i32::sauer_read(reader)?;
-        let pack_len = i32::sauer_read(reader)?;
-        let len = if pack_len > 0 { pack_len as usize } else { 0 };
-        let data = read_slice(reader, len)?.to_vec();
-
-        Ok(Self {
-            unpack_len,
-            pack_len,
-            data,
-        })
-    }
-}
+[N_REDO] RedoClient {
+    unpack_len: i32,
+    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+});
 
 /// `N_BASES` Sends the list of capture base spawns to the server (Capture / Regen Capture).
 #[derive(Debug, Clone, PartialEq)]
@@ -1925,29 +1251,31 @@ impl SauerWrite for BasesClient {
 }
 impl SauerRead for BasesClient {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_BASES)?;
-        let num_bases = i32::sauer_read(reader)?;
-        if num_bases < 0 || num_bases > 256 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "num_bases",
-                value: num_bases,
-                max: 256,
-            });
+        fn inner(reader: &mut &[u8]) -> Result<BasesClient, ParseError> {
+            check_tag(reader, N_BASES)?;
+            let num_bases = i32::sauer_read(reader)?;
+            if num_bases < 0 || num_bases > 256 {
+                return Err(ParseError::ValueOutOfRange {
+                    value: num_bases,
+                    max: 256,
+                });
+            }
+            let mut bases = Vec::with_capacity(num_bases as usize);
+            for _ in 0..num_bases {
+                let ammotype_val = i32::sauer_read(reader)?;
+                let ammotype = if ammotype_val == 0 {
+                    None
+                } else {
+                    Some(ItemType::try_from(ammotype_val).in_enum("ItemType")?)
+                };
+                bases.push(BaseSpawn {
+                    ammotype,
+                    pos: data::vec3::read_quantized::<DMF>(reader)?,
+                });
+            }
+            Ok(BasesClient { bases })
         }
-        let mut bases = Vec::with_capacity(num_bases as usize);
-        for _ in 0..num_bases {
-            let ammotype_val = i32::sauer_read(reader)?;
-            let ammotype = if ammotype_val == 0 {
-                None
-            } else {
-                Some(ItemType::try_from(ammotype_val).in_enum("ItemType")?)
-            };
-            bases.push(BaseSpawn {
-                ammotype,
-                pos: data::vec3::read_quantized::<DMF>(reader)?,
-            });
-        }
-        Ok(Self { bases })
+        inner(reader).in_struct("N_BASES")
     }
 }
 
@@ -1968,71 +1296,17 @@ make_struct!(
     version: i32,
 });
 
+make_struct!(
 /// `N_INITFLAGS` Sends initial flag spawn positions to the server (CTF modes).
-#[derive(Debug, Clone, PartialEq)]
-pub struct InitFlagsClient {
-    pub flags: Vec<FlagSpawn>,
-}
-impl SauerWrite for InitFlagsClient {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_INITFLAGS.sauer_write(out);
-        (self.flags.len() as i32).sauer_write(out);
-        for f in &self.flags {
-            f.sauer_write(out);
-        }
-    }
-}
-impl SauerRead for InitFlagsClient {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_INITFLAGS)?;
-        let num_flags = i32::sauer_read(reader)?;
-        if num_flags < 0 || num_flags > 256 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "num_flags",
-                value: num_flags,
-                max: 256,
-            });
-        }
-        let mut flags = Vec::with_capacity(num_flags as usize);
-        for _ in 0..num_flags {
-            flags.push(FlagSpawn::sauer_read(reader)?);
-        }
-        Ok(Self { flags })
-    }
-}
+[N_INITFLAGS] InitFlagsClient {
+    flags: Vec<FlagSpawn> => write_varint_pref_seq, read_varint_pref_seq::<256, _>, // max 256
+});
 
+make_struct!(
 /// `N_INITTOKENS` Sends initial token base spawn data to the server (Collect mode).
-#[derive(Debug, Clone, PartialEq)]
-pub struct InitTokensClient {
-    pub bases: Vec<TokenBaseSpawn>,
-}
-impl SauerWrite for InitTokensClient {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
-        N_INITTOKENS.sauer_write(out);
-        (self.bases.len() as i32).sauer_write(out);
-        for b in &self.bases {
-            b.sauer_write(out);
-        }
-    }
-}
-impl SauerRead for InitTokensClient {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        check_tag(reader, N_INITTOKENS)?;
-        let num_bases = i32::sauer_read(reader)?;
-        if num_bases < 0 || num_bases > 256 {
-            return Err(ParseError::ValueOutOfRange {
-                field: "num_bases",
-                value: num_bases,
-                max: 256,
-            });
-        }
-        let mut bases = Vec::with_capacity(num_bases as usize);
-        for _ in 0..num_bases {
-            bases.push(TokenBaseSpawn::sauer_read(reader)?);
-        }
-        Ok(Self { bases })
-    }
-}
+[N_INITTOKENS] InitTokensClient {
+    bases: Vec<TokenBaseSpawn> => write_varint_pref_seq, read_varint_pref_seq::<256, _>, // max 256
+});
 
 make_struct!(
 /// `N_TAKETOKEN` Client collected a token.

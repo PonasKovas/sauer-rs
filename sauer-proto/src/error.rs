@@ -31,12 +31,8 @@ pub enum ParseError {
     #[error("This packet cant be wrapped in N_CLIENT")]
     BadClientWrapper,
 
-    #[error("Value {value} out of range for `{field}` (max {max})")]
-    ValueOutOfRange {
-        field: &'static str,
-        value: i32,
-        max: i32,
-    },
+    #[error("Value {value} out of range (max {max})")]
+    ValueOutOfRange { value: i32, max: i32 },
 
     #[error("extinfo packet invalid")]
     InvalidExtInfo,

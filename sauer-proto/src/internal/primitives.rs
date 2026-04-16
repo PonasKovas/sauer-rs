@@ -4,6 +4,28 @@ use crate::{
 };
 use cube_string::{CubeStr, CubeString};
 
+impl<const N: usize, T: SauerWrite> SauerWrite for [T; N] {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        for el in self {
+            el.sauer_write(out);
+        }
+    }
+}
+impl<const N: usize, T: SauerRead> SauerRead for [T; N] {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+        // waiting for array:try_map to stabilize
+        let vec: Vec<T> = (0..N)
+            .map(|_| T::sauer_read(reader))
+            .collect::<Result<_, _>>()?;
+
+        if let Ok(arr) = vec.try_into() {
+            Ok(arr)
+        } else {
+            unreachable!()
+        }
+    }
+}
+
 impl SauerWrite for u8 {
     fn sauer_write(&self, out: &mut Vec<u8>) {
         out.push(*self);
@@ -122,5 +144,116 @@ impl SauerRead for CubeString {
         }
 
         Ok(CubeString::from_bytes(string_bytes))
+    }
+}
+
+// Bytes without any length prefix or terminator
+pub(crate) fn read_all_remaining(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
+    Ok(reader.to_vec())
+}
+pub(crate) fn write_all_remaining(val: &Vec<u8>, out: &mut Vec<u8>) {
+    out.extend_from_slice(val);
+}
+
+// u16 length prefixed bytes
+pub(crate) fn read_short_pref_data(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
+    let l = read_slice(reader, 2)?;
+    let len = u16::from_le_bytes([l[0], l[1]]) as usize;
+
+    let data = read_slice(reader, len)?.to_vec();
+
+    Ok(data)
+}
+pub(crate) fn write_short_pref_data(val: &Vec<u8>, out: &mut Vec<u8>) {
+    (val.len() as u8).sauer_write(out);
+    ((val.len() >> 8) as u8).sauer_write(out);
+    out.extend_from_slice(val);
+}
+
+// varint length prefixed bytes
+pub(crate) fn read_varint_pref_data(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
+    let len = i32::sauer_read(reader)?;
+    let len = if len > 0 { len as usize } else { 0 };
+    let data = read_slice(reader, len)?.to_vec();
+
+    Ok(data)
+}
+pub(crate) fn write_varint_pref_data(val: &Vec<u8>, out: &mut Vec<u8>) {
+    (val.len() as i32).sauer_write(out);
+    out.extend_from_slice(val);
+}
+
+// -1 (or any negative number) terminated sequence
+pub(crate) fn read_neg_term_seq<T: SauerRead>(reader: &mut &[u8]) -> Result<Vec<T>, ParseError> {
+    let mut vec = Vec::new();
+
+    loop {
+        // peek if -1
+        let mut temp_reader = *reader;
+        if i32::sauer_read(&mut temp_reader)? < 0 {
+            *reader = temp_reader;
+            break;
+        }
+
+        vec.push(T::sauer_read(reader)?);
+    }
+
+    Ok(vec)
+}
+pub(crate) fn write_neg_term_seq<T: SauerWrite>(val: &Vec<T>, out: &mut Vec<u8>) {
+    for item in val {
+        item.sauer_write(out);
+    }
+    (-1i32).sauer_write(out);
+}
+
+// Nonpositive - 0 (or any negative number) terminated sequence
+pub(crate) fn read_nonpos_term_seq<T: SauerRead>(reader: &mut &[u8]) -> Result<Vec<T>, ParseError> {
+    let mut vec = Vec::new();
+
+    loop {
+        // peek if 0
+        let mut temp_reader = *reader;
+        if i32::sauer_read(&mut temp_reader)? <= 0 {
+            *reader = temp_reader;
+            break;
+        }
+
+        vec.push(T::sauer_read(reader)?);
+    }
+
+    Ok(vec)
+}
+pub(crate) fn write_nonpos_term_seq<T: SauerWrite>(val: &Vec<T>, out: &mut Vec<u8>) {
+    for item in val {
+        item.sauer_write(out);
+    }
+    0i32.sauer_write(out);
+}
+
+// varint length prefixed sequence
+pub(crate) fn read_varint_pref_seq<const MAX: usize, T: SauerRead>(
+    reader: &mut &[u8],
+) -> Result<Vec<T>, ParseError> {
+    let count = i32::sauer_read(reader)?;
+    if count < 0 || count > MAX as i32 {
+        return Err(ParseError::ValueOutOfRange {
+            value: count,
+            max: MAX as i32,
+        });
+    }
+
+    let mut vec = Vec::with_capacity(count as usize);
+
+    for _ in 0..count {
+        vec.push(T::sauer_read(reader)?);
+    }
+
+    Ok(vec)
+}
+pub(crate) fn write_varint_pref_seq<T: SauerWrite>(val: &Vec<T>, out: &mut Vec<u8>) {
+    (val.len() as i32).sauer_write(out);
+    for item in val {
+        item.sauer_write(out);
     }
 }

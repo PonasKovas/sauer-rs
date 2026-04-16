@@ -3,7 +3,7 @@ use crate::ParseError;
 pub(crate) mod constants;
 pub(crate) mod macros;
 mod msg_id_to_name;
-mod primitives;
+pub(crate) mod primitives;
 
 pub(crate) use msg_id_to_name::msg_id_to_name;
 
