@@ -8,8 +8,11 @@ use rand::random;
 use sauer_proto::{
     Client, Encode,
     channel0::{JumpPad, Position, Teleport},
-    channel1::{ClientDisconnected, InitClient, MapChange, ServInfo, SpawnState, Text, Welcome},
-    data::{ArmourType, GameMode, Gun, PlayerAmmo, PlayerModel, PlayerState},
+    channel1::{
+        ClientDisconnected, ClientPing, Damage, Died, InitClient, MapChange, Ping, Pong, ServInfo,
+        Shoot, ShotFx, SpawnState, Suicide, SwitchModel, SwitchName, Text, TrySpawn, Welcome,
+    },
+    data::{ArmourType, ClientState, GameMode, Gun, PlayerAmmo, PlayerModel, PlayerState},
     route::{Chan0, Chan1, S2C},
 };
 use tracing::info;
@@ -35,6 +38,10 @@ struct BasePluginData {
 struct Player {
     name: CubeString,
     model: PlayerModel,
+    state: ClientState,
+    health: i32,
+    frags: i32,
+    life_sequence: i32,
 }
 
 impl BasePlugin {
@@ -86,6 +93,99 @@ impl BasePlugin {
         for cn in cns {
             server.get_client(cn).send_chan0(packet).await;
         }
+    }
+    async fn kill(&self, server: &Server, victim_cn: u32, actor_cn: u32) {
+        let actor_frags;
+        {
+            let mut data = self.data.write().unwrap();
+            let victim = data.players.get_mut(&victim_cn).unwrap();
+
+            victim.state = ClientState::Dead;
+            victim.life_sequence += 1;
+
+            let actor = data.players.get_mut(&actor_cn).unwrap();
+            if victim_cn != actor_cn {
+                actor.frags += 1;
+            }
+            actor_frags = actor.frags;
+        }
+
+        self.broadcast1(
+            server,
+            None,
+            &Died {
+                victim_cn: victim_cn as i32,
+                actor_cn: actor_cn as i32,
+                actor_frags,
+                team_frags: 0,
+            },
+        )
+        .await;
+    }
+    async fn do_damage(&self, server: &Server, victim_cn: u32, actor_cn: u32, damage: i32) {
+        let new_victim_health;
+        {
+            let mut data = self.data.write().unwrap();
+
+            let victim = match data.players.get_mut(&victim_cn) {
+                Some(x) => x,
+                None => return,
+            };
+
+            victim.health -= damage;
+            new_victim_health = victim.health;
+        }
+
+        self.broadcast1(
+            server,
+            None,
+            &Damage {
+                target_cn: victim_cn as i32,
+                actor_cn: actor_cn as i32,
+                damage,
+                armour: 0,
+                health: new_victim_health,
+            },
+        )
+        .await;
+
+        if new_victim_health <= 0 {
+            // death
+            self.kill(server, victim_cn, actor_cn).await;
+        }
+    }
+    async fn send_spawn_state(&self, server: &Server, cn: u32) {
+        let life_sequence;
+        let health;
+        {
+            let data = self.data.read().unwrap();
+            let player = data.players.get(&cn).unwrap();
+
+            life_sequence = player.life_sequence;
+            health = player.health;
+        }
+        server
+            .get_client(cn)
+            .send_chan1(&SpawnState {
+                client_num: cn as i32,
+                state: PlayerState {
+                    life_sequence,
+                    health,
+                    max_health: 100,
+                    armour: 0,
+                    armour_type: ArmourType::Yellow,
+                    gun_select: Gun::Rifle,
+                    ammo: PlayerAmmo {
+                        rifle: 9999,
+                        shotgun: 0,
+                        chaingun: 0,
+                        rocket_launcher: 0,
+                        grenade_launcher: 0,
+                        pistol: 0,
+                    },
+                },
+            })
+            .await;
     }
 }
 
@@ -149,6 +249,10 @@ impl Plugin for BasePlugin {
             Player {
                 name: name.clone(),
                 model,
+                state: ClientState::Alive,
+                health: 100,
+                frags: 0,
+                life_sequence: 0,
             },
         );
 
@@ -162,28 +266,7 @@ impl Plugin for BasePlugin {
             })
             .await;
 
-        ctx.server
-            .get_client(ctx.cn)
-            .send_chan1(&SpawnState {
-                client_num: ctx.cn as i32,
-                state: PlayerState {
-                    life_sequence: 0,
-                    health: 100,
-                    max_health: 100,
-                    armour: 0,
-                    armour_type: ArmourType::Yellow,
-                    gun_select: Gun::Rifle,
-                    ammo: PlayerAmmo {
-                        rifle: 9999,
-                        shotgun: 0,
-                        chaingun: 0,
-                        rocket_launcher: 0,
-                        grenade_launcher: 0,
-                        pistol: 0,
-                    },
-                },
-            })
-            .await;
+        self.send_spawn_state(ctx.server, ctx.cn).await;
 
         // notify existing players of the new player
         self.broadcast1(
@@ -244,6 +327,99 @@ impl Plugin for BasePlugin {
             packet: packet.clone(),
         };
         self.broadcast1(ctx.server, Some(ctx.cn), &packet).await;
+
+        PASS
+    }
+    async fn switch_model(&self, ctx: Context<'_>, packet: &SwitchModel) -> Control {
+        self.data
+            .write()
+            .unwrap()
+            .players
+            .get_mut(&ctx.cn)
+            .unwrap()
+            .model = packet.model;
+
+        let packet = Client {
+            client_num: ctx.cn as i32,
+            packet: packet.clone(),
+        };
+        self.broadcast1(ctx.server, Some(ctx.cn), &packet).await;
+
+        PASS
+    }
+    async fn switch_name(&self, ctx: Context<'_>, packet: &SwitchName) -> Control {
+        self.data
+            .write()
+            .unwrap()
+            .players
+            .get_mut(&ctx.cn)
+            .unwrap()
+            .name = packet.name.clone();
+
+        let packet = Client {
+            client_num: ctx.cn as i32,
+            packet: packet.clone(),
+        };
+        self.broadcast1(ctx.server, Some(ctx.cn), &packet).await;
+
+        PASS
+    }
+
+    async fn ping(&self, ctx: Context<'_>, packet: &Ping) -> Control {
+        ctx.server
+            .get_client(ctx.cn)
+            .send_chan1(&Pong { ping: packet.time })
+            .await;
+
+        PASS
+    }
+    async fn client_ping(&self, ctx: Context<'_>, packet: &ClientPing) -> Control {
+        let packet = Client {
+            client_num: ctx.cn as i32,
+            packet: packet.clone(),
+        };
+        self.broadcast1(ctx.server, Some(ctx.cn), &packet).await;
+
+        PASS
+    }
+
+    async fn shoot(&self, ctx: Context<'_>, packet: &Shoot) -> Control {
+        self.broadcast1(
+            ctx.server,
+            Some(ctx.cn),
+            &ShotFx {
+                client_num: ctx.cn as i32,
+                gun: packet.gun,
+                id: packet.id,
+                to: packet.to,
+                from: packet.from,
+            },
+        )
+        .await;
+
+        for hit in &packet.hits {
+            self.do_damage(ctx.server, hit.target_cn as u32, ctx.cn, 10)
+                .await;
+        }
+
+        PASS
+    }
+
+    async fn suicide(&self, ctx: Context<'_>, _: &Suicide) -> Control {
+        self.kill(ctx.server, ctx.cn, ctx.cn).await;
+
+        PASS
+    }
+
+    async fn try_spawn(&self, ctx: Context<'_>, _: &TrySpawn) -> Control {
+        {
+            let mut data = self.data.write().unwrap();
+            let player = data.players.get_mut(&ctx.cn).unwrap();
+            player.state = ClientState::Alive;
+            player.health = 100;
+        }
+
+        self.send_spawn_state(ctx.server, ctx.cn).await;
 
         PASS
     }
