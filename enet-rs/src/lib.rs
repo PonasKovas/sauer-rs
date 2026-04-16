@@ -210,11 +210,36 @@ impl Host {
         Self::connect_with_timeout(addr, channel_count, Duration::from_secs(5)).await
     }
 
+    /// Connect to a remote ENet server with explicit checksum behavior.
+    pub async fn connect_with_checksum(
+        addr: impl ToSocketAddrs,
+        channel_count: u8,
+        use_checksum: bool,
+    ) -> Result<Peer> {
+        Self::connect_with_timeout_and_checksum(
+            addr,
+            channel_count,
+            Duration::from_secs(5),
+            use_checksum,
+        )
+        .await
+    }
+
     /// Like [`connect`](Self::connect) but with a custom timeout.
     pub async fn connect_with_timeout(
         addr: impl ToSocketAddrs,
         channel_count: u8,
         connect_timeout: Duration,
+    ) -> Result<Peer> {
+        Self::connect_with_timeout_and_checksum(addr, channel_count, connect_timeout, true).await
+    }
+
+    /// Like [`connect_with_timeout`](Self::connect_with_timeout), with explicit checksum behavior.
+    pub async fn connect_with_timeout_and_checksum(
+        addr: impl ToSocketAddrs,
+        channel_count: u8,
+        connect_timeout: Duration,
+        use_checksum: bool,
     ) -> Result<Peer> {
         let addr = addr
             .to_socket_addrs()
@@ -229,7 +254,7 @@ impl Host {
         let (task_tx, task_rx) = mpsc::channel(1024);
         let task = HostTask::new(
             socket, accept_tx, task_rx, 1, // only one peer
-            channel_count.max(1), 1, true, 0, // no incoming bandwidth limit for client
+            channel_count.max(1), 1, use_checksum, 0, // no incoming bandwidth limit for client
             0, // no outgoing bandwidth limit for client
         );
         tokio::spawn(task.run());

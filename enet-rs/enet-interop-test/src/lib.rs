@@ -59,7 +59,15 @@ mod interop_tests {
 
         // Bind the server BEFORE spawning the C client.
         // This entirely eliminates the need to sleep while waiting for the server to spin up.
-        let mut server = Host::bind(&addr, HostConfig::default()).await.unwrap();
+        let mut server = Host::bind(
+            &addr,
+            HostConfig {
+                use_checksum: false,
+                ..HostConfig::default()
+            },
+        )
+        .await
+        .unwrap();
 
         let msg: &[u8] = b"hello from C client";
         let msg_vec = msg.to_vec();
@@ -131,7 +139,7 @@ mod interop_tests {
         let msg: &[u8] = b"hello from Rust client";
         let addr = format!("127.0.0.1:{port}");
 
-        let mut peer = Host::connect(&addr, 2)
+        let mut peer = Host::connect_with_checksum(&addr, 2, false)
             .await
             .expect("Rust client connect failed");
 
