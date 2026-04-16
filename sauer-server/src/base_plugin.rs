@@ -6,23 +6,32 @@ use std::{
 use cube_string::{CubeString, IntoCubeStringLossy};
 use rand::random;
 use sauer_proto::{
-    channel1::{MapChange, ServInfo, SpawnState, Welcome},
+    Client, Encode,
+    channel0::{JumpPad, Position, Teleport},
+    channel1::{ClientDisconnected, InitClient, MapChange, ServInfo, SpawnState, Text, Welcome},
     data::{ArmourType, GameMode, Gun, PlayerAmmo, PlayerModel, PlayerState},
+    route::{Chan0, Chan1, S2C},
 };
 use tracing::info;
 
-use crate::plugin::{Context, Control, PASS, Plugin};
+use crate::{
+    Server,
+    plugin::{Context, Control, PASS, Plugin},
+};
 
 /// A plugin implementing the bare minimum functionality which you would expect in a sauerbraten server
+#[derive(Clone, Debug)]
 pub struct BasePlugin {
     data: Arc<RwLock<BasePluginData>>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 struct BasePluginData {
     server_desc: CubeString,
     players: HashMap<u32, Player>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 struct Player {
     name: CubeString,
     model: PlayerModel,
@@ -36,6 +45,47 @@ impl BasePlugin {
     }
     pub fn set_desc(&self, new_desc: CubeString) {
         self.data.write().unwrap().server_desc = new_desc;
+    }
+
+    async fn broadcast1<T: Encode<S2C<Chan1>>>(
+        &self,
+        server: &Server,
+        except: Option<u32>,
+        packet: &T,
+    ) {
+        let cns: Vec<_> = self
+            .data
+            .read()
+            .unwrap()
+            .players
+            .keys()
+            .copied()
+            .filter(|cn| Some(*cn) != except)
+            .collect();
+
+        for cn in cns {
+            server.get_client(cn).send_chan1(packet).await;
+        }
+    }
+    async fn broadcast0<T: Encode<S2C<Chan0>>>(
+        &self,
+        server: &Server,
+        except: Option<u32>,
+        packet: &T,
+    ) {
+        let cns: Vec<_> = self
+            .data
+            .read()
+            .unwrap()
+            .players
+            .keys()
+            .copied()
+            .filter(|cn| Some(*cn) != except)
+            .collect();
+
+        for cn in cns {
+            server.get_client(cn).send_chan0(packet).await;
+        }
     }
 }
 
@@ -73,17 +123,34 @@ impl Plugin for BasePlugin {
 
         PASS
     }
+    async fn disconnected(&self, ctx: Context<'_>) -> Control {
+        self.data.write().unwrap().players.remove(&ctx.cn);
+
+        // notify all other connected players
+        self.broadcast1(
+            ctx.server,
+            None,
+            &ClientDisconnected {
+                client_num: ctx.cn as i32,
+            },
+        )
+        .await;
+
+        PASS
+    }
     async fn connect(&self, ctx: Context<'_>, packet: &sauer_proto::channel1::Connect) -> Control {
         let name = packet.name.clone();
         let model = packet.player_model;
 
         info!("{name} connected");
 
-        self.data
-            .write()
-            .unwrap()
-            .players
-            .insert(ctx.cn, Player { name, model });
+        self.data.write().unwrap().players.insert(
+            ctx.cn,
+            Player {
+                name: name.clone(),
+                model,
+            },
+        );
 
         ctx.server.get_client(ctx.cn).send_chan1(&Welcome {}).await;
         ctx.server
@@ -117,6 +184,66 @@ impl Plugin for BasePlugin {
                 },
             })
             .await;
+
+        // notify existing players of the new player
+        self.broadcast1(
+            ctx.server,
+            Some(ctx.cn),
+            &InitClient {
+                client_num: ctx.cn as i32,
+                name: name.clone(),
+                player_model: model,
+                team: CubeString::new(),
+            },
+        )
+        .await;
+
+        // notify the new player of existing players
+        let others: Vec<_> = self
+            .data
+            .read()
+            .unwrap()
+            .players
+            .iter()
+            .filter(|(cn, _)| **cn != ctx.cn)
+            .map(|(cn, p)| (*cn, p.clone()))
+            .collect();
+        for (other_cn, other) in others {
+            ctx.server
+                .get_client(ctx.cn)
+                .send_chan1(&InitClient {
+                    client_num: other_cn as i32,
+                    name: other.name,
+                    player_model: other.model,
+                    team: CubeString::new(),
+                })
+                .await;
+        }
+
+        PASS
+    }
+    async fn pos(&self, ctx: Context<'_>, packet: &Position) -> Control {
+        self.broadcast0(ctx.server, Some(ctx.cn), packet).await;
+
+        PASS
+    }
+    async fn teleport(&self, ctx: Context<'_>, packet: &Teleport) -> Control {
+        self.broadcast0(ctx.server, Some(ctx.cn), packet).await;
+
+        PASS
+    }
+    async fn jumppad(&self, ctx: Context<'_>, packet: &JumpPad) -> Control {
+        self.broadcast0(ctx.server, Some(ctx.cn), packet).await;
+
+        PASS
+    }
+
+    async fn text(&self, ctx: Context<'_>, packet: &Text) -> Control {
+        let packet = Client {
+            client_num: ctx.cn as i32,
+            packet: packet.clone(),
+        };
+        self.broadcast1(ctx.server, Some(ctx.cn), &packet).await;
 
         PASS
     }
