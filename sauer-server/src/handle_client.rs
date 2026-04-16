@@ -1,4 +1,7 @@
-use crate::{Server, plugin::Plugin};
+use crate::{
+    Server,
+    plugin::{Context, Plugin},
+};
 use anyhow::{Result, bail};
 use bytes::Bytes;
 use cube_string::{Color, CubeString, IntoCubeStringLossy};
@@ -20,69 +23,84 @@ pub(crate) async fn handle_client<P: Plugin>(
 ) -> Result<()> {
     let mut rx = SauerReceiver::new(peer);
 
-    server
-        .get_client(cn)
-        .send_chan1(&ServInfo {
-            client_num: cn as i32,
-            protocol: sauer_proto::PROTOCOL_VERSION,
-            session_id: 0,
-            has_password: false,
-            server_desc: CubeString::builder()
-                .color(Color::Magenta)
-                .push_str("Retard server v2")
-                .build(),
-            server_auth: CubeString::new(),
-        })
-        .await;
-
-    let player_name = 'outer: loop {
-        let pkt = rx.recv().await?;
-
-        match pkt {
-            Packet::Chan1(Chan1Client::Connect(connect)) => break 'outer connect.name,
-            _ => continue,
-        };
-    };
-
-    info!("{player_name} connected");
-
-    server.get_client(cn).send_chan1(&Welcome {}).await;
-    server
-        .get_client(cn)
-        .send_chan1(&MapChange {
-            map_name: "complex".lossy_cubestring(),
-            mode: GameMode::CoopEdit,
-            has_items: true,
-        })
-        .await;
-
-    server
-        .get_client(cn)
-        .send_chan1(&SpawnState {
-            client_num: 0,
-            state: PlayerState {
-                life_sequence: 0,
-                health: 100,
-                max_health: 100,
-                armour: 0,
-                armour_type: ArmourType::Yellow,
-                gun_select: Gun::Rifle,
-                ammo: PlayerAmmo {
-                    rifle: 9999,
-                    shotgun: 0,
-                    chaingun: 0,
-                    rocket_launcher: 0,
-                    grenade_launcher: 0,
-                    pistol: 0,
-                },
-            },
-        })
-        .await;
-
     loop {
         let pkt = rx.recv().await?;
-        info!("received: {pkt:?}");
+        let ctx = Context { server, cn };
+
+        let _ = match pkt {
+            Packet::Chan0(pkt) => match pkt {
+                Chan0Client::Position(p) => plugin.n_pos(ctx, &p).await,
+                Chan0Client::Teleport(p) => todo!(),
+                Chan0Client::JumpPad(p) => todo!(),
+            },
+            Packet::Chan1(pkt) => todo!(),
+            Packet::Chan2(pkt) => todo!(),
+        };
     }
+
+    // server
+    //     .get_client(cn)
+    //     .send_chan1(&ServInfo {
+    //         client_num: cn as i32,
+    //         protocol: sauer_proto::PROTOCOL_VERSION,
+    //         session_id: 0,
+    //         has_password: false,
+    //         server_desc: CubeString::builder()
+    //             .color(Color::Magenta)
+    //             .push_str("Retard server v2")
+    //             .build(),
+    //         server_auth: CubeString::new(),
+    //     })
+    //     .await;
+    //
+    // let player_name = 'outer: loop {
+    //     let pkt = rx.recv().await?;
+    //
+    //     match pkt {
+    //         Packet::Chan1(Chan1Client::Connect(connect)) => break 'outer connect.name,
+    //         _ => continue,
+    //     };
+    // };
+    //
+    // info!("{player_name} connected");
+    //
+    // server.get_client(cn).send_chan1(&Welcome {}).await;
+    // server
+    //     .get_client(cn)
+    //     .send_chan1(&MapChange {
+    //         map_name: "complex".lossy_cubestring(),
+    //         mode: GameMode::CoopEdit,
+    //         has_items: true,
+    //     })
+    //     .await;
+    //
+    // server
+    //     .get_client(cn)
+    //     .send_chan1(&SpawnState {
+    //         client_num: 0,
+    //         state: PlayerState {
+    //             life_sequence: 0,
+    //             health: 100,
+    //             max_health: 100,
+    //             armour: 0,
+    //             armour_type: ArmourType::Yellow,
+    //             gun_select: Gun::Rifle,
+    //             ammo: PlayerAmmo {
+    //                 rifle: 9999,
+    //                 shotgun: 0,
+    //                 chaingun: 0,
+    //                 rocket_launcher: 0,
+    //                 grenade_launcher: 0,
+    //                 pistol: 0,
+    //             },
+    //         },
+    //     })
+    //     .await;
+    //
+    // loop {
+    //     let pkt = rx.recv().await?;
+    //     info!("received: {pkt:?}");
+    // }
 }
 
 struct SauerReceiver {

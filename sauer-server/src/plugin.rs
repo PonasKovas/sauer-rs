@@ -1,4 +1,5 @@
 use crate::Server;
+use sauer_proto::{channel0, channel1, channel2};
 use std::{ops::ControlFlow, sync::Arc};
 
 // if only Try was stable
@@ -20,7 +21,11 @@ pub trait Plugin: Send + Sync + 'static {
     fn disconnected(&self, ctx: Context<'_>) -> impl Future<Output = Control> + Send + Sync {
         async move { PASS }
     }
-    fn n_pos(&self, ctx: Context<'_>, packet: ()) -> impl Future<Output = Control> + Send + Sync {
+    fn n_pos(
+        &self,
+        ctx: Context<'_>,
+        packet: &channel0::Position,
+    ) -> impl Future<Output = Control> + Send + Sync {
         async move { PASS }
     }
 }
@@ -49,7 +54,7 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         self.0.disconnected(ctx).await?;
         self.1.disconnected(ctx).await
     }
-    async fn n_pos(&self, ctx: Context<'_>, packet: ()) -> Control {
+    async fn n_pos(&self, ctx: Context<'_>, packet: &channel0::Position) -> Control {
         // run the left (previous) plugin
         self.0.n_pos(ctx, packet).await?;
         self.1.n_pos(ctx, packet).await

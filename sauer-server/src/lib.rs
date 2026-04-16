@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use peer::Peer;
 
+mod base;
 mod builder;
 mod handle_client;
 mod peer;
