@@ -22,7 +22,7 @@ pub struct ServerBuilder<P = ()> {
 impl ServerBuilder {
     pub fn new() -> Self {
         ServerBuilder {
-            bind_addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 28785).into(),
+            bind_addr: SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 28785).into(),
             max_peers: 128,
             plugin: (),
         }
