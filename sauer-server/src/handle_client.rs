@@ -4,7 +4,7 @@ use bytes::Bytes;
 use cube_string::{Color, CubeString, IntoCubeStringLossy};
 use enet_rs::PeerReceiver;
 use sauer_proto::{
-    Chan0Client, Chan1Client, Reader,
+    Chan0Client, Chan1Client, Reader, Session,
     channel1::{MapChange, ServInfo, SpawnState, Welcome},
     data::{ArmourType, GameMode, Gun, PlayerAmmo, PlayerState},
     route::{C2S, Chan0, Chan1},
@@ -87,6 +87,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 
 struct SauerReceiver {
     rx: PeerReceiver,
+    session: Session,
     buffer: VecDeque<Packet>,
 }
 
@@ -101,6 +102,7 @@ impl SauerReceiver {
     fn new(peer: PeerReceiver) -> Self {
         Self {
             rx: peer,
+            session: Session::new(),
             buffer: VecDeque::new(),
         }
     }
@@ -120,13 +122,13 @@ impl SauerReceiver {
 
             match pkt.channel {
                 sauer_proto::CHANNEL_POSITIONS => {
-                    let mut reader = Reader::<C2S<Chan0>>::new(&pkt.data);
+                    let mut reader = Reader::<C2S<Chan0>>::new(&pkt.data, &mut self.session);
                     while let Some(msg) = reader.next() {
                         self.buffer.push_back(Packet::Chan0(msg?));
                     }
                 }
                 sauer_proto::CHANNEL_MESSAGES => {
-                    let mut reader = Reader::<C2S<Chan1>>::new(&pkt.data);
+                    let mut reader = Reader::<C2S<Chan1>>::new(&pkt.data, &mut self.session);
                     while let Some(msg) = reader.next() {
                         self.buffer.push_back(Packet::Chan1(msg?));
                     }

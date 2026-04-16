@@ -1,5 +1,6 @@
 use crate::Decode;
 use crate::ParseError;
+use crate::Session;
 use crate::error::ParseResultExt;
 use crate::internal::SauerRead;
 use crate::internal::constants::*;
@@ -15,6 +16,7 @@ use std::marker::PhantomData;
 pub struct Reader<'a, R> {
     pub(crate) slice: &'a [u8],
     active_wrapper: Option<ClientWrapperState>,
+    session: &'a mut Session,
     _phantom: PhantomData<R>,
 }
 
@@ -26,10 +28,12 @@ struct ClientWrapperState {
 }
 
 impl<'a, R> Reader<'a, R> {
-    pub fn new(slice: &'a [u8]) -> Self {
+    /// For correct parsing, must give a consistent `Session` (separate session for every connection)
+    pub fn new(slice: &'a [u8], session: &'a mut Session) -> Self {
         Self {
             slice,
             active_wrapper: None,
+            session,
             _phantom: PhantomData,
         }
     }
@@ -78,7 +82,11 @@ impl<'a, R> Reader<'a, R> {
             return self.read_message();
         }
 
-        let msg = T::decode(&mut self.slice, self.active_wrapper.map(|w| w.client_num))?;
+        let msg = T::decode(
+            &mut self.slice,
+            self.active_wrapper.map(|w| w.client_num),
+            self.session,
+        )?;
 
         Ok(msg)
     }

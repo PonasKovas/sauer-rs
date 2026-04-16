@@ -1,4 +1,4 @@
-use crate::ParseError;
+use crate::{ParseError, Session};
 
 pub(crate) mod constants;
 pub(crate) mod macros;
@@ -13,6 +13,16 @@ pub(crate) trait SauerWrite {
 
 pub(crate) trait SauerRead: Sized {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError>;
+}
+
+pub(crate) trait SauerReadStateful: Sized {
+    fn sauer_read_stateful(reader: &mut &[u8], session: &Session) -> Result<Self, ParseError>;
+}
+
+impl<T: SauerRead> SauerReadStateful for T {
+    fn sauer_read_stateful(reader: &mut &[u8], _session: &Session) -> Result<Self, ParseError> {
+        T::sauer_read(reader)
+    }
 }
 
 // convenience methods

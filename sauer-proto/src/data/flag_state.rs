@@ -6,6 +6,9 @@ pub struct FlagState {
     pub spawn_index: i32,
     pub owner: FlagStateOwner,
     pub invis: bool,
+    /// Must only be `Some` if the gamemode is `M_HOLD`!
+    ///
+    /// Client will fail to parse it otherwise and the stream will corrupt!
     pub hold: Option<FlagStateHoldTeam>,
 }
 

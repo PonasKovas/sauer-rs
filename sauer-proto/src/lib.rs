@@ -10,10 +10,11 @@
 //! Use [`Reader`] to read a raw ENet packet buffer:
 //!
 //! ```rust
-//! use sauer_proto::{Reader, Chan1Server, route::{S2C, Chan1}};
+//! use sauer_proto::{Session, Reader, Chan1Server, route::{S2C, Chan1}};
 //!
 //! fn handle_channel1_packet(raw: &[u8]) {
-//!     let mut reader = Reader::<S2C<Chan1>>::new(raw);
+//!     let mut session = Session::new();
+//!     let mut reader = Reader::<S2C<Chan1>>::new(raw, &mut session);
 //!     while let Some(msg) = reader.next() {
 //!         match msg.expect("parse error") {
 //!             Chan1Server::ServMsg(servmsg) => println!("server says: {}", servmsg.text),
@@ -47,6 +48,7 @@ mod error;
 mod internal;
 mod messages;
 mod reader;
+mod session;
 mod writer;
 
 pub mod data;
@@ -60,6 +62,7 @@ pub use messages::{
     channel2::{self, Chan2Server},
 };
 pub use reader::Reader;
+pub use session::Session;
 pub use writer::Writer;
 
 pub use cube_string;
@@ -79,10 +82,7 @@ pub const PROTOCOL_VERSION: i32 = 260;
 
 /// Serialize a packet onto a wire-format buffer for route `R`.
 ///
-/// Implementors are full, standalone protocol messages -- not sub-packet
-/// fragments.  The route generic ensures that only packets valid for a
-/// given direction + channel can be written to a [`Writer`]
-/// bound to that route.
+/// Do not use this trait directly, and instead use the [`Writer`].
 pub trait Encode<R> {
     #[doc(hidden)]
     fn encode(&self, out: &mut Vec<u8>);
@@ -96,7 +96,13 @@ pub trait Encode<R> {
 }
 
 /// Deserialize a packet from wire-format bytes for route `R`.
+///
+/// Do not use this trait directly, and instead use the [`Reader`].
 pub trait Decode<R>: Sized {
     #[doc(hidden)]
-    fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, ParseError>;
+    fn decode(
+        reader: &mut &[u8],
+        client_number: Option<i32>,
+        session: &mut Session,
+    ) -> Result<Self, ParseError>;
 }

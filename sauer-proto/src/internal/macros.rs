@@ -126,24 +126,24 @@ macro_rules! make_packet_enum {
     // Implementing Encode and Decode for the struct
     ////////////////////////////////////////////////////////////////////
     // 1. Unwrapped Base Struct
-    (@impl_encode_decode $variant:ident, $ROUTE:path, ) => {
+    (@impl_encode_decode $variant:ident, $ROUTE:path , ) => {
         impl crate::Encode<$ROUTE> for $variant {
             fn encode(&self, out: &mut Vec<u8>) {
                 crate::internal::SauerWrite::sauer_write(self, out);
             }
         }
         impl crate::Decode<$ROUTE> for $variant {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 if client_number.is_some() {
                     return Err(crate::ParseError::BadClientWrapper);
                 }
-                crate::internal::SauerRead::sauer_read(reader)
+                crate::internal::SauerReadStateful::sauer_read_stateful(reader, session)
             }
         }
     };
 
-    // 2. Wrapped Base Struct
-    (@impl_encode_decode $variant:ident, $ROUTE:path, $client_wrapper:ident, ) => {
+    // 2. N_CLIENT wrapped Base Struct
+    (@impl_encode_decode $variant:ident, $ROUTE:path, [ N_CLIENT $client_wrapper:ident ] ) => {
         impl crate::Encode<$ROUTE> for $client_wrapper<$variant> {
             fn encode(&self, out: &mut Vec<u8>) {
                 // Call the private trait, ensuring $variant doesn't need to impl Encode
@@ -154,7 +154,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $client_wrapper<$variant> {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 match client_number {
                     None => {
                         let mut temp = *reader;
@@ -166,20 +166,15 @@ macro_rules! make_packet_enum {
                     Some(client_num) => Ok(Self {
                         client_num,
                         // Call the private trait here too
-                        packet: <$variant as crate::internal::SauerRead>::sauer_read(reader)?,
+                        packet: <$variant as crate::internal::SauerReadStateful>::sauer_read_stateful(reader, session)?,
                     }),
                 }
             }
         }
     };
 
-    // 3. Unwrapped Duplicate Struct
-    (@impl_encode_decode $variant:ident, $ROUTE:path, , $DUPLICATE_STRUCT:ident) => {
-        // Do nothing. The base struct already implements Encode/Decode for this route!
-    };
-
-    // 4. Wrapped Duplicate Struct (e.g. NewMap)
-    (@impl_encode_decode $variant:ident, $ROUTE:path, $client_wrapper:ident, $DUPLICATE_STRUCT:ident) => {
+    // 3. N_CLIENT Wrapped Duplicate Struct (e.g. NewMap)
+    (@impl_encode_decode $variant:ident, $ROUTE:path, [ N_CLIENT $client_wrapper:ident ]  [ DUPLICATE $DUPLICATE_STRUCT:ident ] ) => {
         impl crate::Encode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
             fn encode(&self, out: &mut Vec<u8>) {
                 crate::internal::SauerWrite::sauer_write(&self.packet, out);
@@ -189,7 +184,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 match client_number {
                     None => {
                         let mut temp = *reader;
@@ -200,9 +195,31 @@ macro_rules! make_packet_enum {
                     }
                     Some(client_num) => Ok(Self {
                         client_num,
-                        packet: <$DUPLICATE_STRUCT as crate::internal::SauerRead>::sauer_read(reader)?,
+                        packet: <$DUPLICATE_STRUCT as crate::internal::SauerReadStateful>::sauer_read_stateful(reader, session)?,
                     }),
                 }
+            }
+        }
+    };
+
+    // 4. Unwrapped Base struct with UPDATE_SESSION
+    (@impl_encode_decode $variant:ident, $ROUTE:path, [UPDATE_SESSION $update_closure:expr] ) => {
+        impl crate::Encode<$ROUTE> for $variant {
+            fn encode(&self, out: &mut Vec<u8>) {
+                crate::internal::SauerWrite::sauer_write(self, out);
+            }
+        }
+        impl crate::Decode<$ROUTE> for $variant {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
+                if client_number.is_some() {
+                    return Err(crate::ParseError::BadClientWrapper);
+                }
+                let pkt = crate::internal::SauerReadStateful::sauer_read_stateful(reader, session)?;
+
+                // update session
+                ($update_closure)(session, &pkt);
+
+                Ok(pkt)
             }
         }
     };
@@ -218,6 +235,7 @@ macro_rules! make_packet_enum {
             $(
                 $(#[$($variant_attr:meta)*])*
                 [$TAG:path] $variant:ident $( [N_CLIENT $client_wrapper:ident] $([DUPLICATE $DUPLICATE_STRUCT:ident])? )?
+                $( [UPDATE_SESSION $update_closure:expr] )?
             ),+
             $(,)?
         }
@@ -247,7 +265,10 @@ macro_rules! make_packet_enum {
                 }
             }
 
-            make_packet_enum!(@impl_encode_decode $variant, $ROUTE, $( $client_wrapper , $( $DUPLICATE_STRUCT )? )?  );
+            make_packet_enum!(@impl_encode_decode $variant, $ROUTE,
+                                $( [N_CLIENT $client_wrapper] $([DUPLICATE $DUPLICATE_STRUCT])? )?
+                                $( [UPDATE_SESSION $update_closure] )?
+                             );
         };)+
 
         impl crate::Encode<$ROUTE> for $name {
@@ -268,7 +289,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $name {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 let mut temp_reader = *reader;
                 let msg_id = <i32 as crate::internal::SauerRead>::sauer_read(&mut temp_reader)?;
 
@@ -279,7 +300,7 @@ macro_rules! make_packet_enum {
                         // Automatically disambiguate duplicate tags based on whether we are currently wrapped!
                         let is_wrapped = make_packet_enum!(@is_wrapped $($client_wrapper)?);
                         if is_wrapped == client_number.is_some() {
-                            return Ok(Self::$variant(<__Variant as crate::Decode::<$ROUTE>>::decode(reader, client_number)?));
+                            return Ok(Self::$variant(<__Variant as crate::Decode::<$ROUTE>>::decode(reader, client_number, session)?));
                         }
                     }
                 )+

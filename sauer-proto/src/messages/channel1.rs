@@ -1,8 +1,10 @@
 use crate::ParseError;
+use crate::Session;
 use crate::data;
 use crate::data::*;
 use crate::error::EnumConvertResultExt;
 use crate::error::ParseResultExt;
+use crate::internal::SauerReadStateful;
 use crate::internal::macros::{make_packet_enum, make_struct};
 use crate::internal::{
     SauerRead, SauerWrite, check_tag,
@@ -25,7 +27,7 @@ make_packet_enum!(
     [N_PAUSEGAME] PauseGameServer,
     [N_GAMESPEED] GameSpeedServer,
     [N_SAYTEAM] SayTeamServer,
-    [N_MAPCHANGE] MapChange,
+    [N_MAPCHANGE] MapChange [UPDATE_SESSION |session: &mut Session, packet: &MapChange| session.is_hold_mode = packet.mode == GameMode::Hold],
     [N_FORCEDEATH] ForceDeath,
     [N_ITEMLIST] ItemList,
     [N_INITCLIENT] InitClient,
@@ -673,8 +675,6 @@ make_struct!(
     ammo: i32,
 });
 
-// TODO stateful parsing
-
 /// `N_INITFLAGS` Sends initial flag states to joining clients (CTF modes).
 #[derive(Debug, Clone, PartialEq)]
 pub struct InitFlagsServer {
@@ -686,33 +686,32 @@ impl SauerWrite for InitFlagsServer {
         N_INITFLAGS.sauer_write(out);
         self.scores[0].sauer_write(out);
         self.scores[1].sauer_write(out);
+
         (self.flags.len() as i32).sauer_write(out);
+
         for f in &self.flags {
             f.version.sauer_write(out);
             f.spawn_index.sauer_write(out);
 
-            // putint(p, f.owner);
-            let owner_val = match &f.owner {
-                FlagStateOwner::Owned { owner } => *owner,
-                FlagStateOwner::Dropped { .. } => -1,
-            };
-            owner_val.sauer_write(out);
+            // 1. Write Owner ID (or -1 if dropped/at base)
+            match &f.owner {
+                FlagStateOwner::Owned { owner } => owner.sauer_write(out),
+                FlagStateOwner::Dropped { .. } => (-1i32).sauer_write(out),
+            }
 
-            // putint(p, f.invistime ? 1 : 0);
+            // 2. Write Invis
             (if f.invis { 1i32 } else { 0i32 }).sauer_write(out);
 
-            // if(f.owner<0)
+            // 3. Write Drop State (Only if owner is < 0)
             if let FlagStateOwner::Dropped { dropped, drop_loc } = &f.owner {
-                // putint(p, f.droptime ? 1 : 0);
                 (if *dropped { 1i32 } else { 0i32 }).sauer_write(out);
 
-                // if(f.droptime) { ... }
                 if *dropped {
-                    data::vec3::write_quantized::<DMF>(drop_loc, out);
+                    crate::data::vec3::write_quantized::<DMF>(drop_loc, out);
                 }
             }
 
-            // if(m_hold) ...
+            // 4. Write Hold State (Only if `hold` is Some, enforcing M_HOLD gamemode)
             if let Some(hold) = &f.hold {
                 match hold {
                     FlagStateHoldTeam::None => (-1i32).sauer_write(out),
@@ -725,32 +724,35 @@ impl SauerWrite for InitFlagsServer {
         }
     }
 }
-impl SauerRead for InitFlagsServer {
-    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        fn inner(reader: &mut &[u8]) -> Result<InitFlagsServer, ParseError> {
+impl SauerReadStateful for InitFlagsServer {
+    fn sauer_read_stateful(reader: &mut &[u8], session: &Session) -> Result<Self, ParseError> {
+        fn inner(reader: &mut &[u8], session: &Session) -> Result<InitFlagsServer, ParseError> {
             check_tag(reader, N_INITFLAGS)?;
+
             let scores = [i32::sauer_read(reader)?, i32::sauer_read(reader)?];
             let num_flags = i32::sauer_read(reader)?;
+
             if num_flags < 0 || num_flags > 256 {
                 return Err(ParseError::ValueOutOfRange {
                     value: num_flags,
                     max: 256,
-                })
-                .in_field("num_flags");
+                });
             }
+
             let mut flags = Vec::with_capacity(num_flags as usize);
+
             for _ in 0..num_flags {
                 let version = i32::sauer_read(reader)?;
                 let spawn_index = i32::sauer_read(reader)?;
                 let owner_id = i32::sauer_read(reader)?;
                 let invis = i32::sauer_read(reader)? != 0;
-
                 let owner = if owner_id < 0 {
                     let dropped = i32::sauer_read(reader)? != 0;
                     let drop_loc = if dropped {
-                        data::vec3::read_quantized::<DMF>(reader)?
+                        crate::data::vec3::read_quantized::<DMF>(reader)?
                     } else {
-                        data::Vec3 {
+                        // C++ defaults to (0, 0, 0) for droploc initially before using spawnloc.
+                        Vec3 {
                             x: 0.0,
                             y: 0.0,
                             z: 0.0,
@@ -761,18 +763,17 @@ impl SauerRead for InitFlagsServer {
                     FlagStateOwner::Owned { owner: owner_id }
                 };
 
-                let hold = if reader.is_empty() {
-                    None
-                } else {
+                // Read Hold State (Strictly bound to Session gamemode!)
+                let hold = if session.is_hold_mode {
                     let team = i32::sauer_read(reader)?;
-                    Some(if team < 0 {
-                        FlagStateHoldTeam::None
+                    if team < 0 {
+                        Some(FlagStateHoldTeam::None)
                     } else {
-                        FlagStateHoldTeam::Team {
-                            team,
-                            hold_time: i32::sauer_read(reader)?,
-                        }
-                    })
+                        let hold_time = i32::sauer_read(reader)?;
+                        Some(FlagStateHoldTeam::Team { team, hold_time })
+                    }
+                } else {
+                    None
                 };
 
                 flags.push(FlagState {
@@ -783,10 +784,11 @@ impl SauerRead for InitFlagsServer {
                     hold,
                 });
             }
+
             Ok(InitFlagsServer { scores, flags })
         }
 
-        inner(reader).in_struct("N_INITFLAGS")
+        inner(reader, session).in_struct("N_INITFLAGS")
     }
 }
 
