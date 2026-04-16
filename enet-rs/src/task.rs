@@ -814,8 +814,17 @@ impl HostTask {
                     .or_insert_with(|| {
                         FragmentBuffer::new(sf.total_length as usize, sf.fragment_count)
                     });
-                if buf.fragment_count != sf.fragment_count || buf.total_length != sf.total_length as usize
+                if buf.fragment_count != sf.fragment_count
+                    || buf.total_length != sf.total_length as usize
                 {
+                    warn!(
+                        "dropping fragment with mismatched metadata: start_seq={} expected_count={} got_count={} expected_len={} got_len={}",
+                        sf.start_seq,
+                        buf.fragment_count,
+                        sf.fragment_count,
+                        buf.total_length,
+                        sf.total_length
+                    );
                     return;
                 }
                 buf.receive(sf.fragment_number, sf.fragment_offset as usize, &sf.data)
@@ -984,8 +993,8 @@ impl HostTask {
             .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
         let ch = connect
             .channel_count
-            .clamp(1, self.host_channel_count as u32)
-            .min(protocol::MAX_CHANNELS as u32) as u8;
+            .clamp(1, (self.host_channel_count as u32).min(protocol::MAX_CHANNELS as u32))
+            as u8;
 
         let mut entry = PeerEntry {
             addr: from,

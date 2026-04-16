@@ -124,9 +124,9 @@ impl Packet {
 pub struct HostConfig {
     /// Maximum number of simultaneous peers (default: 64).
     pub max_peers: usize,
-    /// Maximum simultaneous peers sharing a single source IP (default: 8).
+    /// Maximum simultaneous peers sharing a single source IP (default: 8, minimum effective value: 1).
     pub duplicate_peers: usize,
-    /// Number of channels per peer (default: 2).
+    /// Number of channels per peer (default: 2, minimum effective value: 1).
     pub channel_count: u8,
     /// Whether to compute and verify CRC-32 checksums (default: true).
     pub use_checksum: bool,
