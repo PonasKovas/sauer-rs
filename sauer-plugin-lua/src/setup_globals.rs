@@ -17,6 +17,8 @@ pub(crate) fn setup_plugin_env(lua: &Lua, env: &Table, name: &str) -> Result<(),
     env.set("warn", make_log(Level::WARN)?)?;
     env.set("error", make_log(Level::ERROR)?)?;
 
+    env.set("PROTOCOL_VERSION", sauer_proto::PROTOCOL_VERSION)?;
+
     Ok(())
 }
 

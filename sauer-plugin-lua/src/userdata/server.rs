@@ -1,4 +1,5 @@
 use crate::extra::LuaExtraRegistry;
+use crate::userdata::task_handle::TaskHandle;
 use mlua::{FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value};
 use sauer_proto::channel1;
 use sauer_server::Server;
@@ -68,6 +69,25 @@ impl UserData for LuaServer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("peer_address", |_lua, this, cn: u32| {
             Ok(this.inner.get_client(cn).addr().to_string())
+        });
+
+        // Spawn a background tokio task that calls `func()` every
+        // `interval_ms` milliseconds.  Returns a `TaskHandle` with a
+        // `cancel()` method.
+        methods.add_method("spawn_loop", |_lua, _this, (interval_ms, func): (u64, mlua::Function)| {
+            let handle = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(
+                    std::time::Duration::from_millis(interval_ms),
+                );
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = func.call::<()>(()) {
+                        tracing::error!(target: "lua", "spawn_loop: {e}");
+                        break;
+                    }
+                }
+            });
+            Ok(TaskHandle(handle))
         });
 
         // ── Local macros to cut boilerplate ─────────────────────────────────
