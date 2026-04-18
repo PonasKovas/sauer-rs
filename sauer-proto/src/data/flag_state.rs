@@ -23,3 +23,23 @@ pub enum FlagStateHoldTeam {
     None,
     Team { team: i32, hold_time: i32 },
 }
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{IntoLua, Lua, Value};
+
+    impl IntoLua for FlagState {
+        fn into_lua(self, _lua: &Lua) -> mlua::Result<Value> {
+            // not sure yet whats the best way to model FlagStateHoldTeam thing...
+            // this api might change on rust side too, idk. since its a rare packet anyway
+            // will just leave unimplemented for now
+            //
+            // shittiest packet in the game 100%
+            Err(mlua::Error::ToLuaConversionError {
+                from: "FlagState".to_owned(),
+                to: "Value",
+                message: Some("not yet implemented. shit ass packet".to_owned()),
+            })
+        }
+    }
+};

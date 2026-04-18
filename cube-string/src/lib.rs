@@ -7,10 +7,13 @@ mod color;
 mod convenience;
 mod error;
 mod filter;
-pub mod raw;
+#[cfg(feature = "lua")]
+mod lua;
 mod segments;
 mod str;
 mod string;
+
+pub mod raw;
 
 pub use builder::CubeStringBuilder;
 pub use color::Color;

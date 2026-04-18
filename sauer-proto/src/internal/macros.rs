@@ -31,6 +31,22 @@ macro_rules! make_enum {
             }
         }
 
+        // Enums are represented as strings in lua
+        #[cfg(feature = "lua")]
+        const _: () = {
+            use mlua::{IntoLua, Lua, Value};
+
+            impl IntoLua for $name {
+                fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
+                    let s = match self {
+                        $( $name::$variant => stringify!($name), )+
+                    };
+
+                    Ok(Value::String(lua.create_string(s.as_bytes())?))
+                }
+            }
+        };
+
         };
     };
 }
@@ -83,6 +99,24 @@ macro_rules! make_struct {
                 })
             }
         }
+
+        #[cfg(feature = "lua")]
+        const _: () = {
+            use mlua::{UserData, UserDataFields};
+
+            impl UserData for $name {
+                fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+                    $(
+                        fields.add_field_method_get(stringify!($field), |_lua, this| {
+                            Ok(this.$field.clone())
+                        });
+                    )*
+
+                    // avoid unused warning
+                    let _ = fields;
+                }
+            }
+        };
 
         };
     };

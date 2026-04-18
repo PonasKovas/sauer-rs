@@ -4,12 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sauer-proto.workspace = true
-cube-string.workspace = true
+sauer-proto = { workspace = true, features = ["lua"] }
+cube-string = { workspace = true, features = ["lua"] }
 sauer-server.workspace = true
 mlua = { workspace = true, features = ["lua55", "vendored", "send"] }
 thiserror.workspace = true
 
-tokio.workspace = true
-tokio.features = ["fs"]
+tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true
