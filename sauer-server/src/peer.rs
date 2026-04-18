@@ -13,7 +13,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(peer: enet_rs::PeerSender) -> Self {
+    pub(crate) fn new(peer: enet_rs::PeerSender) -> Self {
         Self { raw: peer }
     }
 

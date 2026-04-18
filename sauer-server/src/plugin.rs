@@ -43,6 +43,10 @@ pub trait Plugin: Send + Sync + 'static {
     fn init(&self, server: &mut Server) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
+    /// On server start
+    fn start(&self, server: &Arc<Server>) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
 
     /// On new peer connection
     ///
@@ -162,6 +166,11 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         // run the right (newer) plugin, and the left - older
         self.1.init(server).await;
         self.0.init(server).await
+    }
+    async fn start(&self, server: &Arc<Server>) {
+        // run the right (newer) plugin, and the left - older
+        self.1.start(server).await;
+        self.0.start(server).await
     }
     async fn connected(&self, ctx: Context<'_>) -> Control {
         // run the right (newer) plugin, and the left - older

@@ -1,11 +1,10 @@
 use crate::{error::LuaPluginErrorExt, setup_globals::setup_globals};
 use mlua::Lua;
-use sauer_server::Server;
 use tokio::fs::{self, DirEntry};
-use tracing::error;
 
 mod error;
 mod options;
+mod plugin;
 mod setup_globals;
 
 pub use error::LuaPluginLoadError;
@@ -15,6 +14,8 @@ pub use options::LuaPluginOptions;
 pub struct LuaPlugin {
     lua_instances: Vec<Lua>,
     init: Vec<LuaCallback>,
+    start: Vec<LuaCallback>,
+    connected: Vec<LuaCallback>,
 }
 
 struct LuaCallback {
@@ -100,24 +101,21 @@ fn add_callbacks(
 ) -> Result<(), mlua::Error> {
     let globals = lua.globals();
 
-    if globals.contains_key("init")? {
-        luaplugin.init.push(LuaCallback {
-            plugin_name: name.to_owned(),
-            callback: globals.get("init")?,
-        });
+    macro_rules! add_callback {
+        ($name:ident) => {
+            if globals.contains_key(stringify!($name))? {
+                luaplugin.$name.push(LuaCallback {
+                    plugin_name: name.to_owned(),
+                    callback: globals.get(stringify!($name))?,
+                });
+            }
+        };
     }
+    add_callback!(init);
+    add_callback!(start);
+    add_callback!(connected);
 
     luaplugin.lua_instances.push(lua);
 
     Ok(())
-}
-
-impl sauer_server::Plugin for LuaPlugin {
-    async fn init(&self, _server: &mut Server) {
-        for callback in &self.init {
-            if let Err(e) = callback.callback.call::<()>(()) {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-        }
-    }
 }
