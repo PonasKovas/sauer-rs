@@ -251,3 +251,26 @@ impl SauerRead for Position {
         })
     }
 }
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{UserData, UserDataFields};
+
+    impl UserData for Position {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("client_num", |_lua, this| Ok(this.client_num));
+            fields.add_field_method_get("phys_state", |_lua, this| Ok(this.phys_state));
+            fields.add_field_method_get("life_seq_parity", |_lua, this| Ok(this.life_seq_parity));
+            fields.add_field_method_get("move_dir", |_lua, this| Ok(this.move_dir));
+            fields.add_field_method_get("strafe", |_lua, this| Ok(this.strafe));
+            fields.add_field_method_get("touches_gameclip", |_lua, this| Ok(this.touches_gameclip));
+            fields.add_field_method_get("pos", |_lua, this| Ok(this.pos));
+            fields.add_field_method_get("dir", |_lua, this| Ok(this.dir));
+            fields.add_field_method_get("roll", |_lua, this| Ok(this.roll));
+            fields.add_field_method_get("vel_speed", |_lua, this| Ok(this.vel_speed));
+            fields.add_field_method_get("vel_dir", |_lua, this| Ok(this.vel_dir));
+            fields.add_field_method_get("fall_mag", |_lua, this| Ok(this.fall_mag));
+            fields.add_field_method_get("fall_dir", |_lua, this| Ok(this.fall_dir));
+        }
+    }
+};

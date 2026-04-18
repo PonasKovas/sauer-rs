@@ -107,9 +107,10 @@ impl Plugin for LuaPlugin {
             let inst = &self.lua_instances[callback.instance_idx];
 
             let r = inst.lua.scope(|scope| {
+                let packet = scope.create_userdata_ref(packet)?;
                 let event = scope.create_userdata_ref_mut(&mut event)?;
 
-                callback.callback.call::<()>((ctx.cn, event))
+                callback.callback.call::<()>((ctx.cn, packet, event))
             });
 
             if let Err(e) = r {

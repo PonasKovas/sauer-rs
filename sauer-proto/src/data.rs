@@ -111,6 +111,8 @@ make_enum!([i32] Privilege {
     None = 0, Auth = 1, Master = 2, Admin = 3,
 });
 
+// No make_enum! macro for these two because they have some special retarded format on the wire
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(i8)]
 pub enum Movement {
@@ -126,6 +128,34 @@ pub enum Strafe {
     None = 0,
     Right = 1,
 }
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{IntoLua, Lua, Value};
+
+    impl IntoLua for Movement {
+        fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
+            let s = match self {
+                Movement::Back => "Back",
+                Movement::None => "None",
+                Movement::Forward => "Forward",
+            };
+
+            Ok(Value::String(lua.create_string(s.as_bytes())?))
+        }
+    }
+    impl IntoLua for Strafe {
+        fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
+            let s = match self {
+                Strafe::Left => "Left",
+                Strafe::None => "None",
+                Strafe::Right => "Right",
+            };
+
+            Ok(Value::String(lua.create_string(s.as_bytes())?))
+        }
+    }
+};
 
 make_struct!(
 /// State for a client resuming a game (e.g., late join).

@@ -1,6 +1,6 @@
 use crate::internal::{SauerRead, SauerWrite, read_slice};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct Direction {
     pub yaw: u16,
     pub pitch: i8,
