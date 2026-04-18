@@ -1,35 +1,32 @@
 use crate::{
-    callbacks::{Callbacks, add_callbacks},
+    callbacks::{Callbacks, add_callbacks_from_env},
     error::LuaPluginErrorExt,
-    setup_globals::setup_globals,
+    setup_globals::setup_plugin_env,
 };
 use mlua::Lua;
 use tokio::fs::{self, DirEntry};
 
 mod callbacks;
 mod error;
+mod extra;
 mod options;
 mod plugin;
 mod setup_globals;
 mod userdata;
 
 pub use error::LuaPluginLoadError;
+pub use extra::LuaExtraRegistry;
 pub use options::LuaPluginOptions;
 
-#[derive(Default)]
 pub struct LuaPlugin {
-    lua_instances: Vec<Instance>,
-    callbacks: Callbacks,
-}
-
-struct Instance {
-    lua: Lua,
-    plugin_name: String,
+    pub(crate) lua: Lua,
+    pub(crate) callbacks: Callbacks,
 }
 
 impl LuaPlugin {
     pub async fn load(options: &LuaPluginOptions) -> Result<Self, LuaPluginLoadError> {
-        let mut luaplugin = Self::default();
+        let lua = Lua::new();
+        let mut callbacks = Callbacks::default();
 
         let mut entries = fs::read_dir(&options.plugin_directory)
             .await
@@ -40,26 +37,20 @@ impl LuaPlugin {
             .await
             .in_path(&options.plugin_directory)?
         {
-            let (plugin_name, lua) = process_fs_entry(options, &entry)
+            load_plugin_entry(&entry, &lua, &mut callbacks)
                 .await
                 .in_path(&entry.path())?;
-
-            add_callbacks(options, &mut luaplugin, &plugin_name, lua).map_err(|e| {
-                LuaPluginLoadError::LuaErrorInPlugin {
-                    e,
-                    name: plugin_name,
-                }
-            })?;
         }
 
-        Ok(luaplugin)
+        Ok(Self { lua, callbacks })
     }
 }
 
-async fn process_fs_entry(
-    _options: &LuaPluginOptions,
+async fn load_plugin_entry(
     entry: &DirEntry,
-) -> Result<(String, Lua), LuaPluginLoadError> {
+    lua: &Lua,
+    callbacks: &mut Callbacks,
+) -> Result<(), LuaPluginLoadError> {
     let file_type = entry.file_type().await?;
     let mut path = entry.path();
     let name = path
@@ -72,27 +63,40 @@ async fn process_fs_entry(
         .to_str()
         .ok_or(LuaPluginLoadError::NonUtf8Path)?
         .to_owned();
-    let is_directory = file_type.is_dir();
 
-    let lua = Lua::new();
-
-    if is_directory {
-        // Allow the lua script to use `require(xyz)` to load lua scripts in its own directory
+    if file_type.is_dir() {
         let package: mlua::Table = lua.globals().get("package")?;
         let current_path: String = package.get("path")?;
         package.set("path", format!("{entry_path_str}/?.lua;{current_path}"))?;
-
         path.push("main.lua");
     }
 
-    setup_globals(&lua, &name)?;
+    // Each plugin file gets its own environment table so that global writes
+    // (e.g. `function connected()`) don't collide across plugins. Reads that
+    // aren't in the env fall through to the real `_G` via `__index`.
+    let env = lua.create_table()?;
+    let mt = lua.create_table()?;
+    mt.set("__index", lua.globals())?;
+    env.set_metatable(Some(mt))?;
+
+    // Per-plugin logging: `print`, `trace`, `debug`, `info`, `warn`, `error`
+    // all tag output with the plugin name.
+    setup_plugin_env(lua, &env, &name)?;
 
     let contents = fs::read_to_string(&path).await?;
     let path_str = path.to_str().ok_or(LuaPluginLoadError::NonUtf8Path)?;
 
     lua.load(&contents)
         .set_name(&format!("@{path_str}"))
-        .exec()?;
+        .set_environment(env.clone())
+        .exec()
+        .map_err(|e| LuaPluginLoadError::LuaErrorInPlugin {
+            e,
+            name: name.clone(),
+        })?;
 
-    Ok((name, lua))
+    add_callbacks_from_env(&env, &name, callbacks)
+        .map_err(|e| LuaPluginLoadError::LuaErrorInPlugin { e, name })?;
+
+    Ok(())
 }

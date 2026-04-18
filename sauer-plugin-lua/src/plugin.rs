@@ -1,9 +1,7 @@
 use crate::{
     LuaPlugin,
-    userdata::{
-        event::EventUD,
-        server::{LuaMutServer, LuaServer},
-    },
+    extra::LuaExtraRegistry,
+    userdata::{event::EventUD, server::LuaServer},
 };
 use bytes::Bytes;
 use sauer_proto::{channel0, channel1};
@@ -21,9 +19,7 @@ macro_rules! make_callback_impl {
             let mut event = EventUD::new();
 
             for callback in &self.callbacks.$name {
-                let inst = &self.lua_instances[callback.instance_idx];
-
-                let r = inst.lua.scope(|scope| {
+                let r = self.lua.scope(|scope| {
                     let packet = scope.create_userdata_ref(packet)?;
                     let event = scope.create_userdata_ref_mut(&mut event)?;
 
@@ -31,7 +27,7 @@ macro_rules! make_callback_impl {
                 });
 
                 if let Err(e) = r {
-                    error!(target: "lua", "[{}] {e}", inst.plugin_name);
+                    error!(target: "lua", "[{}] {e}", callback.plugin_name);
                 }
 
                 if event.cancelled {
@@ -47,58 +43,40 @@ macro_rules! make_callback_impl {
 
 impl Plugin for LuaPlugin {
     async fn init(&self, server: &mut Server) {
-        for callback in &self.callbacks.init {
-            let inst = &self.lua_instances[callback.instance_idx];
-
-            let r = inst.lua.scope(|scope| {
-                let server = scope.create_userdata(LuaMutServer::new(server))?;
-
-                callback.callback.call::<()>(server)
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", inst.plugin_name);
-            }
-        }
+        server.extra.insert(LuaExtraRegistry::new());
     }
+
     async fn start(&self, server: &Arc<Server>) {
-        // initialize the `server` global in all instances
-        for inst in &self.lua_instances {
-            let s = LuaServer::new(server);
-
-            if let Err(e) = inst.lua.globals().set("server", s) {
-                let src = inst
-                    .lua
-                    .inspect_stack(1, |debug| debug.source().short_src.map(|s| s.into_owned()))
-                    .flatten()
-                    .unwrap_or("unknown".to_owned());
-
-                error!("Error setting `server` global in lua plugin ({src}): {e}",);
+        let s = match LuaServer::new(&self.lua, server) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to set up lua server global: {e}");
+                return;
             }
+        };
+
+        if let Err(e) = self.lua.globals().set("server", s) {
+            error!("Error setting `server` global in lua: {e}");
         }
 
         for callback in &self.callbacks.start {
-            let inst = &self.lua_instances[callback.instance_idx];
-
             if let Err(e) = callback.callback.call::<()>(()) {
-                error!(target: "lua", "[{}] {e}", inst.plugin_name);
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
             }
         }
     }
+
     async fn connected(&self, ctx: Context<'_>) -> Control {
         let mut event = EventUD::new();
 
         for callback in &self.callbacks.connected {
-            let inst = &self.lua_instances[callback.instance_idx];
-
-            let r = inst.lua.scope(|scope| {
+            let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-
                 callback.callback.call::<()>((ctx.cn, event))
             });
 
             if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", inst.plugin_name);
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
             }
 
             if event.cancelled {
@@ -108,20 +86,18 @@ impl Plugin for LuaPlugin {
 
         PASS
     }
+
     async fn disconnected(&self, ctx: Context<'_>) -> Control {
         let mut event = EventUD::new();
 
         for callback in &self.callbacks.disconnected {
-            let inst = &self.lua_instances[callback.instance_idx];
-
-            let r = inst.lua.scope(|scope| {
+            let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-
                 callback.callback.call::<()>((ctx.cn, event))
             });
 
             if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", inst.plugin_name);
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
             }
 
             if event.cancelled {
@@ -136,17 +112,14 @@ impl Plugin for LuaPlugin {
         let mut event = EventUD::new();
 
         for callback in &self.callbacks.map {
-            let inst = &self.lua_instances[callback.instance_idx];
-
-            let r = inst.lua.scope(|scope| {
-                let data = inst.lua.create_string(packet.as_ref())?;
+            let r = self.lua.scope(|scope| {
+                let data = self.lua.create_string(packet.as_ref())?;
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-
                 callback.callback.call::<()>((ctx.cn, data, event))
             });
 
             if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", inst.plugin_name);
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
             }
 
             if event.cancelled {

@@ -1,66 +1,38 @@
-use mlua::{Function, Lua, Value, Variadic};
+use mlua::{Function, Lua, Table, Value, Variadic};
 use tracing::{Level, event};
 
-pub(crate) fn setup_globals(lua: &Lua, name: &str) -> Result<(), mlua::Error> {
-    // print is replaced with info
-    let name_clone = name.to_owned();
-    let print = lua.create_function(move |lua, args: Variadic<Value>| {
-        log(Level::INFO, &name_clone, lua, args)
-    })?;
+/// Set up per-plugin logging functions (`print`, `trace`, `debug`, `info`,
+/// `warn`, `error`) in the plugin's sandboxed environment table so that log
+/// output is tagged with the plugin name.
+pub(crate) fn setup_plugin_env(lua: &Lua, env: &Table, name: &str) -> Result<(), mlua::Error> {
+    let make_log = |level: Level| -> mlua::Result<mlua::Function> {
+        let n = name.to_owned();
+        lua.create_function(move |lua, args: Variadic<Value>| log(level, &n, lua, args))
+    };
 
-    let name_clone = name.to_owned();
-    let trace = lua.create_function(move |lua, args: Variadic<Value>| {
-        log(Level::TRACE, &name_clone, lua, args)
-    })?;
-    let name_clone = name.to_owned();
-    let debug = lua.create_function(move |lua, args: Variadic<Value>| {
-        log(Level::DEBUG, &name_clone, lua, args)
-    })?;
-    let name_clone = name.to_owned();
-    let info = lua.create_function(move |lua, args: Variadic<Value>| {
-        log(Level::INFO, &name_clone, lua, args)
-    })?;
-    let name_clone = name.to_owned();
-    let warn = lua.create_function(move |lua, args: Variadic<Value>| {
-        log(Level::WARN, &name_clone, lua, args)
-    })?;
-    let name_clone = name.to_owned();
-    let error = lua.create_function(move |lua, args: Variadic<Value>| {
-        log(Level::ERROR, &name_clone, lua, args)
-    })?;
-
-    lua.globals().set("print", print)?;
-    lua.globals().set("trace", trace)?;
-    lua.globals().set("debug", debug)?;
-    lua.globals().set("info", info)?;
-    lua.globals().set("warn", warn)?;
-    lua.globals().set("error", error)?;
+    env.set("print", make_log(Level::INFO)?)?;
+    env.set("trace", make_log(Level::TRACE)?)?;
+    env.set("debug", make_log(Level::DEBUG)?)?;
+    env.set("info", make_log(Level::INFO)?)?;
+    env.set("warn", make_log(Level::WARN)?)?;
+    env.set("error", make_log(Level::ERROR)?)?;
 
     Ok(())
 }
 
 fn log(level: Level, name: &str, lua: &Lua, args: Variadic<Value>) -> Result<(), mlua::Error> {
-    // Grab Lua's native `tostring` function so we respect `__tostring` metamethods
     let tostring: Function = lua.globals().get("tostring")?;
 
-    let mut printed_args = Vec::new();
-
+    let mut parts = Vec::new();
     for arg in args {
-        // Convert each argument to a string using Lua's tostring
-        let str_val: String = tostring.call(arg)?;
-        printed_args.push(str_val);
+        parts.push(tostring.call::<String>(arg)?);
     }
+    let output = parts.join("\t");
 
-    // Lua's native print separates arguments with a tab character
-    let output = printed_args.join("\t");
-
-    // Level 1 is the Lua code that called this Rust closure
     let (file, line) = lua
         .inspect_stack(1, |debug| {
-            // short_src() returns &[u8], so we safely convert it to a String
             let file = debug.source().short_src.map(|s| s.into_owned());
             let line = debug.current_line();
-
             (file, line)
         })
         .unwrap_or((None, None));
@@ -74,8 +46,8 @@ fn log(level: Level, name: &str, lua: &Lua, args: Variadic<Value>) -> Result<(),
     match level {
         Level::TRACE => event!(target: "lua", Level::TRACE, file, line, "[{name}] {output}"),
         Level::DEBUG => event!(target: "lua", Level::DEBUG, file, line, "[{name}] {output}"),
-        Level::INFO => event!( target: "lua", Level::INFO, file, line, "[{name}] {output}"),
-        Level::WARN => event!(target: "lua", Level::WARN, file, line, "[{name}] {output}"),
+        Level::INFO =>  event!(target: "lua", Level::INFO,  file, line, "[{name}] {output}"),
+        Level::WARN =>  event!(target: "lua", Level::WARN,  file, line, "[{name}] {output}"),
         Level::ERROR => event!(target: "lua", Level::ERROR, file, line, "[{name}] {output}"),
     }
 
