@@ -1,5 +1,6 @@
 use dashmap::DashMap;
 use peer::Peer;
+use sauer_proto::{Encode, route::{Chan1, S2C}};
 
 mod base_plugin;
 mod builder;
@@ -28,6 +29,14 @@ impl Server {
         match self.clients.get(&client_number) {
             Some(x) => x,
             None => panic!("tried to get client number which doesnt exist"),
+        }
+    }
+
+    /// Send a channel-1 packet to every connected client. Drops silently on a
+    /// full send buffer (same semantics as `Peer::try_send_chan1`).
+    pub fn broadcast_chan1(&self, pkt: &impl Encode<S2C<Chan1>>) {
+        for entry in self.clients.iter() {
+            entry.value().try_send_chan1(pkt);
         }
     }
 }

@@ -831,6 +831,21 @@ impl SauerReadStateful for InitFlagsServer {
     }
 }
 
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{FromLua, Value};
+
+    impl FromLua for InitFlagsServer {
+        fn from_lua(_value: Value, _lua: &mlua::Lua) -> mlua::Result<Self> {
+            Err(mlua::Error::FromLuaConversionError {
+                from: "Value",
+                to: "InitFlagsServer".to_owned(),
+                message: Some("not yet supported from Lua (FlagState is not yet constructable)".to_owned()),
+            })
+        }
+    }
+};
+
 make_struct!(
 /// `N_DROPFLAG` A player dropped a flag.
 [N_DROPFLAG] DropFlag {
