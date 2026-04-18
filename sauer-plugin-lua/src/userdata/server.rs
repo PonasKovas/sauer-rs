@@ -66,6 +66,11 @@ impl UserData for LuaServer {
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("disconnect", |_lua, this, cn: u32| {
+            this.inner.disconnect(cn);
+            Ok(())
+        });
+
         methods.add_method("peer_address", |_lua, this, cn: u32| {
             Ok(this.inner.peer_addr(cn).map(|a| a.to_string()).unwrap_or_default())
         });
