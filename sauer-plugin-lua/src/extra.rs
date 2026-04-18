@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 /// Registry for exposing Rust data to Lua plugins via `server.extra.<name>`.
 ///
-/// Inserted into [`Server::extra`] by [`LuaPlugin`] during [`Plugin::init`].
+/// Inserted into `Server::extra` by `LuaPlugin` during `Plugin::init`.
 /// Any Rust plugin that wants its data accessible from Lua registers a named
-/// factory closure here during its own [`Plugin::init`].
+/// factory closure here during its own `Plugin::init`.
 ///
 /// # Ordering
 ///
