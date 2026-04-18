@@ -1,5 +1,3 @@
-use std::{sync::Arc, time::Duration};
-
 use cube_string::{Color, CubeString};
 use dashmap::DashMap;
 use rand::random;
@@ -11,6 +9,7 @@ use sauer_server::{
     BasePlugin, ServerBuilder,
     plugin::{BLOCK, Context, Control, PASS, Plugin},
 };
+use std::{sync::Arc, time::Duration};
 use tokio::{task::JoinHandle, time::sleep};
 
 struct ChangingNamePlugin {
@@ -88,8 +87,8 @@ async fn main() {
     let server = ServerBuilder::new()
         .bind_addr(([0, 0, 0, 0], 11111))
         .max_peers(1024)
-        .plugin(BasePlugin::new());
-    //.plugin(ChangingNamePlugin::new());
+        .plugin(BasePlugin::new())
+        .plugin(ChangingNamePlugin::new());
 
     if let Err(e) = server.run().await {
         println!("Error setting up the server: {e}");

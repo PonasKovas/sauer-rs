@@ -164,28 +164,7 @@ impl BasePlugin {
             life_sequence = player.life_sequence;
             health = player.health;
         }
-        // server
-        //     .get_client(cn)
-        //     .send_chan1(&SpawnState {
-        //         client_num: cn as i32,
-        //         state: PlayerState {
-        //             life_sequence,
-        //             health,
-        //             max_health: 100,
-        //             armour: 0,
-        //             armour_type: ArmourType::Yellow,
-        //             gun_select: Gun::Rifle,
-        //             ammo: PlayerAmmo {
-        //                 rifle: 9999,
-        //                 shotgun: 0,
-        //                 chaingun: 0,
-        //                 rocket_launcher: 0,
-        //                 grenade_launcher: 0,
-        //                 pistol: 0,
-        //             },
-        //         },
-        //     })
-        //     .await;
+
         self.broadcast1(
             server,
             None,

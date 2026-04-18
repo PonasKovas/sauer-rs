@@ -1,0 +1,10 @@
+[package]
+name = "sauer-plugin-lua"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sauer-proto.workspace = true
+cube-string.workspace = true
+sauer-server.workspace = true
+mlua = { workspace = true, features = ["lua55"] }
