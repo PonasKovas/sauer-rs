@@ -10,5 +10,6 @@ sauer-server.workspace = true
 mlua = { workspace = true, features = ["lua55", "vendored", "send"] }
 thiserror.workspace = true
 
+bytes.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true

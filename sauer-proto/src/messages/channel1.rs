@@ -274,6 +274,18 @@ impl SauerRead for EditVar {
     }
 }
 
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{UserData, UserDataFields};
+
+    impl UserData for EditVar {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("name", |_lua, this| Ok(this.name.clone()));
+            fields.add_field_method_get("val", |_lua, this| Ok(this.val.clone()));
+        }
+    }
+};
+
 make_struct!(
 /// `N_CLIENTPING` Reports/Updates the scoreboard ping value.
 [N_CLIENTPING] ClientPing {
@@ -1282,6 +1294,17 @@ impl SauerRead for BasesClient {
         inner(reader).in_struct("N_BASES")
     }
 }
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{UserData, UserDataFields};
+
+    impl UserData for BasesClient {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("bases", |_lua, this| Ok(this.bases.clone()));
+        }
+    }
+};
 
 make_struct!(
 /// `N_REPAMMO` Requests ammo replenishment (Regen Capture).

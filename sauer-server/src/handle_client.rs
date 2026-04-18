@@ -134,13 +134,6 @@ impl Packet {
             Packet::Chan2(_) => 2,
         }
     }
-    fn msg_type(&self) -> &'static str {
-        match self {
-            Packet::Chan0(v) => v.msg_type(),
-            Packet::Chan1(v) => v.msg_type(),
-            Packet::Chan2(_) => "CHANNEL2_MAP",
-        }
-    }
 }
 
 impl SauerReceiver {
