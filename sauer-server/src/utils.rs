@@ -5,12 +5,16 @@ pub fn init_default_tracing() {
 
     // 1. Try to get the filter from the `RUST_LOG` environment variable.
     // 2. If the variable is missing or empty, fall back to our default.
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("sauer_server=debug"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
 
     // Only try to init if one hasn't been set yet
     let _ = tracing_subscriber::registry()
-        .with(fmt::layer().with_ansi(true))
+        .with(
+            fmt::layer()
+                .compact() // 👈 enable compact format
+                .with_ansi(true)
+                .without_time(), // ❌ no timestamps
+        )
         .with(filter)
         .try_init();
 }

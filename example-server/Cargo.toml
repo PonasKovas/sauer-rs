@@ -1,0 +1,14 @@
+[package]
+name = "example-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sauer-server.workspace = true
+sauer-proto.workspace = true
+sauer-plugin-lua.workspace = true
+cube-string.workspace = true
+
+tokio.workspace = true
+tokio.features = ["full"]
+tracing.workspace = true

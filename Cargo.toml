@@ -1,5 +1,5 @@
 [workspace]
-members = ["cube-string", "enet-rs", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "enet-rs/enet-interop-test", "sauer-plugin-lua"]
+members = ["cube-string", "enet-rs", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "enet-rs/enet-interop-test", "sauer-plugin-lua", "example-server"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -9,6 +9,7 @@ ogz-rs.path = "ogz-rs/"
 sauer-proto.path = "sauer-proto/"
 sauer-server.path = "sauer-server/"
 sauer-map.path = "sauer-map/"
+sauer-plugin-lua.path = "sauer-plugin-lua/"
 
 num_enum = "0.7.6"
 serde = "1.0.218"
