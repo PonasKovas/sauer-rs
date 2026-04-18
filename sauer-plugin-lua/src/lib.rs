@@ -1,26 +1,30 @@
-use crate::{error::LuaPluginErrorExt, setup_globals::setup_globals};
+use crate::{
+    callbacks::{Callbacks, add_callbacks},
+    error::LuaPluginErrorExt,
+    setup_globals::setup_globals,
+};
 use mlua::Lua;
 use tokio::fs::{self, DirEntry};
 
+mod callbacks;
 mod error;
 mod options;
 mod plugin;
 mod setup_globals;
+mod userdata;
 
 pub use error::LuaPluginLoadError;
 pub use options::LuaPluginOptions;
 
 #[derive(Default)]
 pub struct LuaPlugin {
-    lua_instances: Vec<Lua>,
-    init: Vec<LuaCallback>,
-    start: Vec<LuaCallback>,
-    connected: Vec<LuaCallback>,
+    lua_instances: Vec<Instance>,
+    callbacks: Callbacks,
 }
 
-struct LuaCallback {
+struct Instance {
+    lua: Lua,
     plugin_name: String,
-    callback: mlua::Function,
 }
 
 impl LuaPlugin {
@@ -91,31 +95,4 @@ async fn process_fs_entry(
         .exec()?;
 
     Ok((name, lua))
-}
-
-fn add_callbacks(
-    _options: &LuaPluginOptions,
-    luaplugin: &mut LuaPlugin,
-    name: &str,
-    lua: Lua,
-) -> Result<(), mlua::Error> {
-    let globals = lua.globals();
-
-    macro_rules! add_callback {
-        ($name:ident) => {
-            if globals.contains_key(stringify!($name))? {
-                luaplugin.$name.push(LuaCallback {
-                    plugin_name: name.to_owned(),
-                    callback: globals.get(stringify!($name))?,
-                });
-            }
-        };
-    }
-    add_callback!(init);
-    add_callback!(start);
-    add_callback!(connected);
-
-    luaplugin.lua_instances.push(lua);
-
-    Ok(())
 }
