@@ -10,6 +10,7 @@ pub mod utils;
 
 pub use base_plugin::BasePlugin;
 pub use builder::ServerBuilder;
+pub use plugin::{Context, GetPlugin, Plugin};
 
 pub struct Server {
     clients: DashMap<u32, Peer>,

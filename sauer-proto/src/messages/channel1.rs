@@ -1207,13 +1207,15 @@ make_struct!(
 
 make_struct!(
 /// `N_COPY` Coop Edit: Client copies geometry to their clipboard.
-[N_COPY] CopyClient {}
-);
+[N_COPY] CopyClient {
+    sel: SelInfo,
+});
 
 make_struct!(
 /// `N_PASTE` Coop Edit: Client requests to paste geometry from their clipboard.
-[N_PASTE] PasteClient {}
-);
+[N_PASTE] PasteClient {
+    sel: SelInfo,
+});
 
 make_struct!(
 /// `N_CLIPBOARD` Coop Edit: Uploads raw clipboard geometry data.

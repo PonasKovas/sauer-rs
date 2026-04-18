@@ -160,7 +160,9 @@ pub(crate) fn write_varint_float<const Q: u32>(val: &f32, out: &mut Vec<u8>) {
 
 // Bytes without any length prefix or terminator
 pub(crate) fn read_all_remaining(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
-    Ok(reader.to_vec())
+    let data = reader.to_vec();
+    *reader = &[]; // Advance the reader to the end
+    Ok(data)
 }
 pub(crate) fn write_all_remaining(val: &Vec<u8>, out: &mut Vec<u8>) {
     out.extend_from_slice(val);

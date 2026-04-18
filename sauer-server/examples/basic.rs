@@ -86,9 +86,10 @@ async fn main() {
     sauer_server::utils::init_default_tracing();
 
     let server = ServerBuilder::new()
+        .bind_addr(([0, 0, 0, 0], 11111))
         .max_peers(1024)
-        .plugin(BasePlugin::new())
-        .plugin(ChangingNamePlugin::new());
+        .plugin(BasePlugin::new());
+    //.plugin(ChangingNamePlugin::new());
 
     if let Err(e) = server.run().await {
         println!("Error setting up the server: {e}");

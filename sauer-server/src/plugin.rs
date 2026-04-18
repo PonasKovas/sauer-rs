@@ -3,6 +3,10 @@ use bytes::Bytes;
 use sauer_proto::{channel0, channel1};
 use std::{ops::ControlFlow, sync::Arc};
 
+mod get_plugin;
+
+pub use get_plugin::GetPlugin;
+
 // if only Try was stable
 pub type Control = ControlFlow<()>;
 pub const PASS: Control = ControlFlow::Continue(());

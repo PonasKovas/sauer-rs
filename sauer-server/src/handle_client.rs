@@ -10,6 +10,7 @@ use sauer_proto::{
     route::{C2S, Chan0, Chan1},
 };
 use std::{collections::VecDeque, sync::Arc};
+use tracing::trace;
 
 pub(crate) async fn handle_client<P: Plugin>(
     server: &Arc<Server>,
@@ -21,6 +22,11 @@ pub(crate) async fn handle_client<P: Plugin>(
 
     loop {
         let pkt = rx.recv().await?;
+
+        if pkt.channel() == 1 {
+            trace!("received: {pkt:?}");
+        }
+
         let ctx = Context::new(server, cn);
 
         let _ = match pkt {
@@ -118,6 +124,23 @@ enum Packet {
     Chan0(Chan0Client),
     Chan1(Chan1Client),
     Chan2(Bytes),
+}
+
+impl Packet {
+    fn channel(&self) -> u8 {
+        match self {
+            Packet::Chan0(_) => 0,
+            Packet::Chan1(_) => 1,
+            Packet::Chan2(_) => 2,
+        }
+    }
+    fn msg_type(&self) -> &'static str {
+        match self {
+            Packet::Chan0(v) => v.msg_type(),
+            Packet::Chan1(v) => v.msg_type(),
+            Packet::Chan2(_) => "CHANNEL2_MAP",
+        }
+    }
 }
 
 impl SauerReceiver {

@@ -311,6 +311,15 @@ macro_rules! make_packet_enum {
                 })
             }
         }
+        impl $name {
+            pub fn msg_type(&self) -> &'static str {
+                match self {
+                    $(
+                        Self::$variant(_) => crate::internal::msg_id_to_name($TAG),
+                    )+
+                }
+            }
+        }
 
         };
     };
