@@ -8,6 +8,8 @@ pub(crate) struct Callbacks {
     pub connected: Vec<LuaCallback>,
     pub disconnected: Vec<LuaCallback>,
     pub pos: Vec<LuaCallback>,
+    pub teleport: Vec<LuaCallback>,
+    pub jumppad: Vec<LuaCallback>,
 }
 
 pub(crate) struct LuaCallback {

@@ -13,6 +13,37 @@ use sauer_server::{
 use std::sync::Arc;
 use tracing::error;
 
+macro_rules! make_callback_impl {
+    ( $( [$name:ident, $type:ty] ),* $(,)? ) => {
+        $(
+        async fn $name(&self, ctx: Context<'_>, packet: &$type) -> Control {
+            let mut event = EventUD::new();
+
+            for callback in &self.callbacks.$name {
+                let inst = &self.lua_instances[callback.instance_idx];
+
+                let r = inst.lua.scope(|scope| {
+                    let packet = scope.create_userdata_ref(packet)?;
+                    let event = scope.create_userdata_ref_mut(&mut event)?;
+
+                    callback.callback.call::<()>((ctx.cn, packet, event))
+                });
+
+                if let Err(e) = r {
+                    error!(target: "lua", "[{}] {e}", inst.plugin_name);
+                }
+
+                if event.cancelled {
+                    return BLOCK;
+                }
+            }
+
+            PASS
+        }
+        )*
+    };
+}
+
 impl Plugin for LuaPlugin {
     async fn init(&self, server: &mut Server) {
         for callback in &self.callbacks.init {
@@ -100,28 +131,9 @@ impl Plugin for LuaPlugin {
         PASS
     }
 
-    async fn pos(&self, ctx: Context<'_>, packet: &channel0::Position) -> Control {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.pos {
-            let inst = &self.lua_instances[callback.instance_idx];
-
-            let r = inst.lua.scope(|scope| {
-                let packet = scope.create_userdata_ref(packet)?;
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-
-                callback.callback.call::<()>((ctx.cn, packet, event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", inst.plugin_name);
-            }
-
-            if event.cancelled {
-                return BLOCK;
-            }
-        }
-
-        PASS
+    make_callback_impl! {
+        [pos, channel0::Position],
+        [teleport, channel0::Teleport],
+        [jumppad, channel0::JumpPad],
     }
 }
