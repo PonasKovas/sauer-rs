@@ -52,17 +52,14 @@ impl Plugin for ChangingNamePlugin {
                         .push_str(&" ".repeat(TOTAL_WIDTH - TEXT_WIDTH - pos))
                         .build();
 
-                    server
-                        .get_client(cn)
-                        .send_chan1(&ServInfo {
-                            client_num: cn as i32,
-                            protocol: PROTOCOL_VERSION,
-                            session_id: 0,
-                            has_password: false,
-                            server_desc,
-                            server_auth: CubeString::new(),
-                        })
-                        .await;
+                    server.send_chan1(cn, &ServInfo {
+                        client_num: cn as i32,
+                        protocol: PROTOCOL_VERSION,
+                        session_id: 0,
+                        has_password: false,
+                        server_desc,
+                        server_auth: CubeString::new(),
+                    });
 
                     sleep(Duration::from_millis(100)).await;
                     i += 1;

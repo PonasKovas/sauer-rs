@@ -82,6 +82,14 @@ impl PeerSender {
             })
     }
 
+    /// Initiate a graceful disconnect without blocking.
+    pub fn try_disconnect(&self, data: u32) {
+        let _ = self.task_tx.try_send(ToTask::Disconnect {
+            peer_key: self.key,
+            data,
+        });
+    }
+
     /// Initiate a graceful disconnect.
     pub async fn disconnect(&self, data: u32) -> Result<()> {
         self.task_tx

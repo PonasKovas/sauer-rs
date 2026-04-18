@@ -4,7 +4,6 @@ use mlua::{FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, 
 use sauer_proto::channel1;
 use sauer_server::Server;
 use std::sync::Arc;
-use tracing::warn;
 
 pub struct LuaServer {
     pub inner: Arc<Server>,
@@ -68,7 +67,7 @@ impl UserData for LuaServer {
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("peer_address", |_lua, this, cn: u32| {
-            Ok(this.inner.get_client(cn).addr().to_string())
+            Ok(this.inner.peer_addr(cn).map(|a| a.to_string()).unwrap_or_default())
         });
 
         // Spawn a background tokio task that calls `func()` every
@@ -97,9 +96,7 @@ impl UserData for LuaServer {
             ($name:literal, $ty:ty) => {
                 methods.add_method($name, |lua, this, (cn, table): (u32, Table)| {
                     let packet = <$ty>::from_lua(Value::Table(table), lua)?;
-                    if !this.inner.get_client(cn).try_send_chan1(&packet) {
-                        warn!(target: "lua", concat!($name, " to cn={}: channel full, packet dropped"), cn);
-                    }
+                    this.inner.send_chan1(cn, &packet);
                     Ok(())
                 });
             };
