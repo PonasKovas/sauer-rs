@@ -34,15 +34,32 @@ macro_rules! make_enum {
         // Enums are represented as strings in lua
         #[cfg(feature = "lua")]
         const _: () = {
-            use mlua::{IntoLua, Lua, Value};
+            use mlua::{FromLua, IntoLua, Lua, Value};
 
             impl IntoLua for $name {
                 fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
                     let s = match self {
-                        $( $name::$variant => stringify!($name), )+
+                        $( $name::$variant => stringify!($variant), )+
                     };
 
                     Ok(Value::String(lua.create_string(s.as_bytes())?))
+                }
+            }
+
+            impl FromLua for $name {
+                fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
+                    let s = String::from_lua(value, lua)?;
+                    match s.as_str() {
+                        $( stringify!($variant) => Ok($name::$variant), )+
+                        _ => Err(mlua::Error::FromLuaConversionError {
+                            from: "string",
+                            to: stringify!($name).to_owned(),
+                            message: Some(format!(
+                                "unknown variant '{}' for {}",
+                                s, stringify!($name)
+                            )),
+                        }),
+                    }
                 }
             }
         };
@@ -102,7 +119,7 @@ macro_rules! make_struct {
 
         #[cfg(feature = "lua")]
         const _: () = {
-            use mlua::{UserData, UserDataFields};
+            use mlua::{FromLua, UserData, UserDataFields};
 
             impl UserData for $name {
                 fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
@@ -114,6 +131,18 @@ macro_rules! make_struct {
 
                     // avoid unused warning
                     let _ = fields;
+                }
+            }
+
+            impl FromLua for $name {
+                fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+                    #[allow(unused_variables)]
+                    let table = mlua::Table::from_lua(value, lua)?;
+                    Ok(Self {
+                        $(
+                            $field: table.get(stringify!($field))?,
+                        )*
+                    })
                 }
             }
         };

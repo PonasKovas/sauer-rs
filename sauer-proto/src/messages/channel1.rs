@@ -187,6 +187,23 @@ pub struct Client<T> {
     pub packet: T,
 }
 
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{FromLua, Table, Value};
+
+    /// `client_num` is inlined into the same table as the packet fields.
+    /// e.g. `{ client_num = 5, sound_id = 3 }` for `Client<Sound>`.
+    impl<T: FromLua> FromLua for Client<T> {
+        fn from_lua(value: Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = Table::from_lua(value, lua)?;
+            Ok(Self {
+                client_num: table.get("client_num")?,
+                packet: T::from_lua(Value::Table(table), lua)?,
+            })
+        }
+    }
+};
+
 // =====================================================================
 // SHARED STRUCTS (Server & Client identical)
 // =====================================================================
@@ -276,12 +293,22 @@ impl SauerRead for EditVar {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{UserData, UserDataFields};
+    use mlua::{FromLua, UserData, UserDataFields};
 
     impl UserData for EditVar {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
             fields.add_field_method_get("name", |_lua, this| Ok(this.name.clone()));
             fields.add_field_method_get("val", |_lua, this| Ok(this.val.clone()));
+        }
+    }
+
+    impl FromLua for EditVar {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                name: table.get("name")?,
+                val: table.get("val")?,
+            })
         }
     }
 };
@@ -1297,11 +1324,20 @@ impl SauerRead for BasesClient {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{UserData, UserDataFields};
+    use mlua::{FromLua, UserData, UserDataFields};
 
     impl UserData for BasesClient {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
             fields.add_field_method_get("bases", |_lua, this| Ok(this.bases.clone()));
+        }
+    }
+
+    impl FromLua for BasesClient {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                bases: table.get("bases")?,
+            })
         }
     }
 };

@@ -35,6 +35,22 @@ impl Peer {
         }
     }
 
+    /// Send a channel-1 packet without blocking. Returns `false` and logs a
+    /// warning if the peer's send buffer is full or the channel is closed.
+    pub fn try_send_chan1(&self, pkt: &impl Encode<S2C<Chan1>>) -> bool {
+        let mut writer = Writer::<S2C<Chan1>>::new();
+        writer.push(pkt);
+        let bytes = writer.consume();
+
+        self.raw
+            .try_send_packet(enet_rs::Packet {
+                data: bytes.into(),
+                channel: sauer_proto::CHANNEL_MESSAGES,
+                mode: SendMode::Reliable,
+            })
+            .is_ok()
+    }
+
     pub async fn send_chan1(&self, pkt: &impl Encode<S2C<Chan1>>) {
         let mut writer = Writer::<S2C<Chan1>>::new();
         writer.push(pkt);

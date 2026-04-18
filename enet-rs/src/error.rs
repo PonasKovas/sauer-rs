@@ -20,6 +20,9 @@ pub enum Error {
     #[error("channel closed")]
     ChannelClosed,
 
+    #[error("channel full")]
+    ChannelFull,
+
     #[error("connect ID mismatch")]
     ConnectIdMismatch,
 

@@ -26,7 +26,7 @@ pub enum FlagStateHoldTeam {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{IntoLua, Lua, Value};
+    use mlua::{FromLua, IntoLua, Lua, Value};
 
     impl IntoLua for FlagState {
         fn into_lua(self, _lua: &Lua) -> mlua::Result<Value> {
@@ -38,6 +38,16 @@ const _: () = {
             Err(mlua::Error::ToLuaConversionError {
                 from: "FlagState".to_owned(),
                 to: "Value",
+                message: Some("not yet implemented. shit ass packet".to_owned()),
+            })
+        }
+    }
+
+    impl FromLua for FlagState {
+        fn from_lua(_value: Value, _lua: &Lua) -> mlua::Result<Self> {
+            Err(mlua::Error::FromLuaConversionError {
+                from: "Value",
+                to: "FlagState".to_owned(),
                 message: Some("not yet implemented. shit ass packet".to_owned()),
             })
         }

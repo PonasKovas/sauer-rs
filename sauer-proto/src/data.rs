@@ -131,7 +131,7 @@ pub enum Strafe {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{IntoLua, Lua, Value};
+    use mlua::{FromLua, IntoLua, Lua, Value};
 
     impl IntoLua for Movement {
         fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
@@ -144,6 +144,22 @@ const _: () = {
             Ok(Value::String(lua.create_string(s.as_bytes())?))
         }
     }
+    impl FromLua for Movement {
+        fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
+            let s = String::from_lua(value, lua)?;
+            match s.as_str() {
+                "Back" => Ok(Movement::Back),
+                "None" => Ok(Movement::None),
+                "Forward" => Ok(Movement::Forward),
+                _ => Err(mlua::Error::FromLuaConversionError {
+                    from: "string",
+                    to: "Movement".to_owned(),
+                    message: Some(format!("unknown variant '{}' for Movement", s)),
+                }),
+            }
+        }
+    }
+
     impl IntoLua for Strafe {
         fn into_lua(self, lua: &Lua) -> Result<Value, mlua::Error> {
             let s = match self {
@@ -153,6 +169,21 @@ const _: () = {
             };
 
             Ok(Value::String(lua.create_string(s.as_bytes())?))
+        }
+    }
+    impl FromLua for Strafe {
+        fn from_lua(value: Value, lua: &Lua) -> mlua::Result<Self> {
+            let s = String::from_lua(value, lua)?;
+            match s.as_str() {
+                "Left" => Ok(Strafe::Left),
+                "None" => Ok(Strafe::None),
+                "Right" => Ok(Strafe::Right),
+                _ => Err(mlua::Error::FromLuaConversionError {
+                    from: "string",
+                    to: "Strafe".to_owned(),
+                    message: Some(format!("unknown variant '{}' for Strafe", s)),
+                }),
+            }
         }
     }
 };

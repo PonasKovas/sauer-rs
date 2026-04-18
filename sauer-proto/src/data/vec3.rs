@@ -43,13 +43,24 @@ impl SauerRead for Vec3<i32> {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{IntoLua, UserData, UserDataFields};
+    use mlua::{FromLua, IntoLua, UserData, UserDataFields};
 
     impl<T: IntoLua + Clone> UserData for Vec3<T> {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
             fields.add_field_method_get("x", |_lua, this| Ok(this.x.clone()));
             fields.add_field_method_get("y", |_lua, this| Ok(this.y.clone()));
             fields.add_field_method_get("z", |_lua, this| Ok(this.z.clone()));
+        }
+    }
+
+    impl<T: FromLua> FromLua for Vec3<T> {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                x: table.get("x")?,
+                y: table.get("y")?,
+                z: table.get("z")?,
+            })
         }
     }
 };

@@ -9,12 +9,22 @@ pub struct BaseSpawn {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{UserData, UserDataFields};
+    use mlua::{FromLua, UserData, UserDataFields};
 
     impl UserData for BaseSpawn {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
             fields.add_field_method_get("ammotype", |_lua, this| Ok(this.ammotype));
             fields.add_field_method_get("pos", |_lua, this| Ok(this.pos));
+        }
+    }
+
+    impl FromLua for BaseSpawn {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                ammotype: table.get("ammotype")?,
+                pos: table.get("pos")?,
+            })
         }
     }
 };

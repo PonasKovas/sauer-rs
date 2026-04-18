@@ -47,7 +47,7 @@ impl SauerRead for BaseInfo {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{UserData, UserDataFields};
+    use mlua::{FromLua, UserData, UserDataFields};
 
     impl UserData for BaseInfo {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
@@ -56,6 +56,19 @@ const _: () = {
             fields.add_field_method_get("enemy", |_lua, this| Ok(this.enemy.clone()));
             fields.add_field_method_get("converted", |_lua, this| Ok(this.converted));
             fields.add_field_method_get("ammo", |_lua, this| Ok(this.ammo));
+        }
+    }
+
+    impl FromLua for BaseInfo {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                ammotype: table.get("ammotype")?,
+                owner: table.get("owner")?,
+                enemy: table.get("enemy")?,
+                converted: table.get("converted")?,
+                ammo: table.get("ammo")?,
+            })
         }
     }
 };

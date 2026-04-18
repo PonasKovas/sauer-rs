@@ -68,6 +68,20 @@ impl PeerSender {
             .map_err(|_| Error::ChannelClosed)
     }
 
+    /// Send a packet without blocking. Returns `Err(Error::ChannelFull)` if the
+    /// internal send buffer is at capacity.
+    pub fn try_send_packet(&self, pkt: Packet) -> Result<()> {
+        self.task_tx
+            .try_send(ToTask::Send {
+                peer_key: self.key,
+                packet: pkt,
+            })
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => Error::ChannelFull,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => Error::ChannelClosed,
+            })
+    }
+
     /// Initiate a graceful disconnect.
     pub async fn disconnect(&self, data: u32) -> Result<()> {
         self.task_tx

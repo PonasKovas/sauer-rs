@@ -34,12 +34,22 @@ impl SauerRead for Direction {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{UserData, UserDataFields};
+    use mlua::{FromLua, UserData, UserDataFields};
 
     impl UserData for Direction {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
             fields.add_field_method_get("yaw", |_lua, this| Ok(this.yaw));
             fields.add_field_method_get("pitch", |_lua, this| Ok(this.pitch));
+        }
+    }
+
+    impl FromLua for Direction {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                yaw: table.get("yaw")?,
+                pitch: table.get("pitch")?,
+            })
         }
     }
 };

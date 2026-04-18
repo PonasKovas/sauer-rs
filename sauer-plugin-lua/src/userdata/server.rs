@@ -1,7 +1,9 @@
 use crate::extra::LuaExtraRegistry;
-use mlua::{IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value};
+use mlua::{FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value};
+use sauer_proto::channel1;
 use sauer_server::Server;
 use std::sync::Arc;
+use tracing::warn;
 
 pub struct LuaServer {
     pub inner: Arc<Server>,
@@ -66,6 +68,14 @@ impl UserData for LuaServer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("peer_address", |_lua, this, cn: u32| {
             Ok(this.inner.get_client(cn).addr().to_string())
+        });
+
+        methods.add_method("send_serv_msg", |lua, this, (cn, table): (u32, Table)| {
+            let packet = channel1::ServMsg::from_lua(Value::Table(table), lua)?;
+            if !this.inner.get_client(cn).try_send_chan1(&packet) {
+                warn!(target: "lua", "send_serv_msg to cn={cn}: channel full, packet dropped");
+            }
+            Ok(())
         });
     }
 }
