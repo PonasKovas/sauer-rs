@@ -40,7 +40,7 @@ function connect(cn, packet, event)
     local TOTAL_WIDTH = 20
     local TEXT_WIDTH  = 8
 
-    tasks[cn] = server:spawn_loop(100, function()
+    tasks[cn] = server:set_interval(100, function()
         local pos  = triangle(i, TOTAL_WIDTH - TEXT_WIDTH - 1)
         local desc = string.rep(" ", pos)
                   .. random_colour() .. "sauer"

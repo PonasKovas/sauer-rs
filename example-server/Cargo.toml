@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 sauer-server.workspace = true
+sauer-base-plugin.workspace = true
 sauer-proto.workspace = true
 sauer-plugin-lua.workspace = true
 cube-string.workspace = true

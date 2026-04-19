@@ -1,6 +1,6 @@
+use sauer_base_plugin::BasePlugin;
 use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
-use sauer_server::BasePlugin;
 use sauer_server::ServerBuilder;
 use tracing::error;
 

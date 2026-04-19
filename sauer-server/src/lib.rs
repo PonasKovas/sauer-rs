@@ -6,14 +6,12 @@ use sauer_proto::{
 };
 use std::net::SocketAddr;
 
-mod base_plugin;
 mod builder;
 mod handle_client;
 mod peer;
 pub mod plugin;
 pub mod utils;
 
-pub use base_plugin::BasePlugin;
 pub use builder::ServerBuilder;
 pub use plugin::{Context, Plugin};
 
