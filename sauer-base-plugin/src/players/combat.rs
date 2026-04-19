@@ -87,7 +87,7 @@ pub fn apply_damage(
         armour,
         health,
     });
-    server.broadcast_chan1(&HitPush {
+    server.send_chan1(target_cn, &HitPush {
         target_cn: target_cn as i32,
         gun,
         damage,

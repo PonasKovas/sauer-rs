@@ -47,10 +47,13 @@ pub fn welcome(server: &Server, cn: u32) {
 
     // notify the new player of existing players
     for other_cn in server.client_cns() {
+        if other_cn == cn {
+            continue;
+        }
         let p = get_players(server).get(other_cn);
         let (name, player_model, team) = (p.name.clone(), p.model, p.team.clone());
         drop(p);
-        server.broadcast_except_chan1(
+        server.send_chan1(
             cn,
             &InitClient {
                 client_num: other_cn as i32,
