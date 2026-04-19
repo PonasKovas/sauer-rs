@@ -5,17 +5,14 @@ use crate::{
 };
 use bytes::Bytes;
 use sauer_proto::{channel0, channel1};
-use sauer_server::{
-    Context, Plugin, Server,
-    plugin::{BLOCK, Control, PASS},
-};
+use sauer_server::{Context, Plugin, Server};
 use std::sync::Arc;
 use tracing::error;
 
 macro_rules! make_callback_impl {
     ( $( [$name:ident, $type:ty] ),* $(,)? ) => {
         $(
-        async fn $name(&self, ctx: Context<'_>, packet: &$type) -> Control {
+        async fn $name(&self, ctx: &mut Context, packet: &$type) {
             let mut event = EventUD::new();
 
             for callback in &self.callbacks.$name {
@@ -23,7 +20,7 @@ macro_rules! make_callback_impl {
                     let packet = scope.create_userdata_ref(packet)?;
                     let event = scope.create_userdata_ref_mut(&mut event)?;
 
-                    callback.callback.call::<()>((ctx.cn, packet, event))
+                    callback.callback.call::<()>((ctx.cn(), packet, event))
                 });
 
                 if let Err(e) = r {
@@ -31,11 +28,10 @@ macro_rules! make_callback_impl {
                 }
 
                 if event.cancelled {
-                    return BLOCK;
+                    ctx.cancel();
+                    break;
                 }
             }
-
-            PASS
         }
         )*
     };
@@ -66,13 +62,13 @@ impl Plugin for LuaPlugin {
         }
     }
 
-    async fn connected(&self, ctx: Context<'_>) -> Control {
+    async fn connected(&self, ctx: &mut Context) {
         let mut event = EventUD::new();
 
         for callback in &self.callbacks.connected {
             let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn, event))
+                callback.callback.call::<()>((ctx.cn(), event))
             });
 
             if let Err(e) = r {
@@ -80,20 +76,19 @@ impl Plugin for LuaPlugin {
             }
 
             if event.cancelled {
-                return BLOCK;
+                ctx.cancel();
+                break;
             }
         }
-
-        PASS
     }
 
-    async fn disconnected(&self, ctx: Context<'_>) -> Control {
+    async fn disconnected(&self, ctx: &mut Context) {
         let mut event = EventUD::new();
 
         for callback in &self.callbacks.disconnected {
             let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn, event))
+                callback.callback.call::<()>((ctx.cn(), event))
             });
 
             if let Err(e) = r {
@@ -101,21 +96,20 @@ impl Plugin for LuaPlugin {
             }
 
             if event.cancelled {
-                return BLOCK;
+                ctx.cancel();
+                break;
             }
         }
-
-        PASS
     }
 
-    async fn map(&self, ctx: Context<'_>, packet: &Bytes) -> Control {
+    async fn map(&self, ctx: &mut Context, packet: &Bytes) {
         let mut event = EventUD::new();
 
         for callback in &self.callbacks.map {
             let r = self.lua.scope(|scope| {
                 let data = self.lua.create_string(packet.as_ref())?;
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn, data, event))
+                callback.callback.call::<()>((ctx.cn(), data, event))
             });
 
             if let Err(e) = r {
@@ -123,11 +117,10 @@ impl Plugin for LuaPlugin {
             }
 
             if event.cancelled {
-                return BLOCK;
+                ctx.cancel();
+                break;
             }
         }
-
-        PASS
     }
 
     make_callback_impl! {

@@ -1,48 +1,48 @@
-mod client;
-mod combat;
-mod connect;
-mod crypto;
-mod game;
-mod identity;
-mod map;
-mod master;
-mod modes;
-mod ping;
-mod registry;
-mod spawn;
-mod timer;
-
-pub mod error;
-pub mod options;
-
-pub use client::ClientData;
-pub use combat::CombatState;
-pub use error::BasePluginError;
-pub use game::GameState;
-pub use master::MasterState;
-pub use modes::{default_spawn_state, has_items, is_instagib, is_multiplayer};
-pub use options::BasePluginOptions;
-pub use registry::ClientRegistry;
-
-use options::BasePluginOptions as Opts;
-use sauer_proto::{channel0, channel1};
+use crate::{
+    names::{Names, clear_name, set_name},
+    options::{BasePluginOptions, get_options},
+    playermodels::{PlayerModels, set_playermodel},
+    session_ids::{SessionIds, clear_session_id, create_session_id},
+    teams::{Teams, clear_team, set_initial_team},
+};
+use sauer_proto::{
+    channel0,
+    channel1::{self, ServInfo},
+};
 use sauer_server::{
     Server,
-    plugin::{Context, Control, Plugin, PASS},
+    plugin::{Context, Plugin},
 };
-use std::sync::Arc;
+use tracing::info;
+
+use std::sync::RwLock;
+
+mod error;
+pub mod names;
+pub mod options;
+pub mod playermodels;
+pub mod session_ids;
+pub mod teams;
+mod welcome;
+
+pub use error::BasePluginError;
+pub use welcome::welcome;
 
 pub struct BasePlugin {
-    options: Arc<Opts>,
+    initial_options: BasePluginOptions,
 }
 
 impl BasePlugin {
     pub fn new() -> Self {
-        Self { options: Arc::new(Opts::default()) }
+        Self {
+            initial_options: BasePluginOptions::default(),
+        }
     }
 
-    pub fn with_options(options: Opts) -> Self {
-        Self { options: Arc::new(options) }
+    pub fn with_options(options: BasePluginOptions) -> Self {
+        Self {
+            initial_options: options,
+        }
     }
 }
 
@@ -54,135 +54,48 @@ impl Default for BasePlugin {
 
 impl Plugin for BasePlugin {
     async fn init(&self, server: &mut Server) {
-        server.extra.insert(ClientRegistry::new());
-        server.extra.insert(MasterState::new());
-        server.extra.insert(CombatState::new());
-        server.extra.insert(GameState::new(
-            self.options.initial_map.clone(),
-            self.options.initial_mode,
-        ));
+        let options = RwLock::new(self.initial_options.clone());
+        server.extra.insert(options);
+        server.extra.insert(SessionIds::new());
+        server.extra.insert(Names::new());
+        server.extra.insert(PlayerModels::new());
+        server.extra.insert(Teams::new());
     }
 
-    async fn start(&self, server: &Arc<Server>) {
-        let server = Arc::clone(server);
-        let options = Arc::clone(&self.options);
-        tokio::spawn(timer::run_tick_loop(server, options));
+    async fn connected(&self, ctx: &mut Context) {
+        let options = get_options(ctx.server()).read().unwrap();
+
+        let session_id = create_session_id(ctx.server(), ctx.cn());
+
+        ctx.server().send_chan1(
+            ctx.cn(),
+            &ServInfo {
+                client_num: ctx.cn() as i32,
+                protocol: sauer_proto::PROTOCOL_VERSION,
+                session_id,
+                has_password: options.has_password,
+                server_desc: options.server_desc.clone(),
+                server_auth: options.server_auth.clone(),
+            },
+        );
     }
 
-    async fn connected(&self, ctx: Context<'_>) -> Control {
-        connect::on_connected(ctx.server, ctx.cn, &self.options).await
+    async fn disconnected(&self, ctx: &mut Context) {
+        clear_session_id(ctx.server(), ctx.cn());
+        clear_name(ctx.server(), ctx.cn());
+        clear_team(ctx.server(), ctx.cn());
     }
 
-    async fn disconnected(&self, ctx: Context<'_>) -> Control {
-        connect::on_disconnect(ctx.server, ctx.cn).await;
-        PASS
-    }
+    async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
+        info!("{} (cn {}) connected.", packet.name, ctx.cn());
 
-    async fn connect(&self, ctx: Context<'_>, packet: &channel1::Connect) -> Control {
-        connect::on_connect(ctx.server, ctx.cn, packet, &self.options).await
-    }
+        set_name(ctx.server(), ctx.cn(), packet.name.clone());
+        set_playermodel(ctx.server(), ctx.cn(), packet.player_model);
+        set_initial_team(ctx.server(), ctx.cn());
 
-    async fn pos(&self, ctx: Context<'_>, packet: &channel0::Position) -> Control {
-        combat::on_pos(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn ping(&self, ctx: Context<'_>, packet: &channel1::Ping) -> Control {
-        ping::on_ping(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn client_ping(&self, ctx: Context<'_>, packet: &channel1::ClientPing) -> Control {
-        ping::on_client_ping(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn try_spawn(&self, ctx: Context<'_>, packet: &channel1::TrySpawn) -> Control {
-        spawn::on_try_spawn(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn spawn_client(&self, ctx: Context<'_>, packet: &channel1::SpawnClient) -> Control {
-        spawn::on_spawn_client(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn gun_select(&self, ctx: Context<'_>, packet: &channel1::GunSelect) -> Control {
-        combat::on_gun_select(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn shoot(&self, ctx: Context<'_>, packet: &channel1::Shoot) -> Control {
-        combat::on_shoot(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn explode(&self, ctx: Context<'_>, packet: &channel1::Explode) -> Control {
-        combat::on_explode(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn suicide(&self, ctx: Context<'_>, packet: &channel1::Suicide) -> Control {
-        combat::on_suicide(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn switch_name(&self, ctx: Context<'_>, packet: &channel1::SwitchName) -> Control {
-        identity::on_switch_name(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn switch_model(&self, ctx: Context<'_>, packet: &channel1::SwitchModel) -> Control {
-        identity::on_switch_model(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn switch_team(&self, ctx: Context<'_>, packet: &channel1::SwitchTeam) -> Control {
-        identity::on_switch_team(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn spectator(&self, ctx: Context<'_>, packet: &channel1::SpectatorClient) -> Control {
-        identity::on_spectator(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn set_master(&self, ctx: Context<'_>, packet: &channel1::SetMaster) -> Control {
-        master::on_set_master(ctx.server, ctx.cn, packet, &self.options).await
-    }
-
-    async fn master_mode(&self, ctx: Context<'_>, packet: &channel1::MasterModeClient) -> Control {
-        master::on_master_mode(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn kick(&self, ctx: Context<'_>, packet: &channel1::Kick) -> Control {
-        master::on_kick(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn clear_bans(&self, ctx: Context<'_>, packet: &channel1::ClearBans) -> Control {
-        master::on_clear_bans(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn auth_try(&self, ctx: Context<'_>, packet: &channel1::AuthTry) -> Control {
-        master::on_auth_try(ctx.server, ctx.cn, packet, &self.options).await
-    }
-
-    async fn auth_answer(&self, ctx: Context<'_>, packet: &channel1::AuthAnswer) -> Control {
-        master::on_auth_ans(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn map_vote(&self, ctx: Context<'_>, packet: &channel1::MapVote) -> Control {
-        map::on_map_vote(ctx.server, ctx.cn, packet, &self.options).await
-    }
-
-    async fn new_map(&self, ctx: Context<'_>, packet: &channel1::NewMap) -> Control {
-        map::on_new_map(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn item_list(&self, ctx: Context<'_>, packet: &channel1::ItemList) -> Control {
-        map::on_item_list(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn force_intermission(
-        &self,
-        ctx: Context<'_>,
-        packet: &channel1::ForceIntermission,
-    ) -> Control {
-        map::on_force_intermission(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn pause_game(&self, ctx: Context<'_>, packet: &channel1::PauseGameClient) -> Control {
-        map::on_pause_game(ctx.server, ctx.cn, packet).await
-    }
-
-    async fn game_speed(&self, ctx: Context<'_>, packet: &channel1::GameSpeedClient) -> Control {
-        map::on_game_speed(ctx.server, ctx.cn, packet).await
+        let options = get_options(ctx.server()).read().unwrap();
+        if options.instant_welcome {
+            welcome(ctx.server(), ctx.cn());
+        }
     }
 }

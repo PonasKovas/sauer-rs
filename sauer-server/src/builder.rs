@@ -81,19 +81,23 @@ impl<P: Plugin> ServerBuilder<P> {
             let plugin = Arc::clone(&plugin);
             let server = Arc::clone(&server);
             tokio::spawn(async move {
-                'ff: {
-                    if plugin.connected(Context::new(&server, cn)).await.is_break() {
-                        break 'ff; // walmart version of GOTO
-                    }
+                let mut ctx = Context {
+                    server,
+                    cn,
+                    cancelled: false,
+                };
 
-                    if let Err(e) = handle_client(&server, &plugin, rx, cn).await {
+                plugin.connected(&mut ctx).await;
+
+                if !ctx.cancelled {
+                    if let Err(e) = handle_client(&ctx.server, &plugin, rx, cn).await {
                         error!("handling peer: {e}");
                     }
                 }
 
-                let _ = plugin.disconnected(Context::new(&server, cn)).await;
+                plugin.disconnected(&mut ctx).await;
 
-                server.clients.remove(&cn);
+                ctx.server.clients.remove(&cn);
             });
         }
 

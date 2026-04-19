@@ -638,7 +638,7 @@ make_struct!(
 [N_SETTEAM] SetTeamServer {
     client_num: i32,
     team: CubeString,
-    reason: i32,
+    reason: SetTeamReason,
 });
 
 make_struct!(
@@ -840,7 +840,9 @@ const _: () = {
             Err(mlua::Error::FromLuaConversionError {
                 from: "Value",
                 to: "InitFlagsServer".to_owned(),
-                message: Some("not yet supported from Lua (FlagState is not yet constructable)".to_owned()),
+                message: Some(
+                    "not yet supported from Lua (FlagState is not yet constructable)".to_owned(),
+                ),
             })
         }
     }

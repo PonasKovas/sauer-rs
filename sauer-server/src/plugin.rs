@@ -1,21 +1,22 @@
 use crate::Server;
 use bytes::Bytes;
 use sauer_proto::{channel0, channel1};
-use std::{ops::ControlFlow, sync::Arc};
+use std::sync::Arc;
 
-// if only Try was stable
-pub type Control = ControlFlow<()>;
-pub const PASS: Control = ControlFlow::Continue(());
-pub const BLOCK: Control = ControlFlow::Break(());
-
-#[derive(Copy, Clone)]
-pub struct Context<'a> {
-    pub server: &'a Arc<Server>,
-    pub cn: u32,
+pub struct Context {
+    pub(crate) server: Arc<Server>,
+    pub(crate) cn: u32,
+    pub(crate) cancelled: bool,
 }
-impl<'a> Context<'a> {
-    pub(crate) fn new(server: &'a Arc<Server>, cn: u32) -> Self {
-        Self { server, cn }
+impl Context {
+    pub fn server(&self) -> &Arc<Server> {
+        &self.server
+    }
+    pub fn cn(&self) -> u32 {
+        self.cn
+    }
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
     }
 }
 
@@ -27,10 +28,10 @@ macro_rules! make_packet_handlers {
             #[doc = stringify!($msg_id packet handler)]
             fn $method_name(
                 &self,
-                ctx: Context<'_>,
+                ctx: &mut Context,
                 packet: & $packet_struct,
-            ) -> impl Future<Output = Control> + Send + Sync {
-                async move { PASS }
+            ) -> impl Future<Output = ()> + Send + Sync {
+                async move {  }
             }
         )*
     };
@@ -51,17 +52,17 @@ pub trait Plugin: Send + Sync + 'static {
     /// On new peer connection
     ///
     /// BLOCKING will disconnect the peer immediatelly
-    fn connected(&self, ctx: Context<'_>) -> impl Future<Output = Control> + Send + Sync {
-        async move { PASS }
+    fn connected(&self, ctx: &mut Context) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
     }
-    /// On peer disconnection
-    fn disconnected(&self, ctx: Context<'_>) -> impl Future<Output = Control> + Send + Sync {
-        async move { PASS }
+    /// On peer disconnection, this cannot be cancelled as it's essential for resource cleanup
+    fn disconnected(&self, ctx: &mut Context) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
     }
 
     /// `CHANNEL_2` (Maps) raw map data from the client
-    fn map(&self, ctx: Context<'_>, packet: &Bytes) -> impl Future<Output = Control> + Send + Sync {
-        async move { PASS }
+    fn map(&self, ctx: &mut Context, packet: &Bytes) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
     }
 
     make_packet_handlers! {
@@ -150,10 +151,13 @@ macro_rules! make_packet_handlers_for_tuple {
         $( [$msg_id:ident] $method_name:ident ($packet_struct:path) ),* $(,)?
     ) => {
         $(
-            async fn $method_name(&self, ctx: Context<'_>, packet: & $packet_struct) -> Control {
+            async fn $method_name(&self, ctx: &mut Context, packet: & $packet_struct) {
                 // run the right (newer) plugin, and the left - older
-                self.1.$method_name(ctx, packet).await?;
-                self.0.$method_name(ctx, packet).await
+                self.1.$method_name(ctx, packet).await;
+                if ctx.cancelled {
+                    return;
+                }
+                self.0.$method_name(ctx, packet).await;
             }
         )*
     };
@@ -172,21 +176,27 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         self.1.start(server).await;
         self.0.start(server).await
     }
-    async fn connected(&self, ctx: Context<'_>) -> Control {
+    async fn connected(&self, ctx: &mut Context) {
         // run the right (newer) plugin, and the left - older
-        self.1.connected(ctx).await?;
-        self.0.connected(ctx).await
+        self.1.connected(ctx).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.connected(ctx).await;
     }
-    async fn disconnected(&self, ctx: Context<'_>) -> Control {
+    async fn disconnected(&self, ctx: &mut Context) {
         // run the right (newer) plugin, and the left - older
-        self.1.disconnected(ctx).await?;
-        self.0.disconnected(ctx).await
+        self.1.disconnected(ctx).await;
+        self.0.disconnected(ctx).await;
     }
 
-    async fn map(&self, ctx: Context<'_>, p: &Bytes) -> Control {
+    async fn map(&self, ctx: &mut Context, p: &Bytes) {
         // run the right (newer) plugin, and the left - older
-        self.1.map(ctx, p).await?;
-        self.0.map(ctx, p).await
+        self.1.map(ctx, p).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.map(ctx, p).await;
     }
 
     make_packet_handlers_for_tuple! {

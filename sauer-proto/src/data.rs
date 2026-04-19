@@ -20,6 +20,10 @@ pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
 pub use vec3::Vec3;
 
+make_enum!([i32] SetTeamReason {
+    Switched = 0, Forced = 1,
+});
+
 make_enum!([i32] Gun {
     Fist = 0, Sg = 1, Cg = 2, Rl = 3, Rifle = 4, Gl = 5, Pistol = 6,
 });
@@ -48,6 +52,30 @@ make_enum!(
     InstaHold = 16, EfficCTF = 17, EfficProtect = 18, EfficHold = 19,
     Collect = 20, InstaCollect = 21, EfficCollect = 22,
 });
+
+impl GameMode {
+    pub fn has_teams(&self) -> bool {
+        ![
+            Self::Ffa,
+            Self::CoopEdit,
+            Self::Instagib,
+            Self::Efficiency,
+            Self::Tactics,
+        ]
+        .contains(self)
+    }
+    pub fn is_insta(&self) -> bool {
+        [
+            Self::Instagib,
+            Self::InstaTeam,
+            Self::InstaCTF,
+            Self::InstaProtect,
+            Self::InstaHold,
+            Self::InstaCollect,
+        ]
+        .contains(self)
+    }
+}
 
 make_enum!(
 /// Server-side AI bot type.
