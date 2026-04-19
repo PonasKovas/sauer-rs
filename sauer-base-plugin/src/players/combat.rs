@@ -18,6 +18,31 @@ pub fn gun_damage_per_ray(gun: Gun) -> i32 {
     }
 }
 
+fn gun_exprad(gun: Gun) -> f32 {
+    match gun {
+        Gun::Rl => 40.0,
+        Gun::Gl => 45.0,
+        _ => 0.0,
+    }
+}
+
+const EXP_DISTSCALE: f32 = 1.5;
+const EXP_SELFDAMDIV: i32 = 2;
+
+/// Damage dealt by an explosion at `dist` from the centre.
+/// `is_self` halves the damage (EXP_SELFDAMDIV).
+pub fn explosion_damage(gun: Gun, dist: f32, is_self: bool) -> i32 {
+    let base = gun_damage_per_ray(gun) as f32;
+    let exprad = gun_exprad(gun);
+    let damage = if exprad > 0.0 {
+        (base * (1.0 - dist / EXP_DISTSCALE / exprad)) as i32
+    } else {
+        base as i32
+    };
+    let damage = damage.max(0);
+    if is_self { damage / EXP_SELFDAMDIV } else { damage }
+}
+
 /// Apply `damage` from `actor_cn` to `target_cn`. Handles armour absorption,
 /// broadcasts N_DAMAGE and N_HITPUSH, and kills the target if health drops to 0.
 pub fn apply_damage(

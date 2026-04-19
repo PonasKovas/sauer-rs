@@ -2,7 +2,7 @@ use crate::{
     options::{BasePluginOptions, get_options},
     players::{
         Players, clear_player, get_players, init_player,
-        combat::{apply_damage, gun_damage_per_ray, kill_player},
+        combat::{apply_damage, explosion_damage, gun_damage_per_ray, kill_player},
         model::{init_model, set_model},
         name::{init_name, set_name},
         position::set_position,
@@ -12,7 +12,7 @@ use crate::{
 };
 use sauer_proto::{
     Client, channel0,
-    channel1::{self, ServInfo, SpawnServer, ShotFx},
+    channel1::{self, ExplodeFx, ServInfo, ShotFx, SpawnServer},
     data::{ClientState, SetTeamReason},
 };
 use sauer_server::{
@@ -180,6 +180,43 @@ impl Plugin for BasePlugin {
             }
 
             let damage = hit.rays * gun_damage_per_ray(packet.gun);
+            apply_damage(server, target_cn, cn, packet.gun, damage, hit.dir);
+        }
+    }
+
+    async fn explode(&self, ctx: &mut Context, packet: &channel1::Explode) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+
+        {
+            let p = get_players(server).get(cn);
+            if p.client_state != ClientState::Alive {
+                return;
+            }
+        }
+
+        server.broadcast_chan1(&ExplodeFx {
+            client_num: cn as i32,
+            gun: packet.gun,
+            id: packet.id,
+        });
+
+        for hit in &packet.hits {
+            let target_cn = hit.target_cn as u32;
+
+            let life_seq_ok = match get_players(server).try_get(target_cn) {
+                Some(p) => {
+                    p.client_state == ClientState::Alive
+                        && p.state.as_ref().map(|s| s.life_sequence) == Some(hit.life_sequence)
+                }
+                None => false,
+            };
+            if !life_seq_ok {
+                continue;
+            }
+
+            let damage = explosion_damage(packet.gun, hit.dist, target_cn == cn);
+
             apply_damage(server, target_cn, cn, packet.gun, damage, hit.dir);
         }
     }
