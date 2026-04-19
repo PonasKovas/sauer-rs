@@ -130,6 +130,9 @@ pub(crate) async fn complete_connection(
 ) {
     server.send_chan1(cn, &channel1::Welcome {});
 
+    // Tell the client which map and mode are currently active.
+    crate::game::send_map_info(server, cn);
+
     let resume_states = registry.resume_states(cn);
     server.send_chan1(cn, &channel1::Resume { clients: resume_states });
 

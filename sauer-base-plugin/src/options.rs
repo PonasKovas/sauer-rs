@@ -1,5 +1,10 @@
 use cube_string::CubeString;
-use sauer_proto::data::Privilege;
+use sauer_proto::data::{GameMode, Privilege};
+
+pub struct MapRotation {
+    pub map_name: CubeString,
+    pub mode: GameMode,
+}
 
 pub struct AuthUser {
     pub name: CubeString,
@@ -21,6 +26,12 @@ pub struct BasePluginOptions {
     pub admin_password: Option<CubeString>,
     /// Users that may authenticate via N_AUTHTRY / N_AUTHANS ECC auth.
     pub auth_users: Vec<AuthUser>,
+    /// Initial map loaded when the server starts.
+    pub initial_map: CubeString,
+    /// Initial game mode.
+    pub initial_mode: GameMode,
+    /// Ordered map rotation; cycled at the end of each match.
+    pub maprotations: Vec<MapRotation>,
 }
 
 impl BasePluginOptions {
@@ -31,6 +42,9 @@ impl BasePluginOptions {
             password: None,
             admin_password: None,
             auth_users: Vec::new(),
+            initial_map: CubeString::from_str_lossy("metl3"),
+            initial_mode: GameMode::Ffa,
+            maprotations: Vec::new(),
         }
     }
 }

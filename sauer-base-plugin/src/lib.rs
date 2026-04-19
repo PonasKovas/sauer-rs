@@ -1,6 +1,7 @@
 mod client;
 mod connect;
 mod crypto;
+mod game;
 mod identity;
 mod master;
 mod ping;
@@ -11,29 +12,32 @@ pub mod options;
 
 pub use client::ClientData;
 pub use error::BasePluginError;
+pub use game::GameState;
 pub use master::MasterState;
 pub use options::BasePluginOptions;
 pub use registry::ClientRegistry;
 
+use options::BasePluginOptions as Opts;
 use sauer_proto::channel1;
 use sauer_server::{
     Server,
     plugin::{Context, Control, Plugin, PASS},
 };
+use std::sync::Arc;
 
 pub struct BasePlugin {
-    options: BasePluginOptions,
+    options: Arc<Opts>,
 }
 
 impl BasePlugin {
     pub fn new() -> Self {
         Self {
-            options: BasePluginOptions::default(),
+            options: Arc::new(Opts::default()),
         }
     }
 
-    pub fn with_options(options: BasePluginOptions) -> Self {
-        Self { options }
+    pub fn with_options(options: Opts) -> Self {
+        Self { options: Arc::new(options) }
     }
 }
 
@@ -47,6 +51,16 @@ impl Plugin for BasePlugin {
     async fn init(&self, server: &mut Server) {
         server.extra.insert(ClientRegistry::new());
         server.extra.insert(MasterState::new());
+        server.extra.insert(GameState::new(
+            self.options.initial_map.clone(),
+            self.options.initial_mode,
+        ));
+    }
+
+    async fn start(&self, server: &Arc<Server>) {
+        let server = Arc::clone(server);
+        let options = Arc::clone(&self.options);
+        tokio::spawn(game::run_tick_loop(server, options));
     }
 
     async fn connected(&self, ctx: Context<'_>) -> Control {
@@ -108,5 +122,33 @@ impl Plugin for BasePlugin {
 
     async fn auth_answer(&self, ctx: Context<'_>, packet: &channel1::AuthAnswer) -> Control {
         master::on_auth_ans(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn map_vote(&self, ctx: Context<'_>, packet: &channel1::MapVote) -> Control {
+        game::on_map_vote(ctx.server, ctx.cn, packet, &self.options).await
+    }
+
+    async fn new_map(&self, ctx: Context<'_>, packet: &channel1::NewMap) -> Control {
+        game::on_new_map(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn item_list(&self, ctx: Context<'_>, packet: &channel1::ItemList) -> Control {
+        game::on_item_list(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn force_intermission(
+        &self,
+        ctx: Context<'_>,
+        packet: &channel1::ForceIntermission,
+    ) -> Control {
+        game::on_force_intermission(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn pause_game(&self, ctx: Context<'_>, packet: &channel1::PauseGameClient) -> Control {
+        game::on_pause_game(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn game_speed(&self, ctx: Context<'_>, packet: &channel1::GameSpeedClient) -> Control {
+        game::on_game_speed(ctx.server, ctx.cn, packet).await
     }
 }
