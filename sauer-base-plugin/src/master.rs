@@ -1,9 +1,10 @@
 use crate::{
+    client::ClientData,
     crypto,
     options::BasePluginOptions,
     registry::ClientRegistry,
 };
-use cube_string::CubeString;
+use cube_string::{CubeStr, CubeString};
 use dashmap::DashMap;
 use sauer_proto::{
     channel1::{self, AuthAnswer, AuthTry, ClearBans, Kick, MasterModeClient, SetMaster},
@@ -20,13 +21,20 @@ use std::sync::{
 };
 use tracing::info;
 
-// ── Pending auth challenge ────────────────────────────────────────────────────
+// ── Pending auth challenges ───────────────────────────────────────────────────
 
+/// Pending challenge for a privilege auth (N_AUTHTRY / N_AUTHANS).
 struct PendingAuth {
     id: u32,
     name: CubeString,
     privilege: Privilege,
-    /// Expected x-coordinate (24-byte big-endian) of `pubkey * scalar`.
+    expected_x: [u8; 24],
+}
+
+/// Pending challenge for a connect auth (Private mastermode gate).
+/// The client's [`ClientData`] is parked in `registry.connect_pending`.
+struct ConnectPendingAuth {
+    id: u32,
     expected_x: [u8; 24],
 }
 
@@ -37,8 +45,10 @@ pub struct MasterState {
     mastermode: Mutex<MasterMode>,
     /// Monotonically increasing counter for auth challenge IDs.
     authreq: AtomicU32,
-    /// Pending auth challenges indexed by client cn.
+    /// Pending privilege auth challenges, keyed by client cn.
     pending_auth: DashMap<u32, PendingAuth>,
+    /// Pending connect auth challenges (Private mastermode gate), keyed by client cn.
+    connect_pending_auth: DashMap<u32, ConnectPendingAuth>,
 }
 
 impl MasterState {
@@ -47,6 +57,7 @@ impl MasterState {
             mastermode: Mutex::new(MasterMode::Open),
             authreq: AtomicU32::new(0),
             pending_auth: DashMap::new(),
+            connect_pending_auth: DashMap::new(),
         }
     }
 
@@ -75,9 +86,21 @@ impl MasterState {
         (pending.id == id).then_some(pending)
     }
 
-    /// Remove any pending auth for a client (e.g. on disconnect).
+    fn begin_connect_auth(&self, cn: u32, expected_x: [u8; 24]) -> u32 {
+        let id = self.next_authreq();
+        self.connect_pending_auth.insert(cn, ConnectPendingAuth { id, expected_x });
+        id
+    }
+
+    fn take_connect_pending_auth(&self, cn: u32, id: u32) -> Option<ConnectPendingAuth> {
+        let (_, pending) = self.connect_pending_auth.remove(&cn)?;
+        (pending.id == id).then_some(pending)
+    }
+
+    /// Remove all pending auth state for a client (called on disconnect).
     pub(crate) fn cancel_pending_auth(&self, cn: u32) {
         self.pending_auth.remove(&cn);
+        self.connect_pending_auth.remove(&cn);
     }
 
     // ── Invariant-enforcing setters ───────────────────────────────────────
@@ -136,16 +159,14 @@ pub async fn on_set_master(
     };
 
     if let Some(admin_pwd) = &options.admin_password {
-        let expected = crypto::hash_password(cn, session_id, &admin_pwd.to_string());
-        if CubeString::from_str_lossy(&expected) == packet.hash {
+        let expected = crypto::hash_password(cn, session_id, admin_pwd);
+        if expected == packet.hash {
+            let name = registry.get(cn).map(|c| c.name().to_cube_string()).unwrap_or_default();
             master.set_client_privilege(cn, Privilege::Admin, server, &registry);
             server.broadcast_chan1(&channel1::ServMsg {
-                text: CubeString::from_str_lossy(&format!(
-                    "{} claimed admin",
-                    registry.get(cn).map(|c| c.name().to_string()).unwrap_or_default()
-                )),
+                text: CubeString::from_str_lossy(&format!("{} claimed admin", name)),
             });
-            info!("cn {} claimed admin", cn);
+            info!("cn {} ({}) claimed admin", cn, name);
             return PASS;
         }
     }
@@ -187,7 +208,7 @@ pub async fn on_kick(server: &Arc<Server>, cn: u32, packet: &Kick) -> Control {
 
     let victim = packet.victim_cn as u32;
     if registry.get(victim).is_some() {
-        let kicker = registry.get(cn).map(|c| c.name().to_string()).unwrap_or_default();
+        let kicker = registry.get(cn).map(|c| c.name().to_cube_string()).unwrap_or_default();
         info!("cn {} ({}) kicked cn {} (reason: {})", cn, kicker, victim, packet.reason);
         server.disconnect(victim);
     }
@@ -203,34 +224,34 @@ pub async fn on_clear_bans(server: &Arc<Server>, cn: u32, _packet: &ClearBans) -
         return PASS;
     }
 
-    // No ban list yet; this will matter once ban tracking is added.
     server.broadcast_chan1(&channel1::ServMsg {
         text: CubeString::from_str_lossy("bans cleared"),
     });
     PASS
 }
 
+/// N_AUTHTRY: already-connected client requesting privilege elevation.
+/// This is NOT used for the Private mastermode connect gate.
 pub async fn on_auth_try(
     server: &Arc<Server>,
     cn: u32,
     packet: &AuthTry,
     options: &BasePluginOptions,
 ) -> Control {
-    if server.extra.get::<ClientRegistry>().unwrap().get(cn).is_none() {
+    // Only handle fully connected clients.
+    let registry = server.extra.get::<ClientRegistry>().unwrap();
+    if registry.get(cn).is_none() {
         return PASS;
     }
 
-    // Look up the auth user matching name + desc.
     let Some(user) = options
         .auth_users
         .iter()
         .find(|u| u.name == packet.name && u.desc == packet.desc)
     else {
-        // Unknown user — silently ignore (don't reveal which names are valid).
         return PASS;
     };
 
-    // Generate ECC challenge: secret = G*scalar (sent to client), expected = pubkey*scalar.
     let Some((challenge_str, expected_x)) = crypto::gen_auth_challenge(&user.pubkey) else {
         return PASS;
     };
@@ -252,21 +273,42 @@ pub async fn on_auth_try(
 
 pub async fn on_auth_ans(server: &Arc<Server>, cn: u32, packet: &AuthAnswer) -> Control {
     let master = server.extra.get::<MasterState>().unwrap();
-    let registry = server.extra.get::<ClientRegistry>().unwrap();
 
+    // Connect auth (Private mastermode gate) takes priority.
+    if let Some(pending) = master.take_connect_pending_auth(cn, packet.id) {
+        if crypto::verify_auth_answer(&packet.answer, &pending.expected_x) {
+            let registry = server.extra.get::<ClientRegistry>().unwrap();
+            let mastermode = master.mastermode();
+            if registry.complete_connect_pending(cn) {
+                let name = registry.get(cn).map(|c| c.name().to_cube_string()).unwrap_or_default();
+                crate::connect::complete_connection(server, cn, &registry, mastermode).await;
+                info!("cn {} ({}) joined via auth", cn, name);
+            }
+        } else {
+            server.send_chan1(
+                cn,
+                &channel1::ServMsg {
+                    text: CubeString::from_str_lossy("authentication failed"),
+                },
+            );
+            server.disconnect(cn);
+        }
+        return PASS;
+    }
+
+    // Privilege auth for an already-connected client.
+    let registry = server.extra.get::<ClientRegistry>().unwrap();
     let Some(pending) = master.take_pending_auth(cn, packet.id) else {
         return PASS;
     };
 
     if crypto::verify_auth_answer(&packet.answer, &pending.expected_x) {
         master.set_client_privilege(cn, pending.privilege, server, &registry);
+        let name = registry.get(cn).map(|c| c.name().to_cube_string()).unwrap_or_default();
         server.broadcast_chan1(&channel1::ServMsg {
-            text: CubeString::from_str_lossy(&format!(
-                "{} authenticated",
-                registry.get(cn).map(|c| c.name().to_string()).unwrap_or_default()
-            )),
+            text: CubeString::from_str_lossy(&format!("{} authenticated", name)),
         });
-        info!("cn {} authenticated as {}", cn, pending.name);
+        info!("cn {} ({}) authenticated as {}", cn, name, pending.name);
     } else {
         server.send_chan1(
             cn,
@@ -277,4 +319,54 @@ pub async fn on_auth_ans(server: &Arc<Server>, cn: u32, packet: &AuthAnswer) -> 
     }
 
     PASS
+}
+
+/// Called from `on_connect` when mastermode is Private.
+///
+/// Validates the auth credentials from the N_CONNECT packet against known users
+/// whose desc matches `server_auth`, generates a challenge, parks the client in
+/// connect-pending state, and sends N_AUTHCHAL.
+///
+/// Returns `false` if no matching auth user was found (caller should disconnect).
+pub(crate) async fn try_connect_auth(
+    server: &Arc<Server>,
+    cn: u32,
+    client: ClientData,
+    auth_desc: &CubeStr,
+    auth_name: &CubeStr,
+    options: &BasePluginOptions,
+) -> bool {
+    // The auth_desc must match the server's own auth domain.
+    if auth_desc != &*options.server_auth {
+        return false;
+    }
+
+    let Some(user) = options
+        .auth_users
+        .iter()
+        .find(|u| u.name == auth_name && u.desc == auth_desc)
+    else {
+        return false;
+    };
+
+    let Some((challenge_str, expected_x)) = crypto::gen_auth_challenge(&user.pubkey) else {
+        return false;
+    };
+
+    let registry = server.extra.get::<ClientRegistry>().unwrap();
+    registry.begin_connect_pending(cn, client);
+
+    let master = server.extra.get::<MasterState>().unwrap();
+    let id = master.begin_connect_auth(cn, expected_x);
+
+    server.send_chan1(
+        cn,
+        &channel1::AuthChal {
+            desc: user.desc.clone(),
+            id,
+            challenge: challenge_str,
+        },
+    );
+
+    true
 }

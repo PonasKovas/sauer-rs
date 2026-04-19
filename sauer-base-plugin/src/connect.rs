@@ -21,7 +21,7 @@ use tracing::info;
 
 /// Called when a peer physically establishes an ENet connection.
 /// Generates a session ID and sends N_SERVINFO immediately so the client
-/// can hash its password before sending N_CONNECT.
+/// can hash its password and prepare its auth key before sending N_CONNECT.
 pub async fn on_connected(
     server: &Arc<Server>,
     cn: u32,
@@ -47,7 +47,7 @@ pub async fn on_connected(
     PASS
 }
 
-/// Called when the client sends N_CONNECT (name, model, password hash).
+/// Called when the client sends N_CONNECT (name, model, password hash, auth info).
 pub async fn on_connect(
     server: &Arc<Server>,
     cn: u32,
@@ -62,8 +62,8 @@ pub async fn on_connect(
             Some(id) => id,
             None => return PASS,
         };
-        let expected = crypto::hash_password(cn, session_id, &password.to_string());
-        if CubeString::from_str_lossy(&expected) != packet.password_hash {
+        let expected = crypto::hash_password(cn, session_id, password);
+        if expected != packet.password_hash {
             server.send_chan1(
                 cn,
                 &channel1::ServMsg {
@@ -81,63 +81,83 @@ pub async fn on_connect(
         packet.player_model,
     );
 
-    // Promote from pending → connected. If not pending (shouldn't happen),
-    // the connection is in a bad state; the server will clean it up on disconnect.
-    if !registry.complete_pending(cn, client) {
-        return PASS;
-    }
-
-    // 1. N_WELCOME — client is now accepted and should start rendering.
-    server.send_chan1(cn, &channel1::Welcome {});
-
-    // 2. N_RESUME — snapshot of all other connected clients' state so the
-    //    joining client can populate its scoreboard.
-    let resume_states = registry.resume_states(cn);
-    server.send_chan1(
-        cn,
-        &channel1::Resume {
-            clients: resume_states,
-        },
-    );
-
-    // 3. N_INITCLIENT — tell all other clients about the new player.
-    let client_ref = registry.get(cn).unwrap();
-    server.broadcast_except_chan1(
-        cn,
-        &channel1::InitClient {
-            client_num: cn as i32,
-            name: client_ref.name().clone(),
-            team: client_ref.team().clone(),
-            player_model: client_ref.player_model(),
-        },
-    );
-    drop(client_ref);
-
-    // Enforce mastermode: Locked and Private force new clients into spectator.
     let mastermode = server
         .extra
         .get::<MasterState>()
         .map(|m| m.mastermode())
         .unwrap_or(MasterMode::Open);
 
-    if matches!(mastermode, MasterMode::Locked | MasterMode::Private) {
-        registry.set_spectator(cn, true, server);
+    if mastermode == MasterMode::Private {
+        // The client included auth credentials in N_CONNECT (triggered by seeing
+        // server_auth in N_SERVINFO). Check if they match the server auth domain
+        // and a known user, then send N_AUTHCHAL. N_AUTHTRY is not involved.
+        let auth_accepted = crate::master::try_connect_auth(
+            server,
+            cn,
+            client,
+            &packet.auth_desc,
+            &packet.auth_name,
+            options,
+        )
+        .await;
+
+        if !auth_accepted {
+            server.disconnect(cn);
+        }
+        return PASS;
     }
 
+    // Non-private mastermodes: admit client immediately.
+    if !registry.complete_pending(cn, client) {
+        return PASS;
+    }
+
+    complete_connection(server, cn, &registry, mastermode).await;
     info!("cn {} ({}) joined", cn, packet.name);
 
     PASS
 }
 
+/// Finish admitting a client: send N_WELCOME / N_RESUME, broadcast N_INITCLIENT,
+/// and enforce Locked spectator state.
+///
+/// Called from `on_connect` (normal flow) and from `on_auth_ans` (Private mode).
+pub(crate) async fn complete_connection(
+    server: &Arc<Server>,
+    cn: u32,
+    registry: &ClientRegistry,
+    mastermode: MasterMode,
+) {
+    server.send_chan1(cn, &channel1::Welcome {});
+
+    let resume_states = registry.resume_states(cn);
+    server.send_chan1(cn, &channel1::Resume { clients: resume_states });
+
+    let client_ref = registry.get(cn).unwrap();
+    server.broadcast_except_chan1(
+        cn,
+        &channel1::InitClient {
+            client_num: cn as i32,
+            name: client_ref.name().to_cube_string(),
+            team: client_ref.team().to_cube_string(),
+            player_model: client_ref.player_model(),
+        },
+    );
+    drop(client_ref);
+
+    // Locked forces spectator; Private does not (auth was the gate).
+    if mastermode == MasterMode::Locked {
+        registry.set_spectator(cn, true, server);
+    }
+}
+
 pub async fn on_disconnect(server: &Arc<Server>, cn: u32) {
-    // Clean up any pending auth challenge regardless of handshake state.
     if let Some(master) = server.extra.get::<MasterState>() {
         master.cancel_pending_auth(cn);
     }
 
     let registry = server.extra.get::<ClientRegistry>().unwrap();
 
-    // Only broadcast N_CDIS if the client had completed the N_CONNECT handshake.
     if registry.remove(cn) {
         server.broadcast_chan1(&channel1::ClientDisconnected {
             client_num: cn as i32,

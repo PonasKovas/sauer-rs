@@ -22,6 +22,9 @@ pub struct ClientRegistry {
     /// Session IDs for clients that have physically connected but not yet
     /// sent N_CONNECT. Stored here so the id is available when N_CONNECT arrives.
     pending: DashMap<u32, i32>,
+    /// Clients that have sent N_CONNECT on a Private server and are waiting for
+    /// successful ECC auth before being admitted to the world.
+    connect_pending: DashMap<u32, ClientData>,
 }
 
 impl ClientRegistry {
@@ -29,6 +32,7 @@ impl ClientRegistry {
         Self {
             clients: DashMap::new(),
             pending: DashMap::new(),
+            connect_pending: DashMap::new(),
         }
     }
 
@@ -54,10 +58,30 @@ impl ClientRegistry {
         true
     }
 
-    /// Remove a client entirely (both pending and connected state).
-    /// Returns whether the client had completed the handshake.
+    /// Park a post-N_CONNECT client awaiting Private-mode ECC auth.
+    /// The session ID stays in `pending` until `complete_connect_pending` is called.
+    pub(crate) fn begin_connect_pending(&self, cn: u32, data: ClientData) {
+        self.connect_pending.insert(cn, data);
+    }
+
+    /// Admit a connect-pending client: move from connect_pending → clients.
+    /// Returns `false` if either map is missing the cn (shouldn't happen).
+    pub(crate) fn complete_connect_pending(&self, cn: u32) -> bool {
+        let Some((_, client)) = self.connect_pending.remove(&cn) else {
+            return false;
+        };
+        let Some((_, session_id)) = self.pending.remove(&cn) else {
+            return false;
+        };
+        self.clients.insert(cn, client.with_session_id(session_id));
+        true
+    }
+
+    /// Remove a client entirely (all lifecycle maps).
+    /// Returns whether the client had completed the handshake (was in `clients`).
     pub(crate) fn remove(&self, cn: u32) -> bool {
         self.pending.remove(&cn);
+        self.connect_pending.remove(&cn);
         self.clients.remove(&cn).is_some()
     }
 

@@ -1,4 +1,4 @@
-use cube_string::CubeString;
+use cube_string::{CubeStr, CubeString};
 use digest::Digest;
 use p192::{
     AffinePoint, NistP192, ProjectivePoint, Scalar,
@@ -11,16 +11,28 @@ use p192::{
 
 // ── Password hash ─────────────────────────────────────────────────────────────
 
-/// Tiger("{cn} {session_id} {password}") → "{w0:x}{w1:x}{w2:x}"
+/// Tiger("{cn} {session_id} {password}") → "{w0:x}{w1:x}{w2:x}" as a CubeString.
 ///
 /// Matches Sauerbraten's `hashpassword` in server.cpp.
-pub fn hash_password(cn: u32, session_id: i32, password: &str) -> String {
-    let input = format!("{} {} {}", cn, session_id, password);
-    let result = tiger::Tiger::digest(input.as_bytes());
-    let w0 = u64::from_le_bytes(result[0..8].try_into().unwrap());
-    let w1 = u64::from_le_bytes(result[8..16].try_into().unwrap());
-    let w2 = u64::from_le_bytes(result[16..24].try_into().unwrap());
-    format!("{:x}{:x}{:x}", w0, w1, w2)
+pub fn hash_password(cn: u32, session_id: i32, password: &CubeStr) -> CubeString {
+    // Build Tiger input as raw bytes without any UTF-8 conversion.
+    let mut input = Vec::new();
+    write_dec_u32(&mut input, cn);
+    input.push(b' ');
+    write_dec_i32(&mut input, session_id);
+    input.push(b' ');
+    input.extend_from_slice(password.as_bytes());
+
+    let hash = tiger::Tiger::digest(&input);
+    let w0 = u64::from_le_bytes(hash[0..8].try_into().unwrap());
+    let w1 = u64::from_le_bytes(hash[8..16].try_into().unwrap());
+    let w2 = u64::from_le_bytes(hash[16..24].try_into().unwrap());
+
+    let mut out = Vec::new();
+    write_hex_u64(&mut out, w0);
+    write_hex_u64(&mut out, w1);
+    write_hex_u64(&mut out, w2);
+    CubeString::from_bytes(out)
 }
 
 // ── ECC auth ──────────────────────────────────────────────────────────────────
@@ -32,13 +44,10 @@ pub fn hash_password(cn: u32, session_id: i32, password: &str) -> String {
 ///   2. `expected = pubkey * scalar`   (client must return `expected.x`)
 ///   3. `secret   = G * scalar`        (sent to client as the challenge point)
 ///
-/// Returns `(challenge_str, expected_x)` where `challenge_str` is `[+-]hex_x`
-/// and `expected_x` is the 24-byte big-endian x-coordinate the client must produce.
-/// Returns `None` if `pubkey_str` is not a valid Sauerbraten point.
-pub fn gen_auth_challenge(pubkey_str: &CubeString) -> Option<(CubeString, [u8; 24])> {
-    let pubkey = parse_sauer_point(&pubkey_str.to_string())?;
+/// Returns `(challenge_str, expected_x_bytes)` or `None` if `pubkey_str` is invalid.
+pub fn gen_auth_challenge(pubkey_str: &CubeStr) -> Option<(CubeString, [u8; 24])> {
+    let pubkey = parse_sauer_point(pubkey_str.as_bytes())?;
 
-    // Tiger-hash a random seed to get the challenge scalar.
     let seed: [u8; 32] = rand::random();
     let hash_ga = tiger::Tiger::digest(&seed[..]);
     let mut hash = [0u8; 24];
@@ -46,23 +55,21 @@ pub fn gen_auth_challenge(pubkey_str: &CubeString) -> Option<(CubeString, [u8; 2
 
     let scalar = scalar_from_le_bytes(&hash);
 
-    // expected = pubkey * scalar  (correct answer x the client must send back)
     let expected = (ProjectivePoint::from(pubkey) * scalar).to_affine();
     let expected_x = affine_x_bytes(&expected);
 
-    // secret = G * scalar  (challenge point sent to client)
     let secret = (ProjectivePoint::GENERATOR * scalar).to_affine();
-    let challenge_str = print_sauer_point(&secret);
+    let challenge = print_sauer_point(&secret);
 
-    Some((CubeString::from_str_lossy(&challenge_str), expected_x))
+    Some((challenge, expected_x))
 }
 
 /// Verify a client's ECC answer against the expected x-coordinate.
 ///
 /// `answer_str` is the client's hex-encoded x-coordinate (Sauerbraten bigint format).
 /// `expected_x` is the 24-byte big-endian value stored when the challenge was generated.
-pub fn verify_auth_answer(answer_str: &CubeString, expected_x: &[u8; 24]) -> bool {
-    match parse_sauer_hex(&answer_str.to_string()) {
+pub fn verify_auth_answer(answer_str: &CubeStr, expected_x: &[u8; 24]) -> bool {
+    match parse_sauer_hex(answer_str.as_bytes()) {
         Some(bytes) => bytes == *expected_x,
         None => false,
     }
@@ -70,7 +77,6 @@ pub fn verify_auth_answer(answer_str: &CubeString, expected_x: &[u8; 24]) -> boo
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Treat 24 little-endian bytes as a 192-bit integer and reduce mod curve order.
 fn scalar_from_le_bytes(bytes: &[u8; 24]) -> Scalar {
     let mut be = *bytes;
     be.reverse();
@@ -78,7 +84,6 @@ fn scalar_from_le_bytes(bytes: &[u8; 24]) -> Scalar {
     <Scalar as Reduce<U192>>::reduce(uint)
 }
 
-/// Extract the 24-byte big-endian x-coordinate from an affine point.
 fn affine_x_bytes(point: &AffinePoint) -> [u8; 24] {
     let encoded = point.to_encoded_point(false);
     let x = encoded.x().expect("affine point has x");
@@ -88,47 +93,47 @@ fn affine_x_bytes(point: &AffinePoint) -> [u8; 24] {
 }
 
 /// Format an affine point as `[+-]hex_x` in Sauerbraten's bigint print format.
-///
-/// '+' = y is even (LSB = 0), '-' = y is odd (LSB = 1).
-/// x is printed as a hex string of 16-bit groups (4 hex chars each) with leading
-/// zero groups stripped, matching `ecjacobian::print` in crypto.cpp.
-fn print_sauer_point(point: &AffinePoint) -> String {
+fn print_sauer_point(point: &AffinePoint) -> CubeString {
     let encoded = point.to_encoded_point(false);
     let x_bytes: &[u8] = encoded.x().expect("affine point has x");
     let y_bytes: &[u8] = encoded.y().expect("affine point has y");
 
-    // LSB of y in bigint terms = bit 0 of the last (least-significant) byte in big-endian.
     let ybit = y_bytes[y_bytes.len() - 1] & 1 != 0;
-    let sign = if ybit { '-' } else { '+' };
+
+    let mut out = Vec::with_capacity(50);
+    out.push(if ybit { b'-' } else { b'+' });
 
     // Full 48-char hex of x (big-endian bytes).
-    let hex: String = x_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    let mut hex = Vec::with_capacity(48);
+    for b in x_bytes {
+        write_hex_byte(&mut hex, *b);
+    }
 
-    // Strip leading zero groups (each group is 4 hex chars = one 16-bit bigint digit).
+    // Strip leading zero 16-bit groups (4 hex chars each).
     let mut start = 0;
-    while start + 4 <= hex.len() && &hex[start..start + 4] == "0000" {
+    while start + 4 <= hex.len() && &hex[start..start + 4] == b"0000" {
         start += 4;
     }
-    let hex_x = if start < hex.len() { &hex[start..] } else { "0000" };
+    if start < hex.len() {
+        out.extend_from_slice(&hex[start..]);
+    } else {
+        out.extend_from_slice(b"0000");
+    }
 
-    format!("{}{}", sign, hex_x)
+    CubeString::from_bytes(out)
 }
 
-/// Parse a Sauerbraten `[+-]hex_x` point into an affine point.
-fn parse_sauer_point(s: &str) -> Option<AffinePoint> {
-    if s.is_empty() {
-        return None;
-    }
-    let (sign, hex_x) = s.split_at(1);
+/// Parse a Sauerbraten `[+-]hex_x` point.
+fn parse_sauer_point(s: &[u8]) -> Option<AffinePoint> {
+    let (&sign, hex_x) = s.split_first()?;
     let ybit = match sign {
-        "+" => false,
-        "-" => true,
+        b'+' => false,
+        b'-' => true,
         _ => return None,
     };
 
     let x_bytes = parse_sauer_hex(hex_x)?;
 
-    // Build a SEC1 compressed point: 0x02 (even y) or 0x03 (odd y) || x.
     let prefix = if ybit { 0x03u8 } else { 0x02u8 };
     let mut buf = [0u8; 25];
     buf[0] = prefix;
@@ -138,27 +143,23 @@ fn parse_sauer_point(s: &str) -> Option<AffinePoint> {
     Option::from(AffinePoint::from_encoded_point(&ep))
 }
 
-/// Parse a Sauerbraten bigint hex string to 24 big-endian bytes.
-///
-/// Sauerbraten prints bigints as groups of 4 hex chars (one 16-bit digit each),
-/// most-significant first, with leading zero groups stripped. The string length
-/// must be a multiple of 4 (or empty for zero).
-fn parse_sauer_hex(hex: &str) -> Option<[u8; 24]> {
+/// Parse Sauerbraten bigint hex to 24 big-endian bytes.
+/// Length must be a multiple of 4 (each 16-bit group = 4 hex chars).
+fn parse_sauer_hex(hex: &[u8]) -> Option<[u8; 24]> {
     if hex.len() > 48 || hex.len() % 4 != 0 {
         return None;
     }
-    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !hex.iter().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
 
     let mut bytes = [0u8; 24];
     let num_bytes = hex.len() / 2;
     let offset = 24 - num_bytes;
-    let hex_b = hex.as_bytes();
 
     for i in 0..num_bytes {
-        let hi = hex_nibble(hex_b[i * 2])?;
-        let lo = hex_nibble(hex_b[i * 2 + 1])?;
+        let hi = hex_nibble(hex[i * 2])?;
+        let lo = hex_nibble(hex[i * 2 + 1])?;
         bytes[offset + i] = (hi << 4) | lo;
     }
 
@@ -171,5 +172,47 @@ fn hex_nibble(c: u8) -> Option<u8> {
         b'a'..=b'f' => Some(c - b'a' + 10),
         b'A'..=b'F' => Some(c - b'A' + 10),
         _ => None,
+    }
+}
+
+fn write_hex_byte(buf: &mut Vec<u8>, b: u8) {
+    const HEX: &[u8] = b"0123456789abcdef";
+    buf.push(HEX[(b >> 4) as usize]);
+    buf.push(HEX[(b & 0xF) as usize]);
+}
+
+fn write_hex_u64(buf: &mut Vec<u8>, mut n: u64) {
+    const HEX: &[u8] = b"0123456789abcdef";
+    if n == 0 {
+        buf.push(b'0');
+        return;
+    }
+    let start = buf.len();
+    while n > 0 {
+        buf.push(HEX[(n & 0xF) as usize]);
+        n >>= 4;
+    }
+    buf[start..].reverse();
+}
+
+fn write_dec_u32(buf: &mut Vec<u8>, mut n: u32) {
+    if n == 0 {
+        buf.push(b'0');
+        return;
+    }
+    let start = buf.len();
+    while n > 0 {
+        buf.push(b'0' + (n % 10) as u8);
+        n /= 10;
+    }
+    buf[start..].reverse();
+}
+
+fn write_dec_i32(buf: &mut Vec<u8>, n: i32) {
+    if n < 0 {
+        buf.push(b'-');
+        write_dec_u32(buf, n.unsigned_abs());
+    } else {
+        write_dec_u32(buf, n as u32);
     }
 }
