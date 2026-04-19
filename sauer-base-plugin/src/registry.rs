@@ -3,13 +3,10 @@ use cube_string::CubeString;
 use dashmap::DashMap;
 use sauer_proto::{
     channel1,
-    data::{
-        ArmourType, ClientResumeState, ClientState, Gun, MasterClient, PlayerAmmo, PlayerModel,
-        PlayerState, Privilege,
-    },
+    data::{ArmourType, ClientResumeState, ClientState, Gun, MasterClient, PlayerAmmo, PlayerModel, PlayerState, Privilege},
 };
 use sauer_server::Server;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 /// Registry of all connected clients, stored in [`Server::extra`].
 ///
@@ -99,14 +96,30 @@ impl ClientRegistry {
         self.clients
             .iter()
             .filter(|e| *e.key() != exclude_cn)
-            .map(|e| ClientResumeState {
-                client_num: *e.key() as i32,
-                state: e.value().state,
-                frags: 0,
-                flags: 0,
-                deaths: 0,
-                quad_millis: 0,
-                player_state: dead_player_state(),
+            .map(|e| {
+                let c = e.value();
+                let player_state = if c.state == ClientState::Alive {
+                    PlayerState {
+                        life_sequence: c.life_sequence,
+                        health: c.health,
+                        max_health: c.max_health,
+                        armour: c.armour,
+                        armour_type: c.armour_type,
+                        gun_select: c.gun_select,
+                        ammo: c.ammo.clone(),
+                    }
+                } else {
+                    dead_player_state()
+                };
+                ClientResumeState {
+                    client_num: *e.key() as i32,
+                    state: c.state,
+                    frags: c.frags,
+                    flags: 0,
+                    deaths: c.deaths,
+                    quad_millis: 0,
+                    player_state,
+                }
             })
             .collect()
     }
@@ -124,6 +137,10 @@ impl ClientRegistry {
 impl ClientRegistry {
     pub fn get(&self, cn: u32) -> Option<impl Deref<Target = ClientData> + '_> {
         self.clients.get(&cn)
+    }
+
+    pub(crate) fn get_mut(&self, cn: u32) -> Option<impl DerefMut<Target = ClientData> + '_> {
+        self.clients.get_mut(&cn)
     }
 
     pub fn client_count(&self) -> usize {

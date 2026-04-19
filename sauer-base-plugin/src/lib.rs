@@ -1,24 +1,31 @@
 mod client;
+mod combat;
 mod connect;
 mod crypto;
 mod game;
 mod identity;
+mod map;
 mod master;
+mod modes;
 mod ping;
 mod registry;
+mod spawn;
+mod timer;
 
 pub mod error;
 pub mod options;
 
 pub use client::ClientData;
+pub use combat::CombatState;
 pub use error::BasePluginError;
 pub use game::GameState;
 pub use master::MasterState;
+pub use modes::{default_spawn_state, has_items, is_instagib, is_multiplayer};
 pub use options::BasePluginOptions;
 pub use registry::ClientRegistry;
 
 use options::BasePluginOptions as Opts;
-use sauer_proto::channel1;
+use sauer_proto::{channel0, channel1};
 use sauer_server::{
     Server,
     plugin::{Context, Control, Plugin, PASS},
@@ -31,9 +38,7 @@ pub struct BasePlugin {
 
 impl BasePlugin {
     pub fn new() -> Self {
-        Self {
-            options: Arc::new(Opts::default()),
-        }
+        Self { options: Arc::new(Opts::default()) }
     }
 
     pub fn with_options(options: Opts) -> Self {
@@ -51,6 +56,7 @@ impl Plugin for BasePlugin {
     async fn init(&self, server: &mut Server) {
         server.extra.insert(ClientRegistry::new());
         server.extra.insert(MasterState::new());
+        server.extra.insert(CombatState::new());
         server.extra.insert(GameState::new(
             self.options.initial_map.clone(),
             self.options.initial_mode,
@@ -60,7 +66,7 @@ impl Plugin for BasePlugin {
     async fn start(&self, server: &Arc<Server>) {
         let server = Arc::clone(server);
         let options = Arc::clone(&self.options);
-        tokio::spawn(game::run_tick_loop(server, options));
+        tokio::spawn(timer::run_tick_loop(server, options));
     }
 
     async fn connected(&self, ctx: Context<'_>) -> Control {
@@ -76,12 +82,40 @@ impl Plugin for BasePlugin {
         connect::on_connect(ctx.server, ctx.cn, packet, &self.options).await
     }
 
+    async fn pos(&self, ctx: Context<'_>, packet: &channel0::Position) -> Control {
+        combat::on_pos(ctx.server, ctx.cn, packet).await
+    }
+
     async fn ping(&self, ctx: Context<'_>, packet: &channel1::Ping) -> Control {
         ping::on_ping(ctx.server, ctx.cn, packet).await
     }
 
     async fn client_ping(&self, ctx: Context<'_>, packet: &channel1::ClientPing) -> Control {
         ping::on_client_ping(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn try_spawn(&self, ctx: Context<'_>, packet: &channel1::TrySpawn) -> Control {
+        spawn::on_try_spawn(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn spawn_client(&self, ctx: Context<'_>, packet: &channel1::SpawnClient) -> Control {
+        spawn::on_spawn_client(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn gun_select(&self, ctx: Context<'_>, packet: &channel1::GunSelect) -> Control {
+        combat::on_gun_select(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn shoot(&self, ctx: Context<'_>, packet: &channel1::Shoot) -> Control {
+        combat::on_shoot(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn explode(&self, ctx: Context<'_>, packet: &channel1::Explode) -> Control {
+        combat::on_explode(ctx.server, ctx.cn, packet).await
+    }
+
+    async fn suicide(&self, ctx: Context<'_>, packet: &channel1::Suicide) -> Control {
+        combat::on_suicide(ctx.server, ctx.cn, packet).await
     }
 
     async fn switch_name(&self, ctx: Context<'_>, packet: &channel1::SwitchName) -> Control {
@@ -125,15 +159,15 @@ impl Plugin for BasePlugin {
     }
 
     async fn map_vote(&self, ctx: Context<'_>, packet: &channel1::MapVote) -> Control {
-        game::on_map_vote(ctx.server, ctx.cn, packet, &self.options).await
+        map::on_map_vote(ctx.server, ctx.cn, packet, &self.options).await
     }
 
     async fn new_map(&self, ctx: Context<'_>, packet: &channel1::NewMap) -> Control {
-        game::on_new_map(ctx.server, ctx.cn, packet).await
+        map::on_new_map(ctx.server, ctx.cn, packet).await
     }
 
     async fn item_list(&self, ctx: Context<'_>, packet: &channel1::ItemList) -> Control {
-        game::on_item_list(ctx.server, ctx.cn, packet).await
+        map::on_item_list(ctx.server, ctx.cn, packet).await
     }
 
     async fn force_intermission(
@@ -141,14 +175,14 @@ impl Plugin for BasePlugin {
         ctx: Context<'_>,
         packet: &channel1::ForceIntermission,
     ) -> Control {
-        game::on_force_intermission(ctx.server, ctx.cn, packet).await
+        map::on_force_intermission(ctx.server, ctx.cn, packet).await
     }
 
     async fn pause_game(&self, ctx: Context<'_>, packet: &channel1::PauseGameClient) -> Control {
-        game::on_pause_game(ctx.server, ctx.cn, packet).await
+        map::on_pause_game(ctx.server, ctx.cn, packet).await
     }
 
     async fn game_speed(&self, ctx: Context<'_>, packet: &channel1::GameSpeedClient) -> Control {
-        game::on_game_speed(ctx.server, ctx.cn, packet).await
+        map::on_game_speed(ctx.server, ctx.cn, packet).await
     }
 }

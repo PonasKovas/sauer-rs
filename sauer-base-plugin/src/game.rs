@@ -1,13 +1,10 @@
-use crate::{options::BasePluginOptions, registry::ClientRegistry};
+use crate::{modes, options::BasePluginOptions, registry::ClientRegistry};
 use cube_string::CubeString;
 use sauer_proto::{
-    channel1::{self, ForceIntermission, GameSpeedClient, ItemList, MapVote, NewMap, PauseGameClient},
-    data::{ArmourType, ClientState, GameMode, Gun, ItemSpawn, PlayerAmmo, PlayerState, Privilege},
+    channel1,
+    data::{ClientState, GameMode, ItemSpawn},
 };
-use sauer_server::{
-    Server,
-    plugin::{Control, PASS},
-};
+use sauer_server::Server;
 use std::{
     collections::HashMap,
     sync::{
@@ -15,40 +12,29 @@ use std::{
         atomic::{AtomicBool, AtomicI32, Ordering},
     },
 };
-use tokio::time::{Duration, Instant, interval};
+use tokio::time::Instant;
 use tracing::info;
 
-const GAMELIMIT_MS: u64 = 10 * 60 * 1000;
-const OVERTIME_MS: u64 = 2 * 60 * 1000;
-const INTERMISSION_MS: u64 = 10_000;
-const TIMEUP_BROADCAST_MS: u64 = 1_000;
-const TICK_MS: u64 = 100;
+pub const GAMELIMIT_MS: u64 = 10 * 60 * 1000;
 
 // ── GameState ─────────────────────────────────────────────────────────────────
 
 pub struct GameState {
     map_name: Mutex<CubeString>,
     mode: Mutex<GameMode>,
-    /// Accumulated game time in milliseconds (not counting paused intervals).
+    /// Accumulated match time in milliseconds (paused intervals excluded).
     gamemillis: Mutex<u64>,
     /// Match time limit in milliseconds.
     pub gamelimit: u64,
-    /// When the game is paused, no gamemillis advance occurs.
-    paused: AtomicBool,
-    /// Game speed percentage (default 100).
-    gamespeed: AtomicI32,
-    /// True once intermission has begun; cleared on map change.
+    pub(crate) paused: AtomicBool,
+    pub(crate) gamespeed: AtomicI32,
     interm: AtomicBool,
-    /// Wall-clock time when intermission started; used to schedule the map change.
-    interm_start: Mutex<Option<Instant>>,
-    /// Server has not yet received the item layout from the first client.
-    notgotitems: AtomicBool,
-    /// Items received from the first client after a map change.
-    items: Mutex<Vec<ItemSpawn>>,
-    /// Votes: (map_name, mode) → set of voter client numbers.
+    /// Wall-clock instant when intermission began; drives the post-interm map change.
+    pub(crate) interm_start: Mutex<Option<Instant>>,
+    pub(crate) notgotitems: AtomicBool,
+    pub(crate) items: Mutex<Vec<ItemSpawn>>,
     votes: Mutex<HashMap<(CubeString, GameMode), Vec<u32>>>,
-    /// Index into the configured map rotation for the next auto-cycle.
-    rotation_index: Mutex<usize>,
+    pub(crate) rotation_index: Mutex<usize>,
 }
 
 impl GameState {
@@ -97,7 +83,6 @@ impl GameState {
         self.notgotitems.load(Ordering::Acquire)
     }
 
-    /// Remaining seconds to broadcast via N_TIMEUP (negative once over limit).
     pub fn remaining_seconds(&self) -> i32 {
         let millis = *self.gamemillis.lock().unwrap();
         let limit = self.gamelimit;
@@ -108,18 +93,30 @@ impl GameState {
         }
     }
 
-    /// Begin intermission: set flag, record wall time, broadcast N_TIMEUP 0.
+    /// Begin intermission: record wall time and broadcast N_TIMEUP 0.
+    /// No-op if already in intermission.
     pub fn start_intermission(&self, server: &Server) {
         if self.interm.swap(true, Ordering::AcqRel) {
-            return; // already in intermission
+            return;
         }
         *self.interm_start.lock().unwrap() = Some(Instant::now());
         server.broadcast_chan1(&channel1::TimeUp { seconds_remaining: 0 });
-        info!("intermission started — map change in {}s", INTERMISSION_MS / 1000);
+        info!("intermission started — map change in 10s");
     }
 
-    /// Apply a map change: wipe state, update map/mode, broadcast N_MAPCHANGE,
-    /// reset player states, and send N_SPAWNSTATE to non-spectators.
+    /// Advance gamemillis by `elapsed_ms * speed / 100`. Returns new value.
+    pub(crate) fn advance_time(&self, elapsed_ms: u64) -> u64 {
+        if self.paused.load(Ordering::Acquire) {
+            return *self.gamemillis.lock().unwrap();
+        }
+        let speed = self.gamespeed.load(Ordering::Acquire).max(0) as u64;
+        let delta = elapsed_ms * speed / 100;
+        let mut guard = self.gamemillis.lock().unwrap();
+        *guard += delta;
+        *guard
+    }
+
+    /// Wipe state and apply a new map/mode; broadcast N_MAPCHANGE; respawn clients.
     pub async fn change_map(
         &self,
         map_name: CubeString,
@@ -130,7 +127,6 @@ impl GameState {
     ) {
         info!("map change → {} ({:?})", map_name, mode);
 
-        // Wipe game state.
         *self.map_name.lock().unwrap() = map_name.clone();
         *self.mode.lock().unwrap() = mode;
         *self.gamemillis.lock().unwrap() = 0;
@@ -141,7 +137,6 @@ impl GameState {
         self.items.lock().unwrap().clear();
         self.votes.lock().unwrap().clear();
 
-        // Advance rotation index so the next auto-cycle picks the entry after this one.
         if !options.maprotations.is_empty() {
             let mut idx = self.rotation_index.lock().unwrap();
             *idx = options
@@ -155,26 +150,23 @@ impl GameState {
         server.broadcast_chan1(&channel1::MapChange {
             map_name,
             mode,
-            has_items: has_items(mode),
+            has_items: modes::has_items(mode),
         });
 
-        // Reset and respawn all non-spectator clients.
-        for cn in registry.all_cns() {
-            let Some(client) = registry.get(cn) else { continue };
-            if client.state() == ClientState::Spectator {
-                continue;
-            }
-            drop(client);
-
-            if is_multiplayer(mode) {
-                let state = default_spawn_state(mode);
+        if modes::is_multiplayer(mode) {
+            for cn in registry.all_cns() {
+                let Some(client) = registry.get(cn) else { continue };
+                if client.state() == ClientState::Spectator {
+                    continue;
+                }
+                drop(client);
+                let state = modes::default_spawn_state(mode);
                 server.send_chan1(cn, &channel1::SpawnState { client_num: cn as i32, state });
             }
         }
     }
 
-    /// Record a vote. Returns the current vote count for that (map, mode) pair.
-    fn record_vote(&self, cn: u32, map_name: CubeString, mode: GameMode) -> usize {
+    pub(crate) fn record_vote(&self, cn: u32, map_name: CubeString, mode: GameMode) -> usize {
         let mut votes = self.votes.lock().unwrap();
         let entry = votes.entry((map_name, mode)).or_default();
         if !entry.contains(&cn) {
@@ -183,349 +175,22 @@ impl GameState {
         entry.len()
     }
 
-    /// Best voted (map, mode) pair, or None if no votes.
-    fn best_voted(&self) -> Option<(CubeString, GameMode)> {
+    /// Returns the (map, mode) pair with the most votes, if any.
+    pub(crate) fn best_voted(&self) -> Option<(CubeString, GameMode)> {
         let votes = self.votes.lock().unwrap();
         votes
             .iter()
             .max_by_key(|(_, voters)| voters.len())
             .map(|((map, mode), _)| (map.clone(), *mode))
     }
-}
 
-// ── Tick loop ─────────────────────────────────────────────────────────────────
-
-pub(crate) async fn run_tick_loop(server: Arc<Server>, options: Arc<BasePluginOptions>) {
-    let mut ticker = interval(Duration::from_millis(TICK_MS));
-    let mut last_tick = Instant::now();
-    let mut last_timeup = Instant::now();
-
-    loop {
-        ticker.tick().await;
-
-        let Some(game) = server.extra.get::<GameState>() else { return };
-        let Some(registry) = server.extra.get::<ClientRegistry>() else { return };
-
-        let now = Instant::now();
-        let elapsed_ms = now.duration_since(last_tick).as_millis() as u64;
-        last_tick = now;
-
-        // ── Intermission countdown ────────────────────────────────────────────
-        if game.is_intermission() {
-            let interm_elapsed = game
-                .interm_start
-                .lock()
-                .unwrap()
-                .map(|t| t.elapsed().as_millis() as u64)
-                .unwrap_or(0);
-
-            if interm_elapsed >= INTERMISSION_MS {
-                let (map_name, mode) = game
-                    .best_voted()
-                    .unwrap_or_else(|| next_rotation(&game, &options));
-                game.change_map(map_name, mode, &server, &registry, &options).await;
-            }
-            continue;
+    /// Next map from the rotation, or the current map if no rotation is configured.
+    pub(crate) fn next_rotation(&self, options: &BasePluginOptions) -> (CubeString, GameMode) {
+        if options.maprotations.is_empty() {
+            return (self.map_name(), self.mode());
         }
-
-        // ── Advance gamemillis ────────────────────────────────────────────────
-        if !game.is_paused() {
-            let speed = game.gamespeed.load(Ordering::Acquire).max(0) as u64;
-            let delta = elapsed_ms * speed / 100;
-            *game.gamemillis.lock().unwrap() += delta;
-        }
-
-        let millis = game.gamemillis();
-
-        // ── Time limit check ──────────────────────────────────────────────────
-        if millis >= game.gamelimit {
-            // TODO: tie detection — if score is tied, extend by overtime instead.
-            // For now, always enter intermission.
-            let _ = OVERTIME_MS; // suppress unused warning until tie logic is added
-            game.start_intermission(&server);
-            continue;
-        }
-
-        // ── Periodic N_TIMEUP broadcast ───────────────────────────────────────
-        if now.duration_since(last_timeup) >= Duration::from_millis(TIMEUP_BROADCAST_MS) {
-            last_timeup = now;
-            server.broadcast_chan1(&channel1::TimeUp {
-                seconds_remaining: game.remaining_seconds(),
-            });
-        }
-    }
-}
-
-// ── Mode helpers ──────────────────────────────────────────────────────────────
-
-/// True for all networked multiplayer modes (excludes SP / demo / coop-edit).
-pub fn is_multiplayer(mode: GameMode) -> bool {
-    !matches!(mode, GameMode::Sp | GameMode::Dmsp | GameMode::Demo | GameMode::CoopEdit)
-}
-
-/// True for modes that use the item pickup system (excludes insta/efficiency/tactics variants).
-pub fn has_items(mode: GameMode) -> bool {
-    matches!(
-        mode,
-        GameMode::Ffa
-            | GameMode::TeamPlay
-            | GameMode::Capture
-            | GameMode::RegenCapture
-            | GameMode::Ctf
-            | GameMode::Protect
-            | GameMode::Hold
-            | GameMode::Collect
-    )
-}
-
-// ── Default spawn state ───────────────────────────────────────────────────────
-
-/// Generate a default spawn PlayerState for a client entering a new map.
-pub fn default_spawn_state(mode: GameMode) -> PlayerState {
-    let instagib = matches!(
-        mode,
-        GameMode::Instagib
-            | GameMode::InstaTeam
-            | GameMode::InstaCTF
-            | GameMode::InstaProtect
-            | GameMode::InstaHold
-            | GameMode::InstaCollect
-    );
-    let efficiency = matches!(
-        mode,
-        GameMode::Efficiency
-            | GameMode::EfficTeam
-            | GameMode::EfficCTF
-            | GameMode::EfficProtect
-            | GameMode::EfficHold
-            | GameMode::EfficCollect
-    );
-
-    if instagib {
-        return PlayerState {
-            life_sequence: 1,
-            health: 1,
-            max_health: 1,
-            armour: 0,
-            armour_type: ArmourType::Blue,
-            gun_select: Gun::Rifle,
-            ammo: PlayerAmmo {
-                shotgun: 0,
-                chaingun: 0,
-                rocket_launcher: 0,
-                rifle: -1, // infinite
-                grenade_launcher: 0,
-                pistol: 0,
-            },
-        };
-    }
-
-    if efficiency {
-        return PlayerState {
-            life_sequence: 1,
-            health: 100,
-            max_health: 100,
-            armour: 0,
-            armour_type: ArmourType::Blue,
-            gun_select: Gun::Fist,
-            ammo: PlayerAmmo {
-                shotgun: 10,
-                chaingun: 20,
-                rocket_launcher: 5,
-                rifle: 5,
-                grenade_launcher: 5,
-                pistol: 10,
-            },
-        };
-    }
-
-    // All other multiplayer modes: start with 50 pistol.
-    PlayerState {
-        life_sequence: 1,
-        health: 100,
-        max_health: 100,
-        armour: 0,
-        armour_type: ArmourType::Blue,
-        gun_select: Gun::Fist,
-        ammo: PlayerAmmo {
-            shotgun: 0,
-            chaingun: 0,
-            rocket_launcher: 0,
-            rifle: 0,
-            grenade_launcher: 0,
-            pistol: 50,
-        },
-    }
-}
-
-// ── Rotation helper ───────────────────────────────────────────────────────────
-
-fn next_rotation(game: &GameState, options: &BasePluginOptions) -> (CubeString, GameMode) {
-    if options.maprotations.is_empty() {
-        return (game.map_name(), game.mode());
-    }
-    let idx = *game.rotation_index.lock().unwrap();
-    let entry = &options.maprotations[idx % options.maprotations.len()];
-    (entry.map_name.clone(), entry.mode)
-}
-
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
-pub async fn on_map_vote(
-    server: &Arc<Server>,
-    cn: u32,
-    packet: &MapVote,
-    options: &BasePluginOptions,
-) -> Control {
-    let registry = server.extra.get::<ClientRegistry>().unwrap();
-    let game = server.extra.get::<GameState>().unwrap();
-
-    let privilege = registry
-        .get(cn)
-        .map(|c| c.privilege())
-        .unwrap_or(Privilege::None);
-
-    if privilege >= Privilege::Master {
-        info!("cn {} forced map {} ({:?})", cn, packet.map_name, packet.mode);
-        game.change_map(packet.map_name.clone(), packet.mode, server, &registry, options).await;
-        return PASS;
-    }
-
-    let vote_count = game.record_vote(cn, packet.map_name.clone(), packet.mode);
-    let eligible = registry.client_count();
-    info!(
-        "cn {} voted for {} ({:?}): {}/{}",
-        cn, packet.map_name, packet.mode, vote_count, eligible
-    );
-
-    if vote_count * 2 > eligible {
-        info!("vote passed for {} ({:?})", packet.map_name, packet.mode);
-        game.change_map(packet.map_name.clone(), packet.mode, server, &registry, options).await;
-    }
-
-    PASS
-}
-
-pub async fn on_new_map(server: &Arc<Server>, cn: u32, packet: &NewMap) -> Control {
-    let game = server.extra.get::<GameState>().unwrap();
-
-    if game.mode() != GameMode::CoopEdit {
-        return PASS;
-    }
-
-    info!("cn {} resized/cleared map to size {}", cn, packet.size);
-
-    game.notgotitems.store(false, Ordering::Release);
-    game.items.lock().unwrap().clear();
-
-    let map_name = game.map_name();
-    server.broadcast_chan1(&channel1::MapChange {
-        map_name,
-        mode: GameMode::CoopEdit,
-        has_items: false,
-    });
-
-    PASS
-}
-
-pub async fn on_item_list(server: &Arc<Server>, cn: u32, packet: &ItemList) -> Control {
-    let game = server.extra.get::<GameState>().unwrap();
-
-    if !game.notgotitems() {
-        return PASS;
-    }
-
-    game.notgotitems.store(false, Ordering::Release);
-    *game.items.lock().unwrap() = packet.items.clone();
-
-    info!("cn {} provided item list: {} items", cn, packet.items.len());
-
-    PASS
-}
-
-pub async fn on_force_intermission(server: &Arc<Server>, cn: u32, _packet: &ForceIntermission) -> Control {
-    let registry = server.extra.get::<ClientRegistry>().unwrap();
-    let privilege = registry
-        .get(cn)
-        .map(|c| c.privilege())
-        .unwrap_or(Privilege::None);
-
-    if privilege < Privilege::Master {
-        return PASS;
-    }
-
-    let game = server.extra.get::<GameState>().unwrap();
-    info!("cn {} forced intermission", cn);
-    game.start_intermission(server);
-
-    PASS
-}
-
-pub async fn on_pause_game(server: &Arc<Server>, cn: u32, packet: &PauseGameClient) -> Control {
-    let registry = server.extra.get::<ClientRegistry>().unwrap();
-    let privilege = registry
-        .get(cn)
-        .map(|c| c.privilege())
-        .unwrap_or(Privilege::None);
-
-    if privilege < Privilege::Master {
-        return PASS;
-    }
-
-    let game = server.extra.get::<GameState>().unwrap();
-    game.paused.store(packet.val, Ordering::Release);
-
-    info!("cn {} {} the game", cn, if packet.val { "paused" } else { "unpaused" });
-
-    server.broadcast_chan1(&channel1::PauseGameServer {
-        is_paused: packet.val,
-        client_num: cn as i32,
-    });
-
-    PASS
-}
-
-pub async fn on_game_speed(server: &Arc<Server>, cn: u32, packet: &GameSpeedClient) -> Control {
-    let registry = server.extra.get::<ClientRegistry>().unwrap();
-    let privilege = registry
-        .get(cn)
-        .map(|c| c.privilege())
-        .unwrap_or(Privilege::None);
-
-    if privilege < Privilege::Admin {
-        return PASS;
-    }
-
-    let speed = packet.speed.clamp(10, 1000);
-    let game = server.extra.get::<GameState>().unwrap();
-    game.gamespeed.store(speed, Ordering::Release);
-
-    info!("cn {} set game speed to {}", cn, speed);
-
-    server.broadcast_chan1(&channel1::GameSpeedServer {
-        speed,
-        client_num: cn as i32,
-    });
-
-    PASS
-}
-
-/// Send the current map state to a newly connected client.
-pub(crate) fn send_map_info(server: &Server, cn: u32) {
-    let Some(game) = server.extra.get::<GameState>() else { return };
-    let mode = game.mode();
-    server.send_chan1(
-        cn,
-        &channel1::MapChange {
-            map_name: game.map_name(),
-            mode,
-            has_items: has_items(mode),
-        },
-    );
-    if has_items(mode) && !game.notgotitems() {
-        let items = game.items.lock().unwrap().clone();
-        if !items.is_empty() {
-            server.send_chan1(cn, &channel1::ItemList { items });
-        }
+        let idx = *self.rotation_index.lock().unwrap();
+        let entry = &options.maprotations[idx % options.maprotations.len()];
+        (entry.map_name.clone(), entry.mode)
     }
 }
