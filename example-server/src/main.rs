@@ -19,8 +19,8 @@ async fn main() {
     let server = ServerBuilder::new()
         .bind_addr(([0, 0, 0, 0], 11111))
         .max_peers(1024)
-        .plugin(BasePlugin::new())  // added first = runs second
-        .plugin(lua_plugin);        // added last = runs first (tuple composition: self.1 before self.0)
+        .plugin(BasePlugin::new())
+        .plugin(lua_plugin);
 
     if let Err(e) = server.run().await {
         println!("Error setting up the server: {e}");

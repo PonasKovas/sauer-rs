@@ -632,6 +632,7 @@ name = "sauer-base-plugin"
 version = "0.1.0"
 dependencies = [
  "cube-string",
+ "dashmap",
  "rand",
  "sauer-proto",
  "sauer-server",

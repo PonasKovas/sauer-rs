@@ -8,6 +8,7 @@ sauer-server.workspace = true
 sauer-proto.workspace = true
 cube-string.workspace = true
 rand.workspace = true
+dashmap.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
-thiserror.workspace= true
+thiserror.workspace = true
