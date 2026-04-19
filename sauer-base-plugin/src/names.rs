@@ -22,7 +22,7 @@ impl Names {
     pub fn get(&self, cn: u32) -> impl Deref<Target = CubeString> {
         match self.try_get(cn) {
             Some(x) => x,
-            None => panic!("cn {cn} not in names list"),
+            None => panic!("cn {cn} not in Names list"),
         }
     }
     /// Sets the name of the player in local data. Use [`set_name`] to automatically send `N_SWITCHNAME` packets to all clients
@@ -38,6 +38,10 @@ impl Default for Names {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub(crate) fn init_name(server: &Server, cn: u32, name: CubeString) {
+    get_names(server).map.insert(cn, name);
 }
 
 pub(crate) fn clear_name(server: &Server, cn: u32) {

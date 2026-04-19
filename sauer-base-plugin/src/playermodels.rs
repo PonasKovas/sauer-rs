@@ -38,6 +38,14 @@ impl Default for PlayerModels {
     }
 }
 
+pub(crate) fn init_playermodel(server: &Server, cn: u32, model: PlayerModel) {
+    get_playermodels(server).map.insert(cn, model);
+}
+
+pub(crate) fn clear_playermodel(server: &Server, cn: u32) {
+    get_playermodels(server).map.remove(&cn);
+}
+
 pub fn get_playermodels(server: &Server) -> &PlayerModels {
     match server.extra.get() {
         Some(x) => x,

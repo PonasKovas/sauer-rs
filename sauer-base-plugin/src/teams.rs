@@ -24,7 +24,7 @@ impl Teams {
     pub fn get(&self, cn: u32) -> impl Deref<Target = CubeString> {
         match self.try_get(cn) {
             Some(x) => x,
-            None => panic!("cn {cn} not in teams list"),
+            None => panic!("cn {cn} not in Teams list"),
         }
     }
     /// Sets the tean of the player in local data. Use [`set_team`] to automatically send `N_SETTEAM` packet to all clients
@@ -59,7 +59,7 @@ pub(crate) fn set_initial_team(server: &Server, cn: u32) {
         CubeString::new()
     };
 
-    get_teams(server).raw_set(cn, team);
+    get_teams(server).map.insert(cn, team);
 }
 
 pub(crate) fn clear_team(server: &Server, cn: u32) {
