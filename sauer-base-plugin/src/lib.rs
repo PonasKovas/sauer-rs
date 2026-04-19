@@ -1,11 +1,12 @@
 use crate::{
-    names::{Names, clear_name, get_names, init_name, set_name},
     options::{BasePluginOptions, get_options},
-    player_states::{PlayerStates, clear_playerstate},
-    playermodels::{PlayerModels, clear_playermodel, init_playermodel, set_playermodel},
-    positions::{Positions, clear_positions, get_positions},
-    session_ids::{SessionIds, clear_session_id, create_session_id},
-    teams::{Teams, clear_team, set_initial_team, set_team},
+    players::{
+        Players, clear_player, get_players, init_player,
+        model::{init_model, set_model},
+        name::{init_name, set_name},
+        position::set_position,
+        team::set_team,
+    },
 };
 use sauer_proto::{
     Client, channel0,
@@ -21,13 +22,8 @@ use tracing::info;
 use std::sync::RwLock;
 
 mod error;
-pub mod names;
 pub mod options;
-pub mod player_states;
-pub mod playermodels;
-pub mod positions;
-pub mod session_ids;
-pub mod teams;
+pub mod players;
 mod util;
 mod welcome;
 
@@ -60,21 +56,14 @@ impl Default for BasePlugin {
 
 impl Plugin for BasePlugin {
     async fn init(&self, server: &mut Server) {
-        let options = RwLock::new(self.initial_options.clone());
-        server.extra.insert(options);
-        server.extra.insert(SessionIds::new());
-        server.extra.insert(Names::new());
-        server.extra.insert(PlayerModels::new());
-        server.extra.insert(Teams::new());
-        server.extra.insert(PlayerStates::new());
-        server.extra.insert(Positions::new());
+        server.extra.insert(RwLock::new(self.initial_options.clone()));
+        server.extra.insert(Players::new());
     }
 
     async fn connected(&self, ctx: &mut Context) {
+        let session_id = init_player(ctx.server(), ctx.cn());
+
         let options = get_options(ctx.server()).read().unwrap();
-
-        let session_id = create_session_id(ctx.server(), ctx.cn());
-
         ctx.server().send_chan1(
             ctx.cn(),
             &ServInfo {
@@ -89,29 +78,24 @@ impl Plugin for BasePlugin {
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
-        clear_session_id(ctx.server(), ctx.cn());
-        clear_name(ctx.server(), ctx.cn());
-        clear_playermodel(ctx.server(), ctx.cn());
-        clear_team(ctx.server(), ctx.cn());
-        clear_playerstate(ctx.server(), ctx.cn());
-        clear_positions(ctx.server(), ctx.cn());
+        clear_player(ctx.server(), ctx.cn());
     }
 
     async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
         info!("{} (cn {}) connected.", packet.name, ctx.cn());
 
         init_name(ctx.server(), ctx.cn(), packet.name.clone());
-        init_playermodel(ctx.server(), ctx.cn(), packet.player_model);
+        init_model(ctx.server(), ctx.cn(), packet.player_model);
 
         let options = get_options(ctx.server()).read().unwrap();
         if options.instant_welcome {
+            drop(options);
             welcome(ctx.server(), ctx.cn());
         }
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
-        get_positions(ctx.server()).set(ctx.cn(), packet.pos);
-
+        set_position(ctx.server(), ctx.cn(), packet.pos);
         ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
     async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) {
@@ -131,7 +115,7 @@ impl Plugin for BasePlugin {
             max_len: Some(5000),
         });
 
-        let name = get_names(ctx.server()).get(ctx.cn()).clone();
+        let name = get_players(ctx.server()).get(ctx.cn()).name.clone();
         info!("[CHAT] {name}: {}", packet.text);
 
         ctx.server().broadcast_chan1(&Client {
@@ -143,7 +127,7 @@ impl Plugin for BasePlugin {
         set_name(ctx.server(), ctx.cn(), packet.name.clone());
     }
     async fn switch_model(&self, ctx: &mut Context, packet: &channel1::SwitchModel) {
-        set_playermodel(ctx.server(), ctx.cn(), packet.model);
+        set_model(ctx.server(), ctx.cn(), packet.model);
     }
     async fn switch_team(&self, ctx: &mut Context, packet: &channel1::SwitchTeam) {
         set_team(
