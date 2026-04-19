@@ -1,18 +1,16 @@
-use sauer_proto::data::{ArmourType, Gun, PlayerAmmo, PlayerState};
+use sauer_proto::{
+    channel1::SpawnState,
+    data::{ArmourType, ClientState, Gun, PlayerAmmo, PlayerState},
+};
 use sauer_server::Server;
 
 use crate::options::get_options;
 
 use super::get_players;
 
-pub(crate) fn set_initial_state(server: &Server, cn: u32) {
-    let insta = {
-        let options = get_options(server).read().unwrap();
-        options.mode.is_insta()
-    };
-
-    let state = PlayerState {
-        life_sequence: 0,
+fn make_spawn_state(insta: bool, life_sequence: i32) -> PlayerState {
+    PlayerState {
+        life_sequence,
         health: if insta { 1 } else { 100 },
         max_health: 100,
         armour: 0,
@@ -26,9 +24,49 @@ pub(crate) fn set_initial_state(server: &Server, cn: u32) {
             grenade_launcher: if insta { 0 } else { 1 },
             pistol: if insta { 0 } else { 30 },
         },
+    }
+}
+
+pub(crate) fn set_initial_state(server: &Server, cn: u32) {
+    let insta = {
+        let options = get_options(server).read().unwrap();
+        options.mode.is_insta()
+    };
+    if let Some(mut p) = get_players(server).try_get_mut(cn) {
+        p.state = Some(make_spawn_state(insta, 0));
+    }
+}
+
+/// Prepare a respawn: increment life_sequence, reset state, send N_SPAWNSTATE only to this client.
+/// Does nothing if the player is not dead or hasn't been welcomed.
+pub fn prepare_spawn(server: &Server, cn: u32) {
+    let insta = {
+        let options = get_options(server).read().unwrap();
+        options.mode.is_insta()
     };
 
-    if let Some(mut p) = get_players(server).try_get_mut(cn) {
-        p.state = Some(state);
-    }
+    let new_state = {
+        let mut p = match get_players(server).try_get_mut(cn) {
+            Some(p) => p,
+            None => return,
+        };
+        if p.client_state != ClientState::Dead {
+            return;
+        }
+        let old_seq = match p.state.as_ref() {
+            Some(s) => s.life_sequence,
+            None => return, // not welcomed yet
+        };
+        let state = make_spawn_state(insta, (old_seq + 1) & 0x7F);
+        p.state = Some(state.clone());
+        state
+    };
+
+    server.send_chan1(
+        cn,
+        &SpawnState {
+            client_num: cn as i32,
+            state: new_state,
+        },
+    );
 }

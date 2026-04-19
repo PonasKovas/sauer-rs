@@ -3,6 +3,7 @@ use rand::random;
 use sauer_server::Server;
 use std::ops::{Deref, DerefMut};
 
+pub mod combat;
 mod data;
 pub mod model;
 pub mod name;

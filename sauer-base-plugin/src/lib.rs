@@ -2,16 +2,18 @@ use crate::{
     options::{BasePluginOptions, get_options},
     players::{
         Players, clear_player, get_players, init_player,
+        combat::{apply_damage, gun_damage_per_ray, kill_player},
         model::{init_model, set_model},
         name::{init_name, set_name},
         position::set_position,
+        state::prepare_spawn,
         team::set_team,
     },
 };
 use sauer_proto::{
     Client, channel0,
-    channel1::{self, ServInfo},
-    data::SetTeamReason,
+    channel1::{self, ServInfo, SpawnServer, ShotFx},
+    data::{ClientState, SetTeamReason},
 };
 use sauer_server::{
     Server,
@@ -91,6 +93,94 @@ impl Plugin for BasePlugin {
         if options.instant_welcome {
             drop(options);
             welcome(ctx.server(), ctx.cn());
+        }
+    }
+
+    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
+        prepare_spawn(ctx.server(), ctx.cn());
+    }
+
+    async fn spawn_client(&self, ctx: &mut Context, packet: &channel1::SpawnClient) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+
+        let spawned_state = {
+            let mut p = match get_players(server).try_get_mut(cn) {
+                Some(p) => p,
+                None => return,
+            };
+            if p.client_state != ClientState::Dead {
+                return;
+            }
+            if p.state.is_none() {
+                return;
+            }
+            p.client_state = ClientState::Alive;
+            if let Some(s) = p.state.as_mut() {
+                // Sync server life_seq to what the client is using — the client
+                // increments it locally before sending N_SPAWN, so we can't
+                // predict it reliably (e.g. when N_TRYSPAWN fires between
+                // welcome's N_SPAWNSTATE and the client's N_SPAWN).
+                s.life_sequence = packet.life_sequence;
+                s.gun_select = packet.gun_select;
+            }
+            p.state.clone()
+        };
+
+        if let Some(state) = spawned_state {
+            // Send to all OTHER clients — the spawning client already received
+            // N_SPAWNSTATE and is CS_ALIVE. If we echo N_SPAWN back to them,
+            // the client sets itself back to CS_SPAWNING which breaks actions.
+            server.broadcast_except_chan1(
+                cn,
+                &Client {
+                    client_num: cn as i32,
+                    packet: SpawnServer { state },
+                },
+            );
+        }
+    }
+
+    async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) {
+        kill_player(ctx.server(), ctx.cn());
+    }
+
+    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+
+        {
+            let p = get_players(server).get(cn);
+            if p.client_state != ClientState::Alive {
+                return;
+            }
+        }
+
+        server.broadcast_chan1(&ShotFx {
+            client_num: cn as i32,
+            gun: packet.gun,
+            id: packet.id,
+            from: packet.from,
+            to: packet.to,
+        });
+
+        for hit in &packet.hits {
+            let target_cn = hit.target_cn as u32;
+
+            // Validate target is alive and lifesequence matches (anti-cheat: can't hit a respawned player)
+            let life_seq_ok = match get_players(server).try_get(target_cn) {
+                Some(p) => {
+                    p.client_state == ClientState::Alive
+                        && p.state.as_ref().map(|s| s.life_sequence) == Some(hit.life_sequence)
+                }
+                None => false,
+            };
+            if !life_seq_ok {
+                continue;
+            }
+
+            let damage = hit.rays * gun_damage_per_ray(packet.gun);
+            apply_damage(server, target_cn, cn, packet.gun, damage, hit.dir);
         }
     }
 

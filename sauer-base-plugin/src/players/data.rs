@@ -1,5 +1,5 @@
 use cube_string::CubeString;
-use sauer_proto::data::{PlayerModel, PlayerState, Vec3};
+use sauer_proto::data::{ClientState, PlayerModel, PlayerState, Vec3};
 
 #[derive(Clone, Debug)]
 pub struct PlayerData {
@@ -7,8 +7,11 @@ pub struct PlayerData {
     pub name: CubeString,
     pub model: PlayerModel,
     pub team: CubeString,
+    pub client_state: ClientState,
     pub state: Option<PlayerState>,
     pub position: Vec3<f32>,
+    pub frags: i32,
+    pub deaths: i32,
 }
 
 impl PlayerData {
@@ -18,8 +21,11 @@ impl PlayerData {
             name: CubeString::new(),
             model: PlayerModel::MrFixit,
             team: CubeString::new(),
+            client_state: ClientState::Dead,
             state: None,
             position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            frags: 0,
+            deaths: 0,
         }
     }
 }
