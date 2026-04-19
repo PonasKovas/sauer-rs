@@ -1,9 +1,16 @@
-use crate::{client::ClientData, options::BasePluginOptions, registry::ClientRegistry};
+use crate::{
+    client::ClientData,
+    crypto,
+    master::MasterState,
+    options::BasePluginOptions,
+    registry::ClientRegistry,
+};
 use cube_string::CubeString;
 use rand::Rng;
 use sauer_proto::{
     PROTOCOL_VERSION,
     channel1::{self, Connect},
+    data::MasterMode,
 };
 use sauer_server::{
     Server,
@@ -31,7 +38,7 @@ pub async fn on_connected(
             client_num: cn as i32,
             protocol: PROTOCOL_VERSION,
             session_id,
-            has_password: options.has_password,
+            has_password: options.password.is_some(),
             server_desc: options.server_desc.clone(),
             server_auth: options.server_auth.clone(),
         },
@@ -41,8 +48,32 @@ pub async fn on_connected(
 }
 
 /// Called when the client sends N_CONNECT (name, model, password hash).
-pub async fn on_connect(server: &Arc<Server>, cn: u32, packet: &Connect) -> Control {
+pub async fn on_connect(
+    server: &Arc<Server>,
+    cn: u32,
+    packet: &Connect,
+    options: &BasePluginOptions,
+) -> Control {
     let registry = server.extra.get::<ClientRegistry>().unwrap();
+
+    // Verify the join password before accepting the client.
+    if let Some(password) = &options.password {
+        let session_id = match registry.pending_session_id(cn) {
+            Some(id) => id,
+            None => return PASS,
+        };
+        let expected = crypto::hash_password(cn, session_id, &password.to_string());
+        if CubeString::from_str_lossy(&expected) != packet.password_hash {
+            server.send_chan1(
+                cn,
+                &channel1::ServMsg {
+                    text: CubeString::from_str_lossy("wrong password"),
+                },
+            );
+            server.disconnect(cn);
+            return PASS;
+        }
+    }
 
     let client = ClientData::new(
         packet.name.clone(),
@@ -80,6 +111,18 @@ pub async fn on_connect(server: &Arc<Server>, cn: u32, packet: &Connect) -> Cont
             player_model: client_ref.player_model(),
         },
     );
+    drop(client_ref);
+
+    // Enforce mastermode: Locked and Private force new clients into spectator.
+    let mastermode = server
+        .extra
+        .get::<MasterState>()
+        .map(|m| m.mastermode())
+        .unwrap_or(MasterMode::Open);
+
+    if matches!(mastermode, MasterMode::Locked | MasterMode::Private) {
+        registry.set_spectator(cn, true, server);
+    }
 
     info!("cn {} ({}) joined", cn, packet.name);
 
@@ -87,6 +130,11 @@ pub async fn on_connect(server: &Arc<Server>, cn: u32, packet: &Connect) -> Cont
 }
 
 pub async fn on_disconnect(server: &Arc<Server>, cn: u32) {
+    // Clean up any pending auth challenge regardless of handshake state.
+    if let Some(master) = server.extra.get::<MasterState>() {
+        master.cancel_pending_auth(cn);
+    }
+
     let registry = server.extra.get::<ClientRegistry>().unwrap();
 
     // Only broadcast N_CDIS if the client had completed the N_CONNECT handshake.

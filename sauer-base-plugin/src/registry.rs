@@ -3,7 +3,10 @@ use cube_string::CubeString;
 use dashmap::DashMap;
 use sauer_proto::{
     channel1,
-    data::{ArmourType, ClientResumeState, ClientState, Gun, PlayerAmmo, PlayerModel, PlayerState},
+    data::{
+        ArmourType, ClientResumeState, ClientState, Gun, MasterClient, PlayerAmmo, PlayerModel,
+        PlayerState, Privilege,
+    },
 };
 use sauer_server::Server;
 use std::ops::Deref;
@@ -34,6 +37,11 @@ impl ClientRegistry {
     /// Record a newly connected peer before N_CONNECT is received.
     pub(crate) fn begin_pending(&self, cn: u32, session_id: i32) {
         self.pending.insert(cn, session_id);
+    }
+
+    /// Return the session ID for a pending (pre-N_CONNECT) client.
+    pub(crate) fn pending_session_id(&self, cn: u32) -> Option<i32> {
+        self.pending.get(&cn).map(|v| *v)
     }
 
     /// Promote a pending connection to a full client entry after N_CONNECT.
@@ -81,6 +89,29 @@ impl ClientRegistry {
                 deaths: 0,
                 quad_millis: 0,
                 player_state: dead_player_state(),
+            })
+            .collect()
+    }
+
+    // ── Privilege ───────────────────────────────────────────────────────
+
+    /// Update the stored privilege for a client.
+    /// Does **not** broadcast — callers must follow up with N_CURRENTMASTER.
+    /// Use [`MasterState::set_client_privilege`] for the full invariant-safe version.
+    pub(crate) fn set_privilege_data(&self, cn: u32, privilege: Privilege) {
+        if let Some(mut c) = self.clients.get_mut(&cn) {
+            c.privilege = privilege;
+        }
+    }
+
+    /// All clients whose privilege is above None, formatted for N_CURRENTMASTER.
+    pub fn privileged_clients(&self) -> Vec<MasterClient> {
+        self.clients
+            .iter()
+            .filter(|e| e.value().privilege != Privilege::None)
+            .map(|e| MasterClient {
+                client_num: *e.key() as i32,
+                privilege: e.value().privilege,
             })
             .collect()
     }

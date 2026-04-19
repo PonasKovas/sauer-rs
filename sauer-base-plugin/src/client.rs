@@ -1,5 +1,5 @@
 use cube_string::CubeString;
-use sauer_proto::data::{ClientState, PlayerModel};
+use sauer_proto::data::{ClientState, PlayerModel, Privilege};
 
 /// Per-client state managed by the base plugin.
 ///
@@ -11,6 +11,7 @@ pub struct ClientData {
     pub(crate) team: CubeString,
     pub(crate) player_model: PlayerModel,
     pub(crate) state: ClientState,
+    pub(crate) privilege: Privilege,
     /// Randomly generated at connect time; used as a cryptographic salt.
     /// Never modified after creation.
     session_id: i32,
@@ -26,6 +27,7 @@ impl ClientData {
             team,
             player_model,
             state: ClientState::Dead,
+            privilege: Privilege::None,
             session_id: 0, // filled in by complete_pending from the pending map
             ping: 0,
         }
@@ -50,6 +52,10 @@ impl ClientData {
 
     pub fn state(&self) -> ClientState {
         self.state
+    }
+
+    pub fn privilege(&self) -> Privilege {
+        self.privilege
     }
 
     /// The session ID is set once at connection time and never changes.

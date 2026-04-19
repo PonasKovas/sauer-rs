@@ -9,6 +9,9 @@ sauer-proto.workspace = true
 cube-string.workspace = true
 rand.workspace = true
 dashmap.workspace = true
+tiger.workspace = true
+digest.workspace = true
+p192.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
 thiserror.workspace = true
