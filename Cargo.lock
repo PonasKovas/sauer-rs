@@ -635,6 +635,7 @@ dependencies = [
  "rand",
  "sauer-proto",
  "sauer-server",
+ "thiserror",
  "tokio",
  "tracing",
 ]
