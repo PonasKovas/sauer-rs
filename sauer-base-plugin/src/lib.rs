@@ -1,5 +1,5 @@
 use crate::{
-    items::{Items, apply_pickup, canpickup, delay_spawn, get_items, spawntime},
+    items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, get_items, spawntime},
     options::{BasePluginOptions, get_options},
     players::{
         ClipboardData, Players, clear_player,
@@ -423,7 +423,59 @@ impl Plugin for BasePlugin {
     relay_coop!(replace(channel1::Replace));
     relay_coop!(edit_v_slot(channel1::EditVSlot));
     relay_coop!(flip(channel1::Flip));
-    relay_coop!(edit_ent(channel1::EditEnt));
+    async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
+        if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+            return;
+        }
+
+        let idx = packet.ent_id as usize;
+        let item_placed = {
+            let mut items = get_items(ctx.server()).write().unwrap();
+            match entity_to_item_type(packet.type_) {
+                Some(item_type) => {
+                    // Entity was set to an item type — ensure the slot exists.
+                    if items.list.len() <= idx {
+                        items.list.resize_with(idx + 1, || ServerItem {
+                            item_type,
+                            spawned: false,
+                            spawn_time_ms: 0,
+                        });
+                    }
+                    items.list[idx].item_type = item_type;
+                    // Don't mark spawned yet — broadcast N_ITEMSPAWN below so all
+                    // clients (including the editor) transition from unspawned to spawned.
+                    items.list[idx].spawned = false;
+                    items.list[idx].spawn_time_ms = 0;
+                    true
+                }
+                None => {
+                    // Entity changed to a non-item type — deactivate the slot so it
+                    // can no longer be picked up or trigger a respawn timer.
+                    if let Some(item) = items.list.get_mut(idx) {
+                        item.spawned = false;
+                        item.spawn_time_ms = 0;
+                    }
+                    false
+                }
+            }
+        };
+
+        // Relay the geometry change to all other coop clients.
+        ctx.server().broadcast_except_chan1(
+            ctx.cn(),
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
+        );
+
+        // After the relay, tell *all* clients (including the editor) that the new
+        // item slot is now spawned so they render it as a live pickup.
+        if item_placed {
+            get_items(ctx.server()).write().unwrap().list[idx].spawned = true;
+            ctx.server().broadcast_chan1(&ItemSpawn { item_index: idx as i32 });
+        }
+    }
     relay_coop!(edit_var(channel1::EditVar));
     relay_coop!(edit_mat(channel1::EditMat));
     relay_coop!(edit_mode(channel1::EditMode));

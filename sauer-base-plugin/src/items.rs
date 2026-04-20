@@ -1,4 +1,4 @@
-use sauer_proto::data::{ArmourType, ItemSpawn, ItemType, PlayerState};
+use sauer_proto::data::{ArmourType, EntityType, ItemSpawn, ItemType, PlayerState};
 use sauer_server::Server;
 use std::sync::RwLock;
 
@@ -84,6 +84,25 @@ pub fn delay_spawn(item_type: ItemType) -> bool {
         item_type,
         ItemType::GreenArmour | ItemType::YellowArmour | ItemType::Boost | ItemType::Quad
     )
+}
+
+/// Converts an [`EntityType`] to its corresponding [`ItemType`], returning `None`
+/// for entity types that are not pickable items.
+pub fn entity_to_item_type(ent_type: EntityType) -> Option<ItemType> {
+    match ent_type {
+        EntityType::IShells => Some(ItemType::Shells),
+        EntityType::IBullets => Some(ItemType::Bullets),
+        EntityType::IRockets => Some(ItemType::Rockets),
+        EntityType::IRounds => Some(ItemType::Rounds),
+        EntityType::IGrenades => Some(ItemType::Grenades),
+        EntityType::ICartridges => Some(ItemType::Cartridges),
+        EntityType::IHealth => Some(ItemType::Health),
+        EntityType::IBoost => Some(ItemType::Boost),
+        EntityType::IGreenArmour => Some(ItemType::GreenArmour),
+        EntityType::IYellowArmour => Some(ItemType::YellowArmour),
+        EntityType::IQuad => Some(ItemType::Quad),
+        _ => None,
+    }
 }
 
 /// Returns (add, max) ammo stats for ammo-type items.
