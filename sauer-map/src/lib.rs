@@ -1,3 +1,3 @@
 mod world;
 
-pub use world::World;
+pub use world::{Cube, Node, World};

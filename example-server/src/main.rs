@@ -1,5 +1,6 @@
 use crate::config::Config;
 use clap::Parser;
+use deathrun_plugin::DeathRun;
 use sauer_base_plugin::BasePlugin;
 use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
@@ -31,8 +32,6 @@ async fn main() {
         }
     };
 
-    println!("{config:?}");
-
     let mut lua_options = LuaPluginOptions::default();
     lua_options.plugin_directory = config.plugin_dir.clone();
 
@@ -48,6 +47,7 @@ async fn main() {
         .bind_addr(config.bind_addr)
         .max_peers(config.max_peers)
         .plugin(BasePlugin::with_options(config.base))
+        .plugin(DeathRun::new())
         .plugin(lua_plugin);
 
     if let Err(e) = server.run().await {

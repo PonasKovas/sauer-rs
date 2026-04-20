@@ -1,6 +1,6 @@
 use ogz_rs::{
     OgzMap,
-    data::{Material, OctreeNode},
+    data::{CubeInfo, Material, ModernSurfaceData, OctreeNode, Surfaces},
 };
 
 #[derive(Debug, Clone)]
@@ -121,6 +121,131 @@ impl World {
             Some((cube, current_size, [ox, oy, oz]))
         } else {
             None
+        }
+    }
+
+    /// Apply a closure to every leaf `Cube` whose bounding box overlaps the
+    /// given axis-aligned selection.
+    ///
+    /// `o` is the selection origin (world-unit corner), `s` is the count of
+    /// cubes in each dimension at `grid` granularity.  Nodes that are coarser
+    /// than `grid` are subdivided on the fly so that edits land at the right
+    /// resolution.
+    pub fn edit_sel<F>(&mut self, o: [i32; 3], s: [i32; 3], grid: i32, mut f: F)
+    where
+        F: FnMut(&mut Cube),
+    {
+        if grid <= 0 || s.iter().any(|&n| n <= 0) {
+            return;
+        }
+        let sel_max = [
+            o[0] + s[0] * grid,
+            o[1] + s[1] * grid,
+            o[2] + s[2] * grid,
+        ];
+        apply_region(&mut self.root, self.size, [0, 0, 0], o, sel_max, grid, &mut f);
+    }
+
+    /// Convert the tracked `World` back into an `OctreeNode` tree.
+    ///
+    /// Lightmap surfaces are not preserved (they are stripped when the `World`
+    /// is constructed via `from_ogz`).  The resulting tree encodes only the
+    /// geometry, textures, and materials tracked by this type.
+    pub fn to_ogz_octree(&self) -> OctreeNode {
+        node_to_ogz(&self.root)
+    }
+}
+
+// ── Octree helpers ────────────────────────────────────────────────────────────
+
+fn node_to_ogz(node: &Node) -> OctreeNode {
+    match node {
+        Node::Branch(children) => {
+            let converted: Vec<OctreeNode> = children.iter().map(node_to_ogz).collect();
+            OctreeNode::Children(Box::new(converted.try_into().unwrap()))
+        }
+        Node::Leaf(cube) => {
+            let surfaces = Surfaces::Modern(ModernSurfaceData {
+                material: if cube.material != Material::default() {
+                    Some(cube.material)
+                } else {
+                    None
+                },
+                merged: None,
+                surfaces: None,
+            });
+            let info = CubeInfo {
+                textures: cube.textures,
+                surfaces,
+            };
+            if cube.edges == [0x00u8; 12] {
+                OctreeNode::Empty(info)
+            } else if cube.edges == [0x80u8; 12] {
+                OctreeNode::Solid(info)
+            } else {
+                OctreeNode::Normal {
+                    info,
+                    edges: cube.edges,
+                }
+            }
+        }
+    }
+}
+
+/// Recursively apply `f` to all leaves whose bounds overlap the closed
+/// selection `[sel_min, sel_max)`.  Leaf nodes coarser than `grid` are
+/// subdivided into eight equal children (each inheriting the parent's cube
+/// data) before recursing.
+fn apply_region(
+    node: &mut Node,
+    node_size: i32,
+    [ox, oy, oz]: [i32; 3],
+    sel_min: [i32; 3],
+    sel_max: [i32; 3],
+    grid: i32,
+    f: &mut impl FnMut(&mut Cube),
+) {
+    // Reject if this node's AABB has no overlap with the selection.
+    if ox >= sel_max[0] || ox + node_size <= sel_min[0] {
+        return;
+    }
+    if oy >= sel_max[1] || oy + node_size <= sel_min[1] {
+        return;
+    }
+    if oz >= sel_max[2] || oz + node_size <= sel_min[2] {
+        return;
+    }
+
+    // If this is a leaf that is coarser than the target grid, subdivide it so
+    // subsequent edits land at the correct resolution.
+    if matches!(node, Node::Leaf(_)) && node_size > grid {
+        let cube = match node {
+            Node::Leaf(c) => c.clone(),
+            _ => unreachable!(),
+        };
+        let children = std::array::from_fn(|_| Node::Leaf(cube.clone()));
+        *node = Node::Branch(Box::new(children));
+    }
+
+    match node {
+        Node::Leaf(cube) => f(cube),
+        Node::Branch(children) => {
+            let half = node_size / 2;
+            for i in 0..8usize {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_origin = [ox + cx * half, oy + cy * half, oz + cz * half];
+                apply_region(
+                    &mut children[i],
+                    half,
+                    child_origin,
+                    sel_min,
+                    sel_max,
+                    grid,
+                    f,
+                );
+            }
         }
     }
 }

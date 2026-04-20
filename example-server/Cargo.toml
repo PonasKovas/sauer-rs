@@ -9,6 +9,7 @@ sauer-base-plugin = { workspace = true, features = ["serde"] }
 sauer-proto.workspace = true
 sauer-plugin-lua.workspace = true
 cube-string.workspace = true
+deathrun-plugin.workspace = true
 
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
