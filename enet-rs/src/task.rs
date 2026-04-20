@@ -605,7 +605,7 @@ impl HostTask {
                         if ch as usize >= p.channels.len() {
                             return;
                         }
-                        p.channels[ch as usize].receive_reliable(seq, sr.data)
+                        p.channels[ch as usize].receive_reliable(seq, sr.data, 1)
                     };
                     for data in ready {
                         self.deliver(k, Packet::reliable(data, ch));
@@ -640,13 +640,13 @@ impl HostTask {
             CMD_SEND_FRAGMENT => {
                 if let (Some(k), CommandBody::SendFragment(sf)) = (key, cmd.body) {
                     let ch = hdr_channel;
-                    self.on_fragment(k, ch, sf, true, now_ms);
+                    self.on_fragment(k, ch, sf, true, hdr_seq, now_ms);
                 }
             }
             CMD_SEND_UNRELIABLE_FRAGMENT => {
                 if let (Some(k), CommandBody::SendUnreliableFragment(sf)) = (key, cmd.body) {
                     let ch = cmd.header.channel_id;
-                    self.on_fragment(k, ch, sf, false, now_ms);
+                    self.on_fragment(k, ch, sf, false, hdr_seq, now_ms);
                 }
             }
             CMD_SEND_UNSEQUENCED => {
@@ -703,6 +703,7 @@ impl HostTask {
         ch: u8,
         sf: crate::protocol::SendFragmentCmd,
         reliable: bool,
+        hdr_seq: u16,
         now_ms: u32,
     ) {
         // Reject obviously malformed fragments before allocating anything.
@@ -732,6 +733,13 @@ impl HostTask {
             p.last_receive_time = now_ms;
             if ch as usize >= p.channels.len() {
                 return;
+            }
+
+            // Discard unreliable fragments tied to a future reliable epoch.
+            if !reliable {
+                if protocol::seq_lt(hdr_seq, p.channels[ch as usize].incoming_reliable_seq) {
+                    return;
+                }
             }
 
             // DoS guards: check limits before touching the fragment buffer map.
@@ -785,26 +793,9 @@ impl HostTask {
                 let chan = &mut p.channels[ch as usize];
 
                 if reliable {
-                    // receive_reliable advances incoming_reliable_seq to start_seq, but the
-                    // sender consumed frag_count sequence numbers (start_seq..start_seq+frag_count-1).
-                    // Advance frag_count-1 more so the next expected seq is start_seq+frag_count,
-                    // then drain any packets in the queue that are now reachable.
-                    let mut ready = chan.receive_reliable(sf.start_seq, assembled);
-                    if !ready.is_empty() && frag_count > 1 {
-                        chan.incoming_reliable_seq = chan
-                            .incoming_reliable_seq
-                            .wrapping_add((frag_count - 1) as u16);
-                        loop {
-                            let next = chan.incoming_reliable_seq.wrapping_add(1);
-                            if let Some(d) = chan.incoming_reliable_queue.remove(&next) {
-                                chan.incoming_reliable_seq = next;
-                                ready.push(d);
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    ready
+                    // Replaced with 1-liner. receive_reliable now fully
+                    // encapsulates the multi-sequence jumping logic.
+                    chan.receive_reliable(sf.start_seq, assembled, frag_count)
                 } else {
                     // Apply the same sequence ordering check as non-fragmented unreliable packets.
                     match chan.receive_unreliable(sf.start_seq, assembled) {

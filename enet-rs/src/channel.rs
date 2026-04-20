@@ -83,7 +83,7 @@ pub struct Channel {
     // Incoming reliable
     pub incoming_reliable_seq: u16,
     /// Reliable commands held waiting for an earlier seq to arrive.
-    pub incoming_reliable_queue: BTreeMap<u16, Bytes>,
+    pub incoming_reliable_queue: BTreeMap<u16, (Bytes, u32)>,
 
     // Incoming unreliable
     pub incoming_unreliable_seq: u16,
@@ -108,6 +108,7 @@ impl Channel {
     /// Advance and return the next outgoing reliable sequence number.
     pub fn next_reliable_seq(&mut self) -> u16 {
         self.outgoing_reliable_seq = self.outgoing_reliable_seq.wrapping_add(1);
+        self.outgoing_unreliable_seq = 0;
         self.outgoing_reliable_seq
     }
 
@@ -122,18 +123,22 @@ impl Channel {
     }
 
     /// Receive a reliable in-order delivery. Returns in-order messages that are now deliverable.
-    pub fn receive_reliable(&mut self, seq: u16, data: Bytes) -> Vec<Bytes> {
+    pub fn receive_reliable(&mut self, seq: u16, data: Bytes, frag_count: u32) -> Vec<Bytes> {
         let expected = self.incoming_reliable_seq.wrapping_add(1);
 
         if seq == expected {
-            self.incoming_reliable_seq = seq;
+            // Advance by frag_count and reset unreliable sequence
+            self.incoming_reliable_seq = seq.wrapping_add((frag_count.max(1) - 1) as u16);
+            self.incoming_unreliable_seq = 0;
             let mut out = vec![data];
             // Drain any buffered follow-on sequences
             loop {
                 let next = self.incoming_reliable_seq.wrapping_add(1);
                 if let Some(d) = self.incoming_reliable_queue.remove(&next) {
-                    self.incoming_reliable_seq = next;
-                    out.push(d);
+                    // Advance by buffered frag_count and reset unreliable sequence
+                    self.incoming_reliable_seq = next.wrapping_add((frag_count.max(1) - 1) as u16);
+                    self.incoming_unreliable_seq = 0;
+                    out.push(d.0);
                 } else {
                     break;
                 }
@@ -145,7 +150,7 @@ impl Channel {
             if seq.wrapping_sub(expected) <= window
                 && self.incoming_reliable_queue.len() < MAX_INCOMING_RELIABLE_QUEUE
             {
-                self.incoming_reliable_queue.insert(seq, data);
+                self.incoming_reliable_queue.insert(seq, (data, frag_count));
             }
             vec![]
         } else {
