@@ -182,6 +182,7 @@ make_packet_enum!(
 
 /// `N_CLIENT` Wrapper
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Client<T> {
     pub client_num: i32,
     pub packet: T,
@@ -240,6 +241,7 @@ make_struct!(
 
 /// `N_EDITVAR` Coop Edit: A map variable was modified.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EditVar {
     pub name: CubeString,
     pub val: EditVarValue,
@@ -735,6 +737,7 @@ make_struct!(
 
 /// `N_INITFLAGS` Sends initial flag states to joining clients (CTF modes).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InitFlagsServer {
     pub scores: [i32; 2],
     pub flags: Vec<FlagState>,
@@ -1275,6 +1278,7 @@ make_struct!(
 
 /// `N_BASES` Sends the list of capture base spawns to the server (Capture / Regen Capture).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BasesClient {
     pub bases: Vec<BaseSpawn>,
 }

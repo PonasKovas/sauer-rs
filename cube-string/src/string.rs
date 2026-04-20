@@ -63,31 +63,6 @@ pub struct CubeString {
     pub(crate) buf: Vec<u8>,
 }
 
-#[cfg(feature = "serde")]
-mod serde_impl {
-    use alloc::vec::Vec;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    impl Serialize for super::CubeString {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            serializer.serialize_bytes(&self.buf)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for super::CubeString {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let bytes = Vec::<u8>::deserialize(deserializer)?;
-            Ok(super::CubeString { buf: bytes })
-        }
-    }
-}
-
 impl CubeString {
     /// Returns a builder for CubeString with colors
     pub fn builder() -> CubeStringBuilder {
@@ -404,5 +379,32 @@ impl Index<RangeToInclusive<usize>> for CubeString {
     type Output = CubeStr;
     fn index(&self, index: RangeToInclusive<usize>) -> &CubeStr {
         cube_str_from_bytes(&self.buf[0..=index.end])
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use crate::CubeString;
+    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+
+    impl Serialize for super::CubeString {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_str(&self.to_utf8())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for super::CubeString {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = <&str>::deserialize(deserializer)?;
+            let cube = CubeString::from_str(s).map_err(Error::custom)?;
+
+            Ok(cube)
+        }
     }
 }

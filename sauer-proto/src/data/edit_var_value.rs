@@ -2,6 +2,7 @@ use cube_string::CubeString;
 
 /// Strict typing for variable modification in cooperative editing (`N_EDITVAR`).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EditVarValue {
     Int(i32),
     Float(f32),

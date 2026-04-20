@@ -1,16 +1,29 @@
+use crate::config::Config;
+use clap::Parser;
 use sauer_base_plugin::BasePlugin;
-use sauer_base_plugin::options::BasePluginOptions;
 use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
-use sauer_proto::data::GameMode;
 use sauer_server::ServerBuilder;
+use std::path::PathBuf;
 use tracing::error;
+
+mod config;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Config path
+    #[arg(short, long, default_value = "config.toml.local")]
+    config: PathBuf,
+}
 
 #[tokio::main]
 async fn main() {
     sauer_server::utils::init_default_tracing();
 
-    let lua_plugin = match LuaPlugin::load(&LuaPluginOptions::default()).await {
+    let args = Args::parse();
+
+    let config = match Config::load(&args).await {
         Ok(x) => x,
         Err(e) => {
             error!("Error loading lua plugins: {e}");
@@ -18,16 +31,26 @@ async fn main() {
         }
     };
 
-    let mut base_options = BasePluginOptions::new();
-    base_options.mode = GameMode::CoopEdit;
+    println!("{config:?}");
+
+    let mut lua_options = LuaPluginOptions::default();
+    lua_options.plugin_directory = config.plugin_dir.clone();
+
+    let lua_plugin = match LuaPlugin::load(&lua_options).await {
+        Ok(x) => x,
+        Err(e) => {
+            error!("Error loading lua plugins: {e}");
+            return;
+        }
+    };
 
     let server = ServerBuilder::new()
-        .bind_addr(([0, 0, 0, 0], 11111))
-        .max_peers(1024)
-        .plugin(BasePlugin::with_options(base_options))
+        .bind_addr(config.bind_addr)
+        .max_peers(config.max_peers)
+        .plugin(BasePlugin::with_options(config.base))
         .plugin(lua_plugin);
 
     if let Err(e) = server.run().await {
-        println!("Error setting up the server: {e}");
+        error!("Error setting up the server: {e}");
     }
 }

@@ -7,6 +7,7 @@ macro_rules! make_enum {
     ) => {
         $(#[$($attr)*])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         #[repr($repr)]
         pub enum $name {
             $( $(#[$($variant_attr)*])* $variant = $num, )+
@@ -80,6 +81,7 @@ macro_rules! make_struct {
     ) => {
         $(#[$($attr)*])*
         #[derive(Debug, Clone, PartialEq)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub struct $name {
             $(
                 $(#[$($variant_attr)*])*
@@ -320,6 +322,7 @@ macro_rules! make_packet_enum {
     ) => {
         $(#[$($attr)*])*
         #[derive(Debug, Clone, PartialEq)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub enum $name {
             $(
                 $(#[$($variant_attr)*])*

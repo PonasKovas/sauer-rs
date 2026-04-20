@@ -1,6 +1,7 @@
 use crate::data::{ItemType, Vec3};
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BaseSpawn {
     /// The ammo type stored at this base, or `None` if the base holds no ammo.
     pub ammotype: Option<ItemType>,

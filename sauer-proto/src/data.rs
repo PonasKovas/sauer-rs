@@ -142,6 +142,7 @@ make_enum!([i32] Privilege {
 // No make_enum! macro for these two because they have some special retarded format on the wire
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i8)]
 pub enum Movement {
     Back = -1,
@@ -150,6 +151,7 @@ pub enum Movement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TryFromPrimitive)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i8)]
 pub enum Strafe {
     Left = -1,

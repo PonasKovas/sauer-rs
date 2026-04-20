@@ -423,6 +423,13 @@ impl Plugin for BasePlugin {
     relay_coop!(replace(channel1::Replace));
     relay_coop!(edit_v_slot(channel1::EditVSlot));
     relay_coop!(flip(channel1::Flip));
+    relay_coop!(edit_var(channel1::EditVar));
+    relay_coop!(edit_mat(channel1::EditMat));
+    relay_coop!(edit_mode(channel1::EditMode));
+    relay_coop!(rotate(channel1::Rotate));
+    relay_coop!(del_cube(channel1::DelCube));
+    relay_coop!(remip(channel1::Remip));
+
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
         if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
             return;
@@ -478,12 +485,6 @@ impl Plugin for BasePlugin {
             });
         }
     }
-    relay_coop!(edit_var(channel1::EditVar));
-    relay_coop!(edit_mat(channel1::EditMat));
-    relay_coop!(edit_mode(channel1::EditMode));
-    relay_coop!(rotate(channel1::Rotate));
-    relay_coop!(del_cube(channel1::DelCube));
-    relay_coop!(remip(channel1::Remip));
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
         // size >= 0 means a new blank map: clear items (no entities to wait for).

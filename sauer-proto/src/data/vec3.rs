@@ -5,6 +5,7 @@ use crate::{
 
 /// 3D Vector
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec3<T> {
     pub x: T,
     pub y: T,

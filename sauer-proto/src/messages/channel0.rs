@@ -30,6 +30,7 @@ make_packet_enum!(
 
 /// `N_POS` Constant physical position updates.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Position {
     pub client_num: u32,
     pub phys_state: PhysState,

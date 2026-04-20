@@ -1,6 +1,7 @@
 use crate::data::Vec3;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FlagState {
     pub version: i32,
     pub spawn_index: i32,
@@ -13,12 +14,14 @@ pub struct FlagState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FlagStateOwner {
     Owned { owner: i32 },
     Dropped { dropped: bool, drop_loc: Vec3<f32> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FlagStateHoldTeam {
     None,
     Team { team: i32, hold_time: i32 },

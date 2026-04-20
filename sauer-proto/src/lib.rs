@@ -31,11 +31,11 @@
 //! packet structs directly -- no need to wrap in the channel enum:
 //!
 //! ```rust
-//! use sauer_proto::{Writer, route::{C2S, Chan1}};
+//! use sauer_proto::{SendMode, Writer, route::{C2S, Chan1}};
 //! use sauer_proto::channel1::Text;
 //! use cube_string::CubeString;
 //!
-//! fn make_chat_packet(text: &str) -> Vec<u8> {
+//! fn make_chat_packet(text: &str) -> (Vec<u8>, SendMode) {
 //!     let mut writer = Writer::<C2S<Chan1>>::new();
 //!     writer.push(&Text {
 //!         text: CubeString::from_str_lossy(text),

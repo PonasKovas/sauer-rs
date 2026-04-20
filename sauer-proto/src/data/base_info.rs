@@ -7,6 +7,7 @@ use crate::{
 use cube_string::CubeString;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BaseInfo {
     /// The ammo type stored at this base, or `None` if the base holds no ammo.
     pub ammotype: Option<ItemType>,

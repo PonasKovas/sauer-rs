@@ -1,6 +1,7 @@
 use crate::internal::{SauerRead, SauerWrite, read_slice};
 
 #[derive(Debug, Clone, PartialEq, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Direction {
     pub yaw: u16,
     pub pitch: i8,

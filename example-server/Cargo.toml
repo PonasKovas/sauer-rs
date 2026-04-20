@@ -5,12 +5,14 @@ edition = "2024"
 
 [dependencies]
 sauer-server.workspace = true
-sauer-base-plugin.workspace = true
+sauer-base-plugin = { workspace = true, features = ["serde"] }
 sauer-proto.workspace = true
 sauer-plugin-lua.workspace = true
 cube-string.workspace = true
 
-tokio.workspace = true
-tokio.features = ["full"]
+tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
-
+toml.workspace = true
+serde = { workspace = true, features = ["derive"] }
+anyhow.workspace = true
+clap = { workspace = true, features = ["derive"] }
