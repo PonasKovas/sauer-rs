@@ -11,11 +11,14 @@ use crate::{
         team::set_team,
     },
 };
+use bytes::Bytes;
+use cube_string::IntoCubeStringLossy;
 use sauer_proto::{
     Client, channel0,
     channel1::{
         self, ClipboardServer, ExplodeFx, RedoServer, ServInfo, ShotFx, SpawnServer, UndoServer,
     },
+    channel2,
     data::{ClientState, GameMode, SetTeamReason},
 };
 use sauer_server::{
@@ -25,6 +28,13 @@ use sauer_server::{
 use tracing::info;
 
 use std::sync::RwLock;
+
+/// Server-wide stored map data uploaded via channel 2.
+pub struct MapData(pub Option<Bytes>);
+
+fn get_map_data(server: &Server) -> &RwLock<MapData> {
+    server.extra.get().expect("MapData not initialized")
+}
 
 mod error;
 pub mod options;
@@ -81,6 +91,7 @@ impl Plugin for BasePlugin {
             .extra
             .insert(RwLock::new(self.initial_options.clone()));
         server.extra.insert(Players::new());
+        server.extra.insert(RwLock::new(MapData(None)));
     }
 
     async fn connected(&self, ctx: &mut Context) {
@@ -320,6 +331,63 @@ impl Plugin for BasePlugin {
         };
         ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
     }
+    async fn map(&self, ctx: &mut Context, data: &Bytes) {
+        let server = ctx.server();
+        let cn = ctx.cn();
+
+        get_map_data(server).write().unwrap().0 = Some(data.clone());
+
+        let name = get_players(server).get(cn).name.clone();
+        info!("[MAP] {name} (cn {cn}) uploaded a new map.");
+
+        server.broadcast_chan1(&channel1::ServMsg {
+            text: format!("[{name} uploaded the map, use \"/getmap\" to receive it]")
+                .lossy_cubestring(),
+        });
+    }
+
+    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+
+        let map_bytes = get_map_data(server).read().unwrap().0.clone();
+        let Some(data) = map_bytes else {
+            return;
+        };
+
+        server.send_chan2(
+            cn,
+            &channel2::SendMap {
+                data: data.to_vec(),
+            },
+        );
+
+        // Resend all players' clipboards so the client has current clipboard
+        // state after loading the fresh map.
+        let players = get_players(server);
+        let clipboard_packets: Vec<(i32, i32, Vec<u8>)> = players
+            .map
+            .iter()
+            .filter(|e| *e.key() != cn)
+            .filter_map(|e| {
+                e.value()
+                    .clipboard
+                    .as_ref()
+                    .map(|cb| (*e.key() as i32, cb.unpack_len, cb.data.clone()))
+            })
+            .collect();
+        for (owner_cn, unpack_len, data) in clipboard_packets {
+            server.send_chan1(
+                cn,
+                &ClipboardServer {
+                    client_num: owner_cn,
+                    unpack_len,
+                    data,
+                },
+            );
+        }
+    }
+
     relay_coop!(edit_tex(channel1::EditTex));
     relay_coop!(edit_face(channel1::EditFace));
     relay_coop!(replace(channel1::Replace));
