@@ -10,7 +10,7 @@ make_packet_enum!(
     /// `N_DEMOPACKET` Demo playback marker.
     [N_DEMOPACKET] DemoPacket,
     /// `N_POS` Constant physical position updates.
-    [N_POS] Position,
+    [N_POS] [RELIABLE false] Position,
     /// `N_TELEPORT` Sent to immediately teleport a player.
     [N_TELEPORT] Teleport,
     /// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
@@ -21,7 +21,7 @@ make_packet_enum!(
 /// Client -> Server (Channel 0)
 [C2S<Chan0>] Chan0Client {
     /// `N_POS` Standard physical position update sent constantly.
-    [N_POS] Position,
+    [N_POS] [RELIABLE false] Position,
     /// `N_TELEPORT` Broadcasts the client teleporting.
     [N_TELEPORT] Teleport,
     /// `N_JUMPPAD` Broadcasts the client hitting a jump pad.

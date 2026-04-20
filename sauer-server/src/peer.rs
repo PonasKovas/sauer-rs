@@ -1,6 +1,5 @@
 //! Networking abstraction module
 
-use enet_rs::SendMode;
 use sauer_proto::{
     Encode, Writer,
     route::{Chan0, Chan1, Chan2, S2C},
@@ -19,33 +18,33 @@ impl Peer {
     pub fn try_send_chan0(&self, pkt: &impl Encode<S2C<Chan0>>) {
         let mut writer = Writer::<S2C<Chan0>>::new();
         writer.push(pkt);
-        let bytes = writer.consume();
+        let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
             channel: sauer_proto::CHANNEL_POSITIONS,
-            mode: SendMode::Unreliable,
+            mode: convert_mode(mode),
         });
     }
 
     pub fn try_send_chan1(&self, pkt: &impl Encode<S2C<Chan1>>) {
         let mut writer = Writer::<S2C<Chan1>>::new();
         writer.push(pkt);
-        let bytes = writer.consume();
+        let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
             channel: sauer_proto::CHANNEL_MESSAGES,
-            mode: SendMode::Reliable,
+            mode: convert_mode(mode),
         });
     }
 
     pub fn try_send_chan2(&self, pkt: &impl Encode<S2C<Chan2>>) {
         let mut writer = Writer::<S2C<Chan2>>::new();
         writer.push(pkt);
-        let bytes = writer.consume();
+        let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
             channel: sauer_proto::CHANNEL_MESSAGES,
-            mode: SendMode::Reliable,
+            mode: convert_mode(mode),
         });
     }
 
@@ -55,5 +54,12 @@ impl Peer {
 
     pub fn addr(&self) -> SocketAddr {
         self.raw.addr()
+    }
+}
+
+fn convert_mode(sauer_proto_mode: sauer_proto::SendMode) -> enet_rs::SendMode {
+    match sauer_proto_mode {
+        sauer_proto::SendMode::Reliable => enet_rs::SendMode::Reliable,
+        sauer_proto::SendMode::Unreliable => enet_rs::SendMode::Unreliable,
     }
 }

@@ -63,7 +63,7 @@ pub use messages::{
 };
 pub use reader::Reader;
 pub use session::Session;
-pub use writer::Writer;
+pub use writer::{SendMode, Writer};
 
 pub use cube_string;
 
@@ -93,6 +93,9 @@ pub trait Encode<R> {
     fn requires_client_wrapper(&self) -> Option<i32> {
         None
     }
+
+    #[doc(hidden)]
+    fn is_reliable(&self) -> bool;
 }
 
 /// Deserialize a packet from wire-format bytes for route `R`.

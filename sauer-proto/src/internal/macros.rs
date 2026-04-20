@@ -185,14 +185,20 @@ macro_rules! make_packet_enum {
     (@is_wrapped ) => { false };
     (@is_wrapped $wrapper:ident) => { true };
 
+    (@is_reliable $reliable:expr ) => { $reliable };
+    (@is_reliable) => { true }; // default
+
 
     // Implementing Encode and Decode for the struct
     ////////////////////////////////////////////////////////////////////
     // 1. Unwrapped Base Struct
-    (@impl_encode_decode $variant:ident, $ROUTE:path , ) => {
+    (@impl_encode_decode $variant:ident, $ROUTE:path, $( [RELIABLE $reliable:expr] )? ) => {
         impl crate::Encode<$ROUTE> for $variant {
             fn encode(&self, out: &mut Vec<u8>) {
                 crate::internal::SauerWrite::sauer_write(self, out);
+            }
+            fn is_reliable(&self) -> bool {
+                make_packet_enum!(@is_reliable $($reliable)? )
             }
         }
         impl crate::Decode<$ROUTE> for $variant {
@@ -206,7 +212,7 @@ macro_rules! make_packet_enum {
     };
 
     // 2. N_CLIENT wrapped Base Struct
-    (@impl_encode_decode $variant:ident, $ROUTE:path, [ N_CLIENT $client_wrapper:ident ] ) => {
+    (@impl_encode_decode $variant:ident, $ROUTE:path, [ N_CLIENT $client_wrapper:ident ] $( [RELIABLE $reliable:expr] )? ) => {
         impl crate::Encode<$ROUTE> for $client_wrapper<$variant> {
             fn encode(&self, out: &mut Vec<u8>) {
                 // Call the private trait, ensuring $variant doesn't need to impl Encode
@@ -214,6 +220,9 @@ macro_rules! make_packet_enum {
             }
             fn requires_client_wrapper(&self) -> Option<i32> {
                 Some(self.client_num)
+            }
+            fn is_reliable(&self) -> bool {
+                make_packet_enum!(@is_reliable $($reliable)? )
             }
         }
         impl crate::Decode<$ROUTE> for $client_wrapper<$variant> {
@@ -237,13 +246,16 @@ macro_rules! make_packet_enum {
     };
 
     // 3. N_CLIENT Wrapped Duplicate Struct (e.g. NewMap)
-    (@impl_encode_decode $variant:ident, $ROUTE:path, [ N_CLIENT $client_wrapper:ident ]  [ DUPLICATE $DUPLICATE_STRUCT:ident ] ) => {
+    (@impl_encode_decode $variant:ident, $ROUTE:path, [ N_CLIENT $client_wrapper:ident ]  [ DUPLICATE $DUPLICATE_STRUCT:ident ] $( [RELIABLE $reliable:expr] )? ) => {
         impl crate::Encode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
             fn encode(&self, out: &mut Vec<u8>) {
                 crate::internal::SauerWrite::sauer_write(&self.packet, out);
             }
             fn requires_client_wrapper(&self) -> Option<i32> {
                 Some(self.client_num)
+            }
+            fn is_reliable(&self) -> bool {
+                make_packet_enum!(@is_reliable $($reliable)? )
             }
         }
         impl crate::Decode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
@@ -266,10 +278,13 @@ macro_rules! make_packet_enum {
     };
 
     // 4. Unwrapped Base struct with UPDATE_SESSION
-    (@impl_encode_decode $variant:ident, $ROUTE:path, [UPDATE_SESSION $update_closure:expr] ) => {
+    (@impl_encode_decode $variant:ident, $ROUTE:path, [UPDATE_SESSION $update_closure:expr] $( [RELIABLE $reliable:expr] )? ) => {
         impl crate::Encode<$ROUTE> for $variant {
             fn encode(&self, out: &mut Vec<u8>) {
                 crate::internal::SauerWrite::sauer_write(self, out);
+            }
+            fn is_reliable(&self) -> bool {
+                make_packet_enum!(@is_reliable $($reliable)? )
             }
         }
         impl crate::Decode<$ROUTE> for $variant {
@@ -297,7 +312,7 @@ macro_rules! make_packet_enum {
         $name:ident {
             $(
                 $(#[$($variant_attr:meta)*])*
-                [$TAG:path] $variant:ident $( [N_CLIENT $client_wrapper:ident] $([DUPLICATE $DUPLICATE_STRUCT:ident])? )?
+                [$TAG:path] $( [RELIABLE $reliable:expr] )? $variant:ident $( [N_CLIENT $client_wrapper:ident] $([DUPLICATE $DUPLICATE_STRUCT:ident])? )?
                 $( [UPDATE_SESSION $update_closure:expr] )?
             ),+
             $(,)?
@@ -330,7 +345,7 @@ macro_rules! make_packet_enum {
 
             make_packet_enum!(@impl_encode_decode $variant, $ROUTE,
                                 $( [N_CLIENT $client_wrapper] $([DUPLICATE $DUPLICATE_STRUCT])? )?
-                                $( [UPDATE_SESSION $update_closure] )?
+                                $( [UPDATE_SESSION $update_closure] )? $( [RELIABLE $reliable] )?
                              );
         };)+
 
@@ -347,6 +362,14 @@ macro_rules! make_packet_enum {
                 match self {
                     $(
                         Self::$variant(v) => crate::Encode::<$ROUTE>::requires_client_wrapper(v),
+                    )+
+                }
+            }
+
+            fn is_reliable(&self) -> bool {
+                match self {
+                    $(
+                        Self::$variant(v) => crate::Encode::<$ROUTE>::is_reliable(v),
                     )+
                 }
             }

@@ -229,14 +229,17 @@ impl Plugin for BasePlugin {
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+        info!("N_POS {} (from {})", packet.client_num, ctx.cn());
         set_position(ctx.server(), ctx.cn(), packet.pos);
         ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
     async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) {
-        ctx.server().broadcast_except_chan0(ctx.cn(), packet);
+        // ctx.server().broadcast_except_chan0(ctx.cn(), packet);
+        ctx.server().broadcast_chan0(packet);
     }
     async fn jumppad(&self, ctx: &mut Context, packet: &channel0::JumpPad) {
-        ctx.server().broadcast_except_chan0(ctx.cn(), packet);
+        // ctx.server().broadcast_except_chan0(ctx.cn(), packet);
+        ctx.server().broadcast_chan0(packet);
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
