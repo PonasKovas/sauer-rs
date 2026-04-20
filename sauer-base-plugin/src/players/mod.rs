@@ -17,11 +17,17 @@ pub struct Players {
     pub(crate) map: DashMap<u32, PlayerData>,
 }
 
-impl Players {
-    pub(crate) fn new() -> Self {
+impl Default for Players {
+    fn default() -> Self {
         Self {
             map: DashMap::new(),
         }
+    }
+}
+
+impl Players {
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 
     pub fn try_get(&self, cn: u32) -> Option<impl Deref<Target = PlayerData> + '_> {

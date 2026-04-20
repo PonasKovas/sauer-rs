@@ -872,7 +872,6 @@ dependencies = [
  "rand",
  "sauer-proto",
  "sauer-server",
- "thiserror",
  "tiger",
  "tokio",
  "tracing",

@@ -15,12 +15,18 @@ pub struct Items {
     pub notgotitems: bool,
 }
 
-impl Items {
-    pub fn new() -> Self {
+impl Default for Items {
+    fn default() -> Self {
         Self {
             list: Vec::new(),
             notgotitems: true,
         }
+    }
+}
+
+impl Items {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn reset(&mut self) {
@@ -113,7 +119,7 @@ fn ammo_current_mut(state: &mut PlayerState, item_type: ItemType) -> &mut i32 {
         ItemType::Rounds => &mut state.ammo.rifle,
         ItemType::Grenades => &mut state.ammo.grenade_launcher,
         ItemType::Cartridges => &mut state.ammo.pistol,
-        _ => panic!("ammo_current_mut called for non-ammo item"),
+        _ => unreachable!("ammo_current_mut called for non-ammo item"),
     }
 }
 

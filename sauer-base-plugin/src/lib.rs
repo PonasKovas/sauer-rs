@@ -38,14 +38,12 @@ fn get_map_data(server: &Server) -> &RwLock<MapData> {
     server.extra.get().expect("MapData not initialized")
 }
 
-mod error;
 pub mod items;
 pub mod options;
 pub mod players;
 mod util;
 mod welcome;
 
-pub use error::BasePluginError;
 pub use welcome::welcome;
 
 pub struct BasePlugin {
@@ -86,6 +84,15 @@ macro_rules! relay_coop {
             ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
         }
     };
+}
+
+/// Returns true if `target_cn` is alive and their life sequence matches `life_sequence`.
+/// Used as an anti-cheat guard: prevents hitting a player who has already respawned.
+fn check_hit(server: &Server, target_cn: u32, life_sequence: i32) -> bool {
+    get_players(server).try_get(target_cn).map_or(false, |p| {
+        p.client_state == ClientState::Alive
+            && matches!(p.state.as_ref(), Some(s) if s.life_sequence == life_sequence)
+    })
 }
 
 impl Plugin for BasePlugin {
@@ -191,25 +198,18 @@ impl Plugin for BasePlugin {
         let server = ctx.server();
 
         let spawned_state = {
-            let mut p = match get_players(server).try_get_mut(cn) {
-                Some(p) => p,
-                None => return,
-            };
+            let Some(mut p) = get_players(server).try_get_mut(cn) else { return };
             if p.client_state != ClientState::Dead {
                 return;
             }
-            if p.state.is_none() {
-                return;
-            }
+            let Some(state) = p.state.as_mut() else { return };
+            // Sync server life_seq to what the client is using — the client
+            // increments it locally before sending N_SPAWN, so we can't
+            // predict it reliably (e.g. when N_TRYSPAWN fires between
+            // welcome's N_SPAWNSTATE and the client's N_SPAWN).
+            state.life_sequence = packet.life_sequence;
+            state.gun_select = packet.gun_select;
             p.client_state = ClientState::Alive;
-            if let Some(s) = p.state.as_mut() {
-                // Sync server life_seq to what the client is using — the client
-                // increments it locally before sending N_SPAWN, so we can't
-                // predict it reliably (e.g. when N_TRYSPAWN fires between
-                // welcome's N_SPAWNSTATE and the client's N_SPAWN).
-                s.life_sequence = packet.life_sequence;
-                s.gun_select = packet.gun_select;
-            }
             p.state.clone()
         };
 
@@ -255,19 +255,9 @@ impl Plugin for BasePlugin {
 
         for hit in &packet.hits {
             let target_cn = hit.target_cn as u32;
-
-            // Validate target is alive and lifesequence matches (anti-cheat: can't hit a respawned player)
-            let life_seq_ok = match get_players(server).try_get(target_cn) {
-                Some(p) => {
-                    p.client_state == ClientState::Alive
-                        && p.state.as_ref().map(|s| s.life_sequence) == Some(hit.life_sequence)
-                }
-                None => false,
-            };
-            if !life_seq_ok {
+            if !check_hit(server, target_cn, hit.life_sequence) {
                 continue;
             }
-
             let damage = hit.rays * gun_damage_per_ray(packet.gun);
             apply_damage(server, target_cn, cn, packet.gun, damage, hit.dir);
         }
@@ -292,20 +282,10 @@ impl Plugin for BasePlugin {
 
         for hit in &packet.hits {
             let target_cn = hit.target_cn as u32;
-
-            let life_seq_ok = match get_players(server).try_get(target_cn) {
-                Some(p) => {
-                    p.client_state == ClientState::Alive
-                        && p.state.as_ref().map(|s| s.life_sequence) == Some(hit.life_sequence)
-                }
-                None => false,
-            };
-            if !life_seq_ok {
+            if !check_hit(server, target_cn, hit.life_sequence) {
                 continue;
             }
-
             let damage = explosion_damage(packet.gun, hit.dist, target_cn == cn);
-
             apply_damage(server, target_cn, cn, packet.gun, damage, hit.dir);
         }
     }
@@ -514,10 +494,7 @@ impl Plugin for BasePlugin {
 
         // Check the player is alive and can pick up the item given their state.
         let can = {
-            let p = match get_players(server).try_get(cn) {
-                Some(p) => p,
-                None => return,
-            };
+            let Some(p) = get_players(server).try_get(cn) else { return };
             if p.client_state != ClientState::Alive {
                 return;
             }

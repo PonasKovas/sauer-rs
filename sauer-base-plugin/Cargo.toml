@@ -15,4 +15,3 @@ p192.workspace = true
 tokio = { workspace = true, features = ["time"] }
 bytes.workspace = true
 tracing.workspace = true
-thiserror.workspace = true

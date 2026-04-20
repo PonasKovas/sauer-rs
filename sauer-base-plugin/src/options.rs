@@ -39,8 +39,5 @@ impl Default for BasePluginOptions {
 }
 
 pub fn get_options(server: &Server) -> &RwLock<BasePluginOptions> {
-    match server.extra.get() {
-        Some(x) => x,
-        None => panic!("BasePluginOptions not initialized"),
-    }
+    server.extra.get().expect("BasePluginOptions not initialized")
 }

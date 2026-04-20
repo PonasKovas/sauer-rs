@@ -59,32 +59,23 @@ pub fn apply_damage(
             .try_get(actor_cn)
             .map_or(1, |p| if p.quad_millis > 0 { 4 } else { 1 });
 
+    let Some(mut p) = get_players(server).try_get_mut(target_cn) else { return };
+    if p.client_state != ClientState::Alive {
+        return;
+    }
+    // Inner block: drops the &mut PlayerState borrow before we write client_state.
     let (health, armour, killed) = {
-        let mut p = match get_players(server).try_get_mut(target_cn) {
-            Some(p) => p,
-            None => return,
-        };
-        if p.client_state != ClientState::Alive {
-            return;
-        }
-        // Nested block so the &mut PlayerState borrow drops before we write client_state
-        let (health, armour, killed) = {
-            let state = match p.state.as_mut() {
-                Some(s) => s,
-                None => return,
-            };
-            // Armour absorbs: blue=25%, green=50%, yellow=75%
-            let absorbed =
-                ((damage * (state.armour_type as i32 + 1) * 25) / 100).min(state.armour);
-            state.armour -= absorbed;
-            state.health -= damage - absorbed;
-            (state.health, state.armour, state.health <= 0)
-        };
-        if killed {
-            p.client_state = ClientState::Dead;
-        }
-        (health, armour, killed)
+        let Some(state) = p.state.as_mut() else { return };
+        // Armour absorbs: blue=25%, green=50%, yellow=75%
+        let absorbed = ((damage * (state.armour_type as i32 + 1) * 25) / 100).min(state.armour);
+        state.armour -= absorbed;
+        state.health -= damage - absorbed;
+        (state.health, state.armour, state.health <= 0)
     };
+    if killed {
+        p.client_state = ClientState::Dead;
+    }
+    drop(p);
 
     server.broadcast_chan1(&Damage {
         target_cn: target_cn as i32,
@@ -107,16 +98,12 @@ pub fn apply_damage(
 
 /// Kill a player by suicide (frags -=1).
 pub fn kill_player(server: &Server, cn: u32) {
-    {
-        let mut p = match get_players(server).try_get_mut(cn) {
-            Some(p) => p,
-            None => return,
-        };
-        if p.client_state != ClientState::Alive {
-            return;
-        }
-        p.client_state = ClientState::Dead;
+    let Some(mut p) = get_players(server).try_get_mut(cn) else { return };
+    if p.client_state != ClientState::Alive {
+        return;
     }
+    p.client_state = ClientState::Dead;
+    drop(p);
     do_kill(server, cn, cn);
 }
 

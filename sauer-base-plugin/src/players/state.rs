@@ -46,17 +46,13 @@ pub fn prepare_spawn(server: &Server, cn: u32) {
     };
 
     let new_state = {
-        let mut p = match get_players(server).try_get_mut(cn) {
-            Some(p) => p,
-            None => return,
-        };
+        let Some(mut p) = get_players(server).try_get_mut(cn) else { return };
         if p.client_state != ClientState::Dead {
             return;
         }
-        let old_seq = match p.state.as_ref() {
-            Some(s) => s.life_sequence,
-            None => return, // not welcomed yet
-        };
+        // Not welcomed yet — state hasn't been initialised.
+        let Some(ref s) = p.state else { return };
+        let old_seq = s.life_sequence;
         let state = make_spawn_state(insta, (old_seq + 1) & 0x7F);
         p.state = Some(state.clone());
         p.quad_millis = 0;

@@ -17,44 +17,35 @@ pub fn welcome(server: &Server, cn: u32) {
 
     server.send_chan1(cn, &Welcome {});
 
-    {
+    // Extract map/item state while holding both locks, then release before sending.
+    let (map_name, mode, notgotitems, spawned_items) = {
         let options = get_options(server).read().unwrap();
         let items = get_items(server).read().unwrap();
-        let has_items = items.notgotitems;
-        server.send_chan1(
-            cn,
-            &MapChange {
-                map_name: options.map.clone(),
-                mode: options.mode,
-                has_items,
-            },
-        );
-        if has_items {
-            server.send_chan1(
-                cn,
-                &ItemList {
-                    items: items.spawned_items(),
-                },
-            );
-        }
+        let notgotitems = items.notgotitems;
+        let spawned = (!notgotitems).then(|| items.spawned_items());
+        (options.map.clone(), options.mode, notgotitems, spawned)
+    };
+
+    server.send_chan1(cn, &MapChange { map_name, mode, has_items: notgotitems });
+    if notgotitems {
+        server.send_chan1(cn, &ItemList { items: spawned_items.unwrap_or_default() });
     }
 
-    // notify existing players of the new player
+    // Notify existing players of the new player.
     {
         let p = get_players(server).get(cn);
-        let (name, player_model, team) = (p.name.clone(), p.model, p.team.clone());
-        drop(p);
         server.broadcast_except_chan1(
             cn,
             &InitClient {
                 client_num: cn as i32,
-                name,
-                player_model,
-                team,
+                name: p.name.clone(),
+                player_model: p.model,
+                team: p.team.clone(),
             },
         );
     }
 
+    // Send the new player a resume snapshot of all existing players.
     {
         let p = get_players(server);
         server.send_chan1(
@@ -63,12 +54,11 @@ pub fn welcome(server: &Server, cn: u32) {
                 clients: server
                     .client_cns()
                     .into_iter()
-                    .filter(|other_cn| *other_cn != cn)
-                    .filter_map(|cn| {
-                        let p = p.get(cn);
-
+                    .filter(|&other| other != cn)
+                    .filter_map(|other| {
+                        let p = p.get(other);
                         p.state.clone().map(|player_state| ClientResumeState {
-                            client_num: cn as i32,
+                            client_num: other as i32,
                             state: p.client_state,
                             frags: p.frags,
                             flags: 0, // TODO
@@ -82,43 +72,25 @@ pub fn welcome(server: &Server, cn: u32) {
         );
     }
 
-    // notify the new player of existing players
-    for other_cn in server.client_cns() {
-        if other_cn == cn {
-            continue;
-        }
+    // Introduce all existing players to the new player and send their clipboards
+    // in a single pass so we only iterate client_cns() once.
+    for other_cn in server.client_cns().into_iter().filter(|&other| other != cn) {
         let p = get_players(server).get(other_cn);
-        let (name, player_model, team) = (p.name.clone(), p.model, p.team.clone());
+        let name = p.name.clone();
+        let player_model = p.model;
+        let team = p.team.clone();
+        let clipboard = p.clipboard.as_ref().map(|cb| ClipboardServer {
+            client_num: other_cn as i32,
+            unpack_len: cb.unpack_len,
+            data: cb.data.clone(),
+        });
         drop(p);
-        server.send_chan1(
-            cn,
-            &InitClient {
-                client_num: other_cn as i32,
-                name,
-                player_model,
-                team,
-            },
-        );
+
+        server.send_chan1(cn, &InitClient { client_num: other_cn as i32, name, player_model, team });
+        if let Some(cb) = clipboard {
+            server.send_chan1(cn, &cb);
+        }
     }
 
     broadcast_spawn_state(server, cn);
-
-    // Send each existing player's clipboard to the newly connected client
-    // so they have the current clipboard state for coop editing.
-    for other_cn in server.client_cns() {
-        if other_cn == cn {
-            continue;
-        }
-        let p = get_players(server).get(other_cn);
-        if let Some(cb) = p.clipboard.as_ref() {
-            server.send_chan1(
-                cn,
-                &ClipboardServer {
-                    client_num: other_cn as i32,
-                    unpack_len: cb.unpack_len,
-                    data: cb.data.clone(),
-                },
-            );
-        }
-    }
 }

@@ -43,5 +43,6 @@ pub fn count_players_in(server: &Server, team: &CubeStr) -> u32 {
     get_players(server)
         .map
         .iter()
-        .fold(0, |acc, entry| if &entry.team == team { acc + 1 } else { acc })
+        .filter(|entry| &entry.team == team)
+        .count() as u32
 }
