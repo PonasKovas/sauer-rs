@@ -179,13 +179,16 @@ impl Plugin for BasePlugin {
             }
         }
 
-        server.broadcast_chan1(&ShotFx {
-            client_num: cn as i32,
-            gun: packet.gun,
-            id: packet.id,
-            from: packet.from,
-            to: packet.to,
-        });
+        server.broadcast_except_chan1(
+            cn,
+            &ShotFx {
+                client_num: cn as i32,
+                gun: packet.gun,
+                id: packet.id,
+                from: packet.from,
+                to: packet.to,
+            },
+        );
 
         for hit in &packet.hits {
             let target_cn = hit.target_cn as u32;
@@ -245,7 +248,6 @@ impl Plugin for BasePlugin {
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
-        info!("N_POS {} (from {})", packet.client_num, ctx.cn());
         set_position(ctx.server(), ctx.cn(), packet.pos);
         ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
