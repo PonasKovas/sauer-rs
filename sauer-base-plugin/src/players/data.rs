@@ -1,6 +1,13 @@
 use cube_string::CubeString;
 use sauer_proto::data::{ClientState, PlayerModel, PlayerState, Vec3};
 
+/// Stored clipboard geometry data for coop edit clipboard relay.
+#[derive(Clone, Debug)]
+pub struct ClipboardData {
+    pub unpack_len: i32,
+    pub data: Vec<u8>,
+}
+
 #[derive(Clone, Debug)]
 pub struct PlayerData {
     pub session_id: i32,
@@ -12,6 +19,8 @@ pub struct PlayerData {
     pub position: Vec3<f32>,
     pub frags: i32,
     pub deaths: i32,
+    /// Compressed clipboard geometry, set when N_CLIPBOARD is received.
+    pub clipboard: Option<ClipboardData>,
 }
 
 impl PlayerData {
@@ -26,6 +35,7 @@ impl PlayerData {
             position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
             frags: 0,
             deaths: 0,
+            clipboard: None,
         }
     }
 }

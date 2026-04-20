@@ -1,7 +1,7 @@
 use crate::{
     options::{BasePluginOptions, get_options},
     players::{
-        Players, clear_player,
+        ClipboardData, Players, clear_player,
         combat::{apply_damage, explosion_damage, gun_damage_per_ray, kill_player},
         get_players, init_player,
         model::{init_model, set_model},
@@ -13,7 +13,9 @@ use crate::{
 };
 use sauer_proto::{
     Client, channel0,
-    channel1::{self, ExplodeFx, RedoServer, ServInfo, ShotFx, SpawnServer, UndoServer},
+    channel1::{
+        self, ClipboardServer, ExplodeFx, RedoServer, ServInfo, ShotFx, SpawnServer, UndoServer,
+    },
     data::{ClientState, GameMode, SetTeamReason},
 };
 use sauer_server::{
@@ -355,5 +357,80 @@ impl Plugin for BasePlugin {
             data: packet.data.clone(),
         };
         ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
+    }
+
+    async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
+        if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+            return;
+        }
+
+        // Clear any stored clipboard for this player — they are starting a new copy.
+        if let Some(mut p) = get_players(ctx.server()).try_get_mut(ctx.cn()) {
+            p.clipboard = None;
+        }
+
+        ctx.server().broadcast_except_chan1(
+            ctx.cn(),
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: channel1::CopyServer {
+                    sel: packet.sel.clone(),
+                },
+            },
+        );
+    }
+
+    async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
+        if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+            return;
+        }
+
+        ctx.server().broadcast_except_chan1(
+            ctx.cn(),
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: channel1::PasteServer {
+                    sel: packet.sel.clone(),
+                },
+            },
+        );
+    }
+
+    async fn clipboard(&self, ctx: &mut Context, packet: &channel1::ClipboardClient) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+
+        let is_spectator = get_players(server)
+            .try_get(cn)
+            .map_or(false, |p| p.client_state == ClientState::Spectator);
+        if is_spectator {
+            return;
+        }
+
+        let pack_len = packet.data.len();
+        if pack_len == 0 || pack_len > (1 << 16) || packet.unpack_len <= 0 {
+            if let Some(mut p) = get_players(server).try_get_mut(cn) {
+                p.clipboard = None;
+            }
+            return;
+        }
+
+        // Store the clipboard and broadcast it to all other clients so they
+        // can paste from this player's clipboard immediately.
+        if let Some(mut p) = get_players(server).try_get_mut(cn) {
+            p.clipboard = Some(ClipboardData {
+                unpack_len: packet.unpack_len,
+                data: packet.data.clone(),
+            });
+        }
+
+        server.broadcast_except_chan1(
+            cn,
+            &ClipboardServer {
+                client_num: cn as i32,
+                unpack_len: packet.unpack_len,
+                data: packet.data.clone(),
+            },
+        );
     }
 }

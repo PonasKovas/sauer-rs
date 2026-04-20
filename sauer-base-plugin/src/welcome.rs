@@ -4,7 +4,7 @@ use crate::{
     util::broadcast_spawn_state,
 };
 use sauer_proto::{
-    channel1::{InitClient, MapChange, Resume, Welcome},
+    channel1::{ClipboardServer, InitClient, MapChange, Resume, Welcome},
     data::ClientResumeState,
 };
 use sauer_server::Server;
@@ -91,4 +91,23 @@ pub fn welcome(server: &Server, cn: u32) {
     }
 
     broadcast_spawn_state(server, cn);
+
+    // Send each existing player's clipboard to the newly connected client
+    // so they have the current clipboard state for coop editing.
+    for other_cn in server.client_cns() {
+        if other_cn == cn {
+            continue;
+        }
+        let p = get_players(server).get(other_cn);
+        if let Some(cb) = p.clipboard.as_ref() {
+            server.send_chan1(
+                cn,
+                &ClipboardServer {
+                    client_num: other_cn as i32,
+                    unpack_len: cb.unpack_len,
+                    data: cb.data.clone(),
+                },
+            );
+        }
+    }
 }

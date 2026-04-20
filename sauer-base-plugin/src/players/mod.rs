@@ -11,7 +11,7 @@ pub mod position;
 pub mod state;
 pub mod team;
 
-pub use data::PlayerData;
+pub use data::{ClipboardData, PlayerData};
 
 pub struct Players {
     pub(crate) map: DashMap<u32, PlayerData>,
