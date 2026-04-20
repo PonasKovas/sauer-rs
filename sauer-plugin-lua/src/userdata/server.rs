@@ -220,13 +220,10 @@ impl UserData for LuaServer {
         add_send!("send_gun_select", channel1::Client::<channel1::GunSelect>);
         add_send!("send_taunt", channel1::Client::<channel1::Taunt>);
         add_send!("send_remip", channel1::Client::<channel1::Remip>);
-        add_send!("send_edit_ent", channel1::Client::<channel1::EditEntServer>);
+        add_send!("send_edit_ent", channel1::Client::<channel1::EditEnt>);
         add_send!("send_edit_var", channel1::Client::<channel1::EditVar>);
         add_send!("send_client_ping", channel1::Client::<channel1::ClientPing>);
-        add_send!(
-            "send_edit_mode",
-            channel1::Client::<channel1::EditModeServer>
-        );
+        add_send!("send_edit_mode", channel1::Client::<channel1::EditMode>);
         add_send!("send_edit_face", channel1::Client::<channel1::EditFace>);
         add_send!("send_edit_tex", channel1::Client::<channel1::EditTex>);
         add_send!("send_edit_mat", channel1::Client::<channel1::EditMat>);
@@ -319,10 +316,7 @@ impl UserData for LuaServer {
         );
         add_broadcast!("broadcast_taunt", channel1::Client::<channel1::Taunt>);
         add_broadcast!("broadcast_remip", channel1::Client::<channel1::Remip>);
-        add_broadcast!(
-            "broadcast_edit_ent",
-            channel1::Client::<channel1::EditEntServer>
-        );
+        add_broadcast!("broadcast_edit_ent", channel1::Client::<channel1::EditEnt>);
         add_broadcast!("broadcast_edit_var", channel1::Client::<channel1::EditVar>);
         add_broadcast!(
             "broadcast_client_ping",
@@ -330,7 +324,7 @@ impl UserData for LuaServer {
         );
         add_broadcast!(
             "broadcast_edit_mode",
-            channel1::Client::<channel1::EditModeServer>
+            channel1::Client::<channel1::EditMode>
         );
         add_broadcast!(
             "broadcast_edit_face",

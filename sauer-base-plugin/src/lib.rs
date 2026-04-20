@@ -13,8 +13,8 @@ use crate::{
 };
 use sauer_proto::{
     Client, channel0,
-    channel1::{self, ExplodeFx, ServInfo, ShotFx, SpawnServer},
-    data::{ClientState, SetTeamReason},
+    channel1::{self, ExplodeFx, RedoServer, ServInfo, ShotFx, SpawnServer, UndoServer},
+    data::{ClientState, GameMode, SetTeamReason},
 };
 use sauer_server::{
     Server,
@@ -55,6 +55,22 @@ impl Default for BasePlugin {
     fn default() -> Self {
         Self::new()
     }
+}
+
+macro_rules! relay_coop {
+    ($callback:ident ($struct:path)) => {
+        async fn $callback(&self, ctx: &mut Context, packet: &$struct) {
+            if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+                return;
+            }
+
+            let packet = Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            };
+            ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
+        }
+    };
 }
 
 impl Plugin for BasePlugin {
@@ -297,6 +313,44 @@ impl Plugin for BasePlugin {
         let packet = Client {
             client_num: ctx.cn() as i32,
             packet: packet.clone(),
+        };
+        ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
+    }
+    relay_coop!(edit_tex(channel1::EditTex));
+    relay_coop!(edit_face(channel1::EditFace));
+    relay_coop!(replace(channel1::Replace));
+    relay_coop!(edit_v_slot(channel1::EditVSlot));
+    relay_coop!(flip(channel1::Flip));
+    relay_coop!(edit_ent(channel1::EditEnt));
+    relay_coop!(edit_var(channel1::EditVar));
+    relay_coop!(edit_mat(channel1::EditMat));
+    relay_coop!(edit_mode(channel1::EditMode));
+    relay_coop!(rotate(channel1::Rotate));
+    relay_coop!(del_cube(channel1::DelCube));
+    relay_coop!(remip(channel1::Remip));
+    relay_coop!(new_map(channel1::NewMap));
+
+    async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
+        if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+            return;
+        }
+
+        let packet = UndoServer {
+            client_num: ctx.cn() as i32,
+            unpack_len: packet.unpack_len,
+            data: packet.data.clone(),
+        };
+        ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
+    }
+    async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
+        if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+            return;
+        }
+
+        let packet = RedoServer {
+            client_num: ctx.cn() as i32,
+            unpack_len: packet.unpack_len,
+            data: packet.data.clone(),
         };
         ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
     }

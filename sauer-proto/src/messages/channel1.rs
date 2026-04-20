@@ -87,10 +87,10 @@ make_packet_enum!(
     [N_GUNSELECT] GunSelect [N_CLIENT Client],
     [N_TAUNT] Taunt [N_CLIENT Client],
     [N_REMIP] Remip [N_CLIENT Client],
-    [N_EDITENT] EditEntServer [N_CLIENT Client],
+    [N_EDITENT] EditEnt [N_CLIENT Client],
     [N_EDITVAR] EditVar [N_CLIENT Client],
     [N_CLIENTPING] [RELIABLE false] ClientPing [N_CLIENT Client],
-    [N_EDITMODE] EditModeServer [N_CLIENT Client],
+    [N_EDITMODE] EditMode [N_CLIENT Client],
     [N_EDITF] EditFace [N_CLIENT Client],
     [N_EDITT] EditTex [N_CLIENT Client],
     [N_EDITM] EditMat [N_CLIENT Client],
@@ -112,7 +112,7 @@ make_packet_enum!(
     [N_PING] [RELIABLE false] Ping,
     [N_FROMAI] FromAi,
     [N_SOUND] Sound,
-    [N_EDITMODE] EditModeClient,
+    [N_EDITMODE] EditMode,
     [N_MAPCRC] MapCrc,
     [N_CHECKMAPS] CheckMaps,
     [N_TRYSPAWN] TrySpawn,
@@ -129,7 +129,7 @@ make_packet_enum!(
     [N_SWITCHTEAM] SwitchTeam,
     [N_MAPVOTE] MapVote,
     [N_ITEMLIST] ItemList,
-    [N_EDITENT] EditEntClient,
+    [N_EDITENT] EditEnt,
     [N_EDITVAR] EditVar,
     [N_CLIENTPING] ClientPing,
     [N_MASTERMODE] MasterModeClient,
@@ -403,6 +403,25 @@ make_struct!(
 /// `N_SERVCMD` Raw server command.
 [N_SERVCMD] ServCmd {
     cmd: CubeString,
+});
+
+make_struct!(
+/// `N_EDITENT` Coop Edit: Modification of map entities.
+[N_EDITENT] EditEnt {
+    ent_id: i32,
+    pos: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
+    type_: EntityType,
+    attr1: i32,
+    attr2: i32,
+    attr3: i32,
+    attr4: i32,
+    attr5: i32,
+});
+
+make_struct!(
+/// `N_EDITMODE` Notifies that a player entered or left Edit Mode.
+[N_EDITMODE] EditMode {
+    is_editing: bool,
 });
 
 // =====================================================================
@@ -973,25 +992,6 @@ make_struct!(
 );
 
 make_struct!(
-/// `N_EDITENT` Coop Edit: Modification of map entities.
-[N_EDITENT] EditEntServer {
-    ent_id: i32,
-    pos: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
-    type_: EntityType,
-    attr1: i32,
-    attr2: i32,
-    attr3: i32,
-    attr4: i32,
-    attr5: i32,
-});
-
-make_struct!(
-/// `N_EDITMODE` Notifies that a player entered or left Edit Mode.
-[N_EDITMODE] EditModeServer {
-    is_editing: bool,
-});
-
-make_struct!(
 /// `N_COPY` Coop Edit: Copy geometry.
 [N_COPY] CopyServer {
     sel: SelInfo,
@@ -1035,12 +1035,6 @@ make_struct!(
 /// `N_FROMAI` Alters the context of subsequent messages in the packet to act as if they came from the specified AI bot.
 [N_FROMAI] FromAi {
     qcn: i32,
-});
-
-make_struct!(
-/// `N_EDITMODE` The client toggled cooperative edit mode locally.
-[N_EDITMODE] EditModeClient {
-    val: bool,
 });
 
 make_struct!(
@@ -1114,21 +1108,6 @@ make_struct!(
 [N_MAPVOTE] MapVote {
     map_name: CubeString,
     mode: GameMode,
-});
-
-make_struct!(
-/// `N_EDITENT` Coop Edit: A map entity was modified.
-[N_EDITENT] EditEntClient {
-    ent_id: i32,
-    x: i32,
-    y: i32,
-    z: i32,
-    type_: EntityType,
-    attr1: i32,
-    attr2: i32,
-    attr3: i32,
-    attr4: i32,
-    attr5: i32,
 });
 
 make_struct!(
