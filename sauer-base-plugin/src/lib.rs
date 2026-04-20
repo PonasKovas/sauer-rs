@@ -1,5 +1,8 @@
 use crate::{
-    items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, get_items, spawntime},
+    items::{
+        Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, get_items,
+        spawntime,
+    },
     options::{BasePluginOptions, get_options},
     players::{
         ClipboardData, Players, clear_player,
@@ -108,8 +111,7 @@ impl Plugin for BasePlugin {
     async fn start(&self, server: &std::sync::Arc<Server>) {
         let server = server.clone();
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_millis(100));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
             loop {
                 interval.tick().await;
                 // Tick item respawn timers and broadcast N_ITEMSPAWN for any that fired.
@@ -198,11 +200,15 @@ impl Plugin for BasePlugin {
         let server = ctx.server();
 
         let spawned_state = {
-            let Some(mut p) = get_players(server).try_get_mut(cn) else { return };
+            let Some(mut p) = get_players(server).try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Dead {
                 return;
             }
-            let Some(state) = p.state.as_mut() else { return };
+            let Some(state) = p.state.as_mut() else {
+                return;
+            };
             // Sync server life_seq to what the client is using — the client
             // increments it locally before sending N_SPAWN, so we can't
             // predict it reliably (e.g. when N_TRYSPAWN fires between
@@ -302,22 +308,16 @@ impl Plugin for BasePlugin {
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
-        let mut packet = packet.clone();
-
-        packet.text = packet.text.filter(cube_string::FilterOptions {
-            strip_colors: true,
-            preserve_whitespace: true,
-            collapse_spaces: true,
-            max_len: Some(5000),
-        });
-
         let name = get_players(ctx.server()).get(ctx.cn()).name.clone();
         info!("[CHAT] {name}: {}", packet.text);
 
-        ctx.server().broadcast_chan1(&Client {
-            client_num: ctx.cn() as i32,
-            packet,
-        });
+        ctx.server().broadcast_except_chan1(
+            ctx.cn(),
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
+        );
     }
     async fn switch_name(&self, ctx: &mut Context, packet: &channel1::SwitchName) {
         set_name(ctx.server(), ctx.cn(), packet.name.clone());
@@ -473,7 +473,9 @@ impl Plugin for BasePlugin {
         // item slot is now spawned so they render it as a live pickup.
         if item_placed {
             get_items(ctx.server()).write().unwrap().list[idx].spawned = true;
-            ctx.server().broadcast_chan1(&ItemSpawn { item_index: idx as i32 });
+            ctx.server().broadcast_chan1(&ItemSpawn {
+                item_index: idx as i32,
+            });
         }
     }
     relay_coop!(edit_var(channel1::EditVar));
@@ -546,7 +548,9 @@ impl Plugin for BasePlugin {
 
         // Check the player is alive and can pick up the item given their state.
         let can = {
-            let Some(p) = get_players(server).try_get(cn) else { return };
+            let Some(p) = get_players(server).try_get(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Alive {
                 return;
             }
@@ -557,12 +561,20 @@ impl Plugin for BasePlugin {
                     .unwrap()
                     .list
                     .get(idx)
-                    .map_or(false, |item| item.spawned && canpickup(s, quad_millis, item.item_type))
+                    .map_or(false, |item| {
+                        item.spawned && canpickup(s, quad_millis, item.item_type)
+                    })
             })
         };
 
         if !can {
-            server.send_chan1(cn, &ItemAck { item_index: packet.item_index, client_num: -1 });
+            server.send_chan1(
+                cn,
+                &ItemAck {
+                    item_index: packet.item_index,
+                    client_num: -1,
+                },
+            );
             return;
         }
 

@@ -20,11 +20,10 @@
 //! }
 //! ```
 
-use core::ops::Deref;
-
 use crate::raw::COLOR_ESCAPE;
 use crate::str::CubeStr;
 use crate::Color;
+use core::ops::Deref;
 
 fn cube_str_from_bytes(bytes: &[u8]) -> &CubeStr {
     zerocopy::transmute_ref!(bytes)

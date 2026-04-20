@@ -14,6 +14,8 @@
 //! }
 //! ```
 
+use crate::raw::{self, COLOR_ESCAPE};
+use crate::{ColorSegment, ColorSegments, CubeString};
 use alloc::borrow::ToOwned;
 use alloc::string::String;
 use core::fmt;
@@ -21,9 +23,6 @@ use core::hash::Hash;
 use core::ops::{
     Deref, Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
-
-use crate::raw::{self, COLOR_ESCAPE};
-use crate::{ColorSegment, ColorSegments, CubeString};
 
 /// A borrowed string for cube engine character encoding.
 ///
@@ -163,8 +162,7 @@ impl CubeStr {
 
     /// Removes all color escape sequences from this string.
     ///
-    /// Returns a new `CubeString` containing only the printable characters
-    /// from this string.
+    /// Returns a new `CubeString`.
     ///
     /// # Example
     ///
@@ -197,13 +195,6 @@ impl CubeStr {
         result
     }
 
-    /// Filters the text in this string according to the given options.
-    ///
-    /// See [`FilterOptions`](crate::FilterOptions) for available options.
-    pub fn filter(&self, options: crate::FilterOptions) -> CubeString {
-        crate::filter::filter_text(&self.0, options)
-    }
-
     /// Returns an iterator over the color segments of this string.
     ///
     /// A color segment is a slice of text with an associated color.
@@ -229,9 +220,9 @@ impl CubeStr {
                     break;
                 }
             }
-            if let Some(c) = raw::cube2uni(byte) {
-                result.push(c);
-            }
+
+            result.push(raw::cube2uni(byte));
+
             i += 1;
         }
         result
