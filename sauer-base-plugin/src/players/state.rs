@@ -59,6 +59,7 @@ pub fn prepare_spawn(server: &Server, cn: u32) {
         };
         let state = make_spawn_state(insta, (old_seq + 1) & 0x7F);
         p.state = Some(state.clone());
+        p.quad_millis = 0;
         state
     };
 

@@ -1,4 +1,5 @@
 use crate::{
+    items::{Items, apply_pickup, canpickup, delay_spawn, get_items, spawntime},
     options::{BasePluginOptions, get_options},
     players::{
         ClipboardData, Players, clear_player,
@@ -16,7 +17,8 @@ use cube_string::IntoCubeStringLossy;
 use sauer_proto::{
     Client, channel0,
     channel1::{
-        self, ClipboardServer, ExplodeFx, RedoServer, ServInfo, ShotFx, SpawnServer, UndoServer,
+        self, ClipboardServer, ExplodeFx, ItemAck, ItemSpawn, RedoServer, ServInfo, ShotFx,
+        SpawnServer, UndoServer,
     },
     channel2,
     data::{ClientState, GameMode, SetTeamReason},
@@ -37,6 +39,7 @@ fn get_map_data(server: &Server) -> &RwLock<MapData> {
 }
 
 mod error;
+pub mod items;
 pub mod options;
 pub mod players;
 mod util;
@@ -92,6 +95,53 @@ impl Plugin for BasePlugin {
             .insert(RwLock::new(self.initial_options.clone()));
         server.extra.insert(Players::new());
         server.extra.insert(RwLock::new(MapData(None)));
+        server.extra.insert(RwLock::new(Items::new()));
+    }
+
+    async fn start(&self, server: &std::sync::Arc<Server>) {
+        let server = server.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_millis(100));
+            loop {
+                interval.tick().await;
+                // Tick item respawn timers and broadcast N_ITEMSPAWN for any that fired.
+                // Decrement quad timers for all players.
+                for mut entry in get_players(&server).map.iter_mut() {
+                    if entry.quad_millis > 0 {
+                        entry.quad_millis = (entry.quad_millis - 100).max(0);
+                    }
+                }
+
+                let spawning: Vec<usize> = {
+                    let mut items = get_items(&server).write().unwrap();
+                    if items.notgotitems {
+                        continue;
+                    }
+                    items
+                        .list
+                        .iter_mut()
+                        .enumerate()
+                        .filter(|(_, item)| item.spawn_time_ms > 0)
+                        .filter_map(|(i, item)| {
+                            item.spawn_time_ms -= 100;
+                            if item.spawn_time_ms <= 0 {
+                                item.spawn_time_ms = 0;
+                                item.spawned = true;
+                                Some(i)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
+                for i in spawning {
+                    server.broadcast_chan1(&ItemSpawn {
+                        item_index: i as i32,
+                    });
+                }
+            }
+        });
     }
 
     async fn connected(&self, ctx: &mut Context) {
@@ -400,7 +450,115 @@ impl Plugin for BasePlugin {
     relay_coop!(rotate(channel1::Rotate));
     relay_coop!(del_cube(channel1::DelCube));
     relay_coop!(remip(channel1::Remip));
-    relay_coop!(new_map(channel1::NewMap));
+
+    async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
+        // size >= 0 means a new blank map: clear items (no entities to wait for).
+        if packet.size >= 0 {
+            let mut items = get_items(ctx.server()).write().unwrap();
+            items.reset();
+            items.notgotitems = false;
+        }
+        if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {
+            return;
+        }
+        ctx.server().broadcast_except_chan1(
+            ctx.cn(),
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
+        );
+    }
+
+    async fn item_list(&self, ctx: &mut Context, packet: &channel1::ItemList) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+
+        let is_spectator = get_players(server)
+            .try_get(cn)
+            .map_or(false, |p| p.client_state == ClientState::Spectator);
+
+        {
+            let mut items = get_items(server).write().unwrap();
+            if !items.notgotitems || is_spectator {
+                return;
+            }
+            let num_players = server.client_cns().len();
+            for item in &packet.items {
+                let idx = item.item_index as usize;
+                while items.list.len() <= idx {
+                    // placeholder; type will be set below
+                    items.list.push(items::ServerItem {
+                        item_type: item.item_type,
+                        spawned: false,
+                        spawn_time_ms: 0,
+                    });
+                }
+                items.list[idx].item_type = item.item_type;
+                if delay_spawn(item.item_type) {
+                    items.list[idx].spawn_time_ms = spawntime(item.item_type, num_players);
+                    items.list[idx].spawned = false;
+                } else {
+                    items.list[idx].spawned = true;
+                    items.list[idx].spawn_time_ms = 0;
+                }
+            }
+            items.notgotitems = false;
+        }
+    }
+
+    async fn item_pickup(&self, ctx: &mut Context, packet: &channel1::ItemPickup) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+        let idx = packet.item_index as usize;
+
+        // Check the player is alive and can pick up the item given their state.
+        let can = {
+            let p = match get_players(server).try_get(cn) {
+                Some(p) => p,
+                None => return,
+            };
+            if p.client_state != ClientState::Alive {
+                return;
+            }
+            let quad_millis = p.quad_millis;
+            p.state.as_ref().map_or(false, |s| {
+                get_items(server)
+                    .read()
+                    .unwrap()
+                    .list
+                    .get(idx)
+                    .map_or(false, |item| item.spawned && canpickup(s, quad_millis, item.item_type))
+            })
+        };
+
+        if !can {
+            server.send_chan1(cn, &ItemAck { item_index: packet.item_index, client_num: -1 });
+            return;
+        }
+
+        let num_players = server.client_cns().len();
+        let item_type = {
+            let mut items = get_items(server).write().unwrap();
+            let item = &mut items.list[idx];
+            item.spawned = false;
+            item.spawn_time_ms = spawntime(item.item_type, num_players);
+            item.item_type
+        };
+
+        if let Some(mut p) = get_players(server).try_get_mut(cn) {
+            let mut quad = p.quad_millis;
+            if let Some(state) = p.state.as_mut() {
+                apply_pickup(state, &mut quad, item_type);
+            }
+            p.quad_millis = quad;
+        }
+
+        server.broadcast_chan1(&ItemAck {
+            item_index: packet.item_index,
+            client_num: cn as i32,
+        });
+    }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
         if get_options(ctx.server()).read().unwrap().mode != GameMode::CoopEdit {

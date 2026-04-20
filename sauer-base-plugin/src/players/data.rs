@@ -21,6 +21,8 @@ pub struct PlayerData {
     pub deaths: i32,
     /// Compressed clipboard geometry, set when N_CLIPBOARD is received.
     pub clipboard: Option<ClipboardData>,
+    /// Remaining quad damage milliseconds. Decremented each server tick.
+    pub quad_millis: i32,
 }
 
 impl PlayerData {
@@ -36,6 +38,7 @@ impl PlayerData {
             frags: 0,
             deaths: 0,
             clipboard: None,
+            quad_millis: 0,
         }
     }
 }

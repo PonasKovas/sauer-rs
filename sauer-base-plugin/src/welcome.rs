@@ -1,10 +1,11 @@
 use crate::{
+    items::get_items,
     options::get_options,
     players::{get_players, state::set_initial_state, team::set_initial_team},
     util::broadcast_spawn_state,
 };
 use sauer_proto::{
-    channel1::{ClipboardServer, InitClient, MapChange, Resume, Welcome},
+    channel1::{ClipboardServer, InitClient, ItemList, MapChange, Resume, Welcome},
     data::ClientResumeState,
 };
 use sauer_server::Server;
@@ -18,14 +19,24 @@ pub fn welcome(server: &Server, cn: u32) {
 
     {
         let options = get_options(server).read().unwrap();
+        let items = get_items(server).read().unwrap();
+        let has_items = items.notgotitems;
         server.send_chan1(
             cn,
             &MapChange {
                 map_name: options.map.clone(),
                 mode: options.mode,
-                has_items: false, // TODO
+                has_items,
             },
         );
+        if has_items {
+            server.send_chan1(
+                cn,
+                &ItemList {
+                    items: items.spawned_items(),
+                },
+            );
+        }
     }
 
     // notify existing players of the new player

@@ -53,6 +53,12 @@ pub fn apply_damage(
     damage: i32,
     dir: Vec3<f32>,
 ) {
+    // Apply quad damage multiplier from the attacker.
+    let damage = damage
+        * get_players(server)
+            .try_get(actor_cn)
+            .map_or(1, |p| if p.quad_millis > 0 { 4 } else { 1 });
+
     let (health, armour, killed) = {
         let mut p = match get_players(server).try_get_mut(target_cn) {
             Some(p) => p,
