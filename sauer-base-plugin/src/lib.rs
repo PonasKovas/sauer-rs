@@ -234,12 +234,10 @@ impl Plugin for BasePlugin {
         ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
     async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) {
-        // ctx.server().broadcast_except_chan0(ctx.cn(), packet);
-        ctx.server().broadcast_chan0(packet);
+        ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
     async fn jumppad(&self, ctx: &mut Context, packet: &channel0::JumpPad) {
-        // ctx.server().broadcast_except_chan0(ctx.cn(), packet);
-        ctx.server().broadcast_chan0(packet);
+        ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
@@ -287,5 +285,19 @@ impl Plugin for BasePlugin {
                 packet: packet.clone(),
             },
         );
+    }
+    async fn taunt(&self, ctx: &mut Context, packet: &channel1::Taunt) {
+        let packet = Client {
+            client_num: ctx.cn() as i32,
+            packet: packet.clone(),
+        };
+        ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
+    }
+    async fn sound(&self, ctx: &mut Context, packet: &channel1::Sound) {
+        let packet = Client {
+            client_num: ctx.cn() as i32,
+            packet: packet.clone(),
+        };
+        ctx.server().broadcast_except_chan1(ctx.cn(), &packet);
     }
 }
