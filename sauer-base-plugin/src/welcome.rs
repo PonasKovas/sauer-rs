@@ -1,13 +1,12 @@
 use crate::{
     options::get_options,
-    players::{
-        get_players,
-        state::set_initial_state,
-        team::set_initial_team,
-    },
+    players::{get_players, state::set_initial_state, team::set_initial_team},
     util::broadcast_spawn_state,
 };
-use sauer_proto::channel1::{InitClient, MapChange, Welcome};
+use sauer_proto::{
+    channel1::{InitClient, MapChange, Resume, Welcome},
+    data::ClientResumeState,
+};
 use sauer_server::Server;
 
 /// Sends a `N_WELCOME` packet and so on, only call this if you disabled instant welcome in [`BasePluginOptions`]
@@ -41,6 +40,33 @@ pub fn welcome(server: &Server, cn: u32) {
                 name,
                 player_model,
                 team,
+            },
+        );
+    }
+
+    {
+        let p = get_players(server);
+        server.send_chan1(
+            cn,
+            &Resume {
+                clients: server
+                    .client_cns()
+                    .into_iter()
+                    .filter(|other_cn| *other_cn != cn)
+                    .filter_map(|cn| {
+                        let p = p.get(cn);
+
+                        p.state.clone().map(|player_state| ClientResumeState {
+                            client_num: cn as i32,
+                            state: p.client_state,
+                            frags: p.frags,
+                            flags: 0, // TODO
+                            deaths: p.deaths,
+                            quad_millis: 0, // TODO
+                            player_state,
+                        })
+                    })
+                    .collect(),
             },
         );
     }

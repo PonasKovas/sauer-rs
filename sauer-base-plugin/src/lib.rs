@@ -1,8 +1,9 @@
 use crate::{
     options::{BasePluginOptions, get_options},
     players::{
-        Players, clear_player, get_players, init_player,
+        Players, clear_player,
         combat::{apply_damage, explosion_damage, gun_damage_per_ray, kill_player},
+        get_players, init_player,
         model::{init_model, set_model},
         name::{init_name, set_name},
         position::set_position,
@@ -58,7 +59,9 @@ impl Default for BasePlugin {
 
 impl Plugin for BasePlugin {
     async fn init(&self, server: &mut Server) {
-        server.extra.insert(RwLock::new(self.initial_options.clone()));
+        server
+            .extra
+            .insert(RwLock::new(self.initial_options.clone()));
         server.extra.insert(Players::new());
     }
 
@@ -81,6 +84,10 @@ impl Plugin for BasePlugin {
 
     async fn disconnected(&self, ctx: &mut Context) {
         clear_player(ctx.server(), ctx.cn());
+
+        ctx.server().broadcast_chan1(&channel1::ClientDisconnected {
+            client_num: ctx.cn() as i32,
+        });
     }
 
     async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
@@ -226,10 +233,10 @@ impl Plugin for BasePlugin {
         ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
     async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) {
-        ctx.server().broadcast_chan0(packet);
+        ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
     async fn jumppad(&self, ctx: &mut Context, packet: &channel0::JumpPad) {
-        ctx.server().broadcast_chan0(packet);
+        ctx.server().broadcast_except_chan0(ctx.cn(), packet);
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {

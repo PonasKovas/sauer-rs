@@ -17,7 +17,7 @@ async fn main() {
     };
 
     let server = ServerBuilder::new()
-        .bind_addr(([0, 0, 0, 0], 11111))
+        .bind_addr(([0, 0, 0, 0], 21111))
         .max_peers(1024)
         .plugin(BasePlugin::new())
         .plugin(lua_plugin);
