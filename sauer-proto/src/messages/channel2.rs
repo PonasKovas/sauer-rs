@@ -6,7 +6,7 @@ use crate::internal::{
 use crate::route::{Chan2, S2C};
 
 make_packet_enum!(
-/// Server -> Client (Channel 0)
+/// Server -> Client (Channel 2)
 [S2C<Chan2>] Chan2Server {
     /// `N_DEMOPACKET` Demo playback marker.
     [N_DEMOPACKET] DemoPacket,

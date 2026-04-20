@@ -43,7 +43,7 @@ impl Peer {
         let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
-            channel: sauer_proto::CHANNEL_MESSAGES,
+            channel: sauer_proto::CHANNEL_MAPS,
             mode: convert_mode(mode),
         });
     }
