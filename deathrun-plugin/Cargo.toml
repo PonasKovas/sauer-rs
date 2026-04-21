@@ -12,3 +12,6 @@ ogz-rs.workspace = true
 cube-string.workspace = true
 bytes.workspace = true
 tracing.workspace = true
+tokio.workspace = true
+flate2.workspace = true
+rand.workspace = true

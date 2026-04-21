@@ -219,11 +219,14 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "cube-string",
+ "flate2",
  "ogz-rs",
+ "rand",
  "sauer-base-plugin",
  "sauer-map",
  "sauer-proto",
  "sauer-server",
+ "tokio",
  "tracing",
 ]
 
