@@ -26,9 +26,21 @@ pub fn welcome(server: &Server, cn: u32) {
         (options.map.clone(), options.mode, notgotitems, spawned)
     };
 
-    server.send_chan1(cn, &MapChange { map_name, mode, has_items: notgotitems });
+    server.send_chan1(
+        cn,
+        &MapChange {
+            map_name,
+            mode,
+            has_items: notgotitems,
+        },
+    );
     if notgotitems {
-        server.send_chan1(cn, &ItemList { items: spawned_items.unwrap_or_default() });
+        server.send_chan1(
+            cn,
+            &ItemList {
+                items: spawned_items.unwrap_or_default(),
+            },
+        );
     }
 
     // Notify existing players of the new player.
@@ -86,7 +98,15 @@ pub fn welcome(server: &Server, cn: u32) {
         });
         drop(p);
 
-        server.send_chan1(cn, &InitClient { client_num: other_cn as i32, name, player_model, team });
+        server.send_chan1(
+            cn,
+            &InitClient {
+                client_num: other_cn as i32,
+                name,
+                player_model,
+                team,
+            },
+        );
         if let Some(cb) = clipboard {
             server.send_chan1(cn, &cb);
         }

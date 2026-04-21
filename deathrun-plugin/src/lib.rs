@@ -1,6 +1,9 @@
 use crate::map::{MapState, get_map_state};
 use bytes::Bytes;
 use cube_string::CubeString;
+use sauer_base_plugin::items::{
+    ServerItem, delay_spawn, entity_to_item_type, get_items, spawntime,
+};
 use sauer_proto::{
     Client,
     channel1::{self, EditMode, ServMsg},
@@ -95,6 +98,38 @@ impl Plugin for DeathRun {
         match MapState::from_bytes(data) {
             Ok(state) => {
                 let world_size = state.world.size;
+                let num_players = server.client_cns().len();
+
+                let mut items = get_items(server).write().unwrap();
+                items.reset();
+                for (i, ent) in state.world.entities.iter().enumerate() {
+                    if let ogz_rs::data::EntityType::GameSpecific(n) = ent.ent_type {
+                        let Ok(proto_type) = sauer_proto::data::EntityType::try_from(n as i32)
+                        else {
+                            continue;
+                        };
+                        if let Some(item_type) = entity_to_item_type(proto_type) {
+                            if items.list.len() <= i {
+                                items.list.resize_with(i + 1, || ServerItem {
+                                    item_type,
+                                    spawned: false,
+                                    spawn_time_ms: 0,
+                                });
+                            }
+                            items.list[i].item_type = item_type;
+                            if delay_spawn(item_type) {
+                                items.list[i].spawned = false;
+                                items.list[i].spawn_time_ms = spawntime(item_type, num_players);
+                            } else {
+                                items.list[i].spawned = true;
+                                items.list[i].spawn_time_ms = 0;
+                            }
+                        }
+                    }
+                }
+                items.notgotitems = false;
+                drop(items);
+
                 *get_map_state(server).write().unwrap() = Some(state);
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
             }
