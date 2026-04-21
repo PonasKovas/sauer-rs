@@ -34,6 +34,28 @@ impl MapState {
         ogz.entities = self.world.entities.clone();
         ogz.serialize()
     }
+
+    /// Clears baked lighting and visibility data.
+    /// Must be called whenever geometry, materials, or textures change!
+    pub fn invalidate_cache(&mut self) {
+        self.meta.lightmaps.clear();
+        self.meta.pvs.clear();
+    }
+
+    /// Updates or inserts a map variable
+    pub fn edit_var(&mut self, name: &cube_string::CubeString, value: ogz_rs::data::Variable) {
+        if let ogz_rs::data::MapConfig::Modern { variables } = &mut self.meta.config {
+            if let Some(existing) = variables.iter_mut().find(|v| match v {
+                ogz_rs::data::Variable::Int { name: n, .. } => n == name,
+                ogz_rs::data::Variable::Float { name: n, .. } => n == name,
+                ogz_rs::data::Variable::String { name: n, .. } => n == name,
+            }) {
+                *existing = value;
+            } else {
+                variables.push(value);
+            }
+        }
+    }
 }
 
 pub(crate) fn get_map_state(server: &Server) -> &RwLock<Option<MapState>> {

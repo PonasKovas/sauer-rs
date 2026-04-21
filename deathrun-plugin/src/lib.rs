@@ -1,6 +1,7 @@
 use crate::map::{MapState, get_map_state};
 use bytes::Bytes;
 use cube_string::CubeString;
+use ogz_rs::data::Variable;
 use sauer_base_plugin::items::{
     ServerItem, delay_spawn, entity_to_item_type, get_items, spawntime,
 };
@@ -8,6 +9,7 @@ use sauer_proto::{
     Client,
     channel1::{self, EditMode, ServMsg},
     channel2,
+    data::EditVarValue,
 };
 use sauer_server::{
     Server,
@@ -165,6 +167,29 @@ impl Plugin for DeathRun {
 
     // ── Coop-edit tracking ────────────────────────────────────────────────────
 
+    /// `N_EDITVAR` - Sync map variables (skybox, water color, etc)
+    async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
+        let mut lock = get_map_state(ctx.server()).write().unwrap();
+        let Some(state) = lock.as_mut() else { return };
+
+        let ogz_var = match &packet.val {
+            EditVarValue::Int(v) => Variable::Int {
+                name: packet.name.clone(),
+                value: *v,
+            },
+            EditVarValue::Float(v) => Variable::Float {
+                name: packet.name.clone(),
+                value: *v,
+            },
+            EditVarValue::String(v) => Variable::String {
+                name: packet.name.clone(),
+                value: v.clone(),
+            },
+        };
+
+        state.edit_var(&packet.name, ogz_var);
+    }
+
     /// `N_EDITT` – texture edit on a selection.
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
         let mut lock = get_map_state(ctx.server()).write().unwrap();
@@ -185,6 +210,7 @@ impl Plugin for DeathRun {
         state
             .world
             .set_texture(&sel, packet.tex as u16, packet.all_faces);
+        state.invalidate_cache();
     }
 
     /// `N_EDITM` – material edit on a selection.
@@ -307,6 +333,7 @@ impl Plugin for DeathRun {
         state.world.edit_sel(&sel, |node, _| {
             apply_mat(node, matid, matmask, filtermat, filtermask, filtergeom);
         });
+        state.invalidate_cache();
     }
 
     /// `N_DELCUBE` – delete (empty) cubes in a selection.
@@ -327,6 +354,7 @@ impl Plugin for DeathRun {
         };
 
         state.world.fill(&sel, false);
+        state.invalidate_cache();
     }
 
     /// `N_REPLACE` – replace all occurrences of one texture with another.
@@ -375,6 +403,7 @@ impl Plugin for DeathRun {
             // Global replace: walk the entire octree from the root
             replace_tex(&mut state.world.root, old_tex, new_tex);
         }
+        state.invalidate_cache();
     }
     /// `N_EDITF` – geometry face edit on a selection.
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
@@ -395,6 +424,7 @@ impl Plugin for DeathRun {
 
         // EditFaceMode is represented via its C++ integer counterpart (0, 1, or 2)
         state.world.edit_face(&sel, packet.dir, packet.mode as i32);
+        state.invalidate_cache();
     }
 
     /// `N_EDITENT` – create, modify, or delete a map entity.
