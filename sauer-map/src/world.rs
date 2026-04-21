@@ -1,80 +1,54 @@
-use ogz_rs::{
-    OgzMap,
-    data::{CubeInfo, Material, ModernSurfaceData, OctreeNode, Surfaces},
-};
+use crate::edit::{apply_region, fill, set_material, set_texture};
+use crate::node::{Cube, Node};
+use crate::selection::Selection;
+use ogz_rs::OgzMap;
+use ogz_rs::data::Material;
+use ogz_rs::data::{Entity, EntityType};
+use std::collections::HashMap;
 
+/// Represents the spatial map structure, tracking geometric cubes, textures, and materials.
 #[derive(Debug, Clone)]
 pub struct World {
     pub size: i32,
     pub root: Node,
-}
-
-#[derive(Debug, Clone)]
-pub enum Node {
-    Branch(Box<[Node; 8]>),
-    Leaf(Cube),
-}
-
-#[derive(Debug, Clone)]
-pub struct Cube {
-    /// 12 edges defining the solid geometry inside this grid cell.
-    /// Each byte is packed: (high_coord << 4) | low_coord.
-    /// 0x80 means low=0, high=8 (fully solid along this edge).
-    /// 0x00 means low=0, high=0 (fully empty along this edge).
-    pub edges: [u8; 12],
-    pub textures: [u16; 6],
-    pub material: Material,
+    pub entities: Vec<Entity>,
 }
 
 impl World {
-    /// Constructs the spatial tree from the raw OGZ data.
+    /// Constructs the spatial tree from raw OGZ data.
     pub fn from_ogz(map: &OgzMap) -> Self {
         World {
             size: map.world_size,
-            root: Self::build_node(&map.octree),
+            root: crate::octree::build_node(&map.octree),
+            entities: map.entities.clone(),
         }
     }
 
-    fn build_node(ogz_node: &OctreeNode) -> Node {
-        match ogz_node {
-            OctreeNode::Children(children) => {
-                let mut branch = Vec::with_capacity(8);
-                for child in children.as_ref() {
-                    branch.push(Self::build_node(child));
-                }
-                Node::Branch(Box::new(branch.try_into().unwrap()))
-            }
-            OctreeNode::LodCube { children, .. } => {
-                // For physics/server logic, we ignore the LOD proxy geometry
-                // and drill straight down into the actual children.
-                let mut branch = Vec::with_capacity(8);
-                for child in children.as_ref() {
-                    branch.push(Self::build_node(child));
-                }
-                Node::Branch(Box::new(branch.try_into().unwrap()))
-            }
-            OctreeNode::Empty(info) => Node::Leaf(Cube {
-                edges: [0x00; 12], // F_EMPTY translates to all 0s
-                textures: info.textures,
-                material: info.surfaces.material().unwrap_or_default(),
-            }),
-            OctreeNode::Solid(info) => Node::Leaf(Cube {
-                edges: [0x80; 12], // F_SOLID is 0x80808080 (low=0, high=8)
-                textures: info.textures,
-                material: info.surfaces.material().unwrap_or_default(),
-            }),
-            OctreeNode::Normal { info, edges } => Node::Leaf(Cube {
-                edges: *edges,
-                textures: info.textures,
-                material: info.surfaces.material().unwrap_or_default(),
-            }),
+    /// Converts the tracked `World` back into an `OctreeNode` tree for serialization.
+    pub fn to_ogz_octree(&self) -> ogz_rs::data::OctreeNode {
+        crate::octree::node_to_ogz(&self.root)
+    }
+
+    /// Updates or inserts a new map entity.
+    pub fn edit_ent(&mut self, id: usize, pos: [f32; 3], ent_type: EntityType, attrs: [i16; 5]) {
+        if id < self.entities.len() {
+            let ent = &mut self.entities[id];
+            ent.position = pos;
+            ent.ent_type = ent_type;
+            ent.attrs = attrs;
+        } else if id == self.entities.len() {
+            self.entities.push(Entity {
+                position: pos,
+                attrs,
+                ent_type,
+                extra_data: Vec::new(),
+            });
         }
     }
 
     /// Queries the octree at a specific 3D coordinate.
     /// Returns the Cube, its spatial size, and its origin (bottom-left-front corner).
     pub fn get_cube(&self, x: f32, y: f32, z: f32) -> Option<(&Cube, i32, [i32; 3])> {
-        // Bounds check
         if x < 0.0
             || y < 0.0
             || z < 0.0
@@ -98,13 +72,12 @@ impl World {
         while let Node::Branch(children) = current_node {
             current_size /= 2;
 
-            // Sauerbraten child index bitmask: X is bit 0, Y is bit 1, Z is bit 2.
             let cx = if ix >= ox + current_size { 1 } else { 0 };
             let cy = if iy >= oy + current_size { 1 } else { 0 };
             let cz = if iz >= oz + current_size { 1 } else { 0 };
 
             let child_idx = cx | (cy << 1) | (cz << 2);
-            current_node = &children[child_idx];
+            current_node = &children[child_idx as usize];
 
             if cx == 1 {
                 ox += current_size;
@@ -124,128 +97,201 @@ impl World {
         }
     }
 
-    /// Apply a closure to every leaf `Cube` whose bounding box overlaps the
-    /// given axis-aligned selection.
-    ///
-    /// `o` is the selection origin (world-unit corner), `s` is the count of
-    /// cubes in each dimension at `grid` granularity.  Nodes that are coarser
-    /// than `grid` are subdivided on the fly so that edits land at the right
-    /// resolution.
-    pub fn edit_sel<F>(&mut self, o: [i32; 3], s: [i32; 3], grid: i32, mut f: F)
+    /// Walk the octree within a defined selection block and apply a custom edit closure.
+    /// Safely handles automatic subdivision if cubes are coarser than the selection grid.
+    pub fn edit_sel<F>(&mut self, sel: &Selection, mut f: F)
     where
-        F: FnMut(&mut Cube),
+        F: FnMut(&mut Node, [i32; 3]),
     {
-        if grid <= 0 || s.iter().any(|&n| n <= 0) {
+        if sel.grid <= 0 || sel.s.iter().any(|&n| n <= 0) {
             return;
         }
-        let sel_max = [
-            o[0] + s[0] * grid,
-            o[1] + s[1] * grid,
-            o[2] + s[2] * grid,
-        ];
-        apply_region(&mut self.root, self.size, [0, 0, 0], o, sel_max, grid, &mut f);
+        let (min, max) = sel.bounds();
+        apply_region(
+            &mut self.root,
+            self.size,
+            [0, 0, 0],
+            &min,
+            &max,
+            sel.grid,
+            &mut f,
+        );
     }
 
-    /// Convert the tracked `World` back into an `OctreeNode` tree.
-    ///
-    /// Lightmap surfaces are not preserved (they are stripped when the `World`
-    /// is constructed via `from_ogz`).  The resulting tree encodes only the
-    /// geometry, textures, and materials tracked by this type.
-    pub fn to_ogz_octree(&self) -> OctreeNode {
-        node_to_ogz(&self.root)
+    /// Applies a material completely replacing the volumes within the selection.
+    pub fn set_material(&mut self, sel: &Selection, mat: Material) {
+        self.edit_sel(sel, |node, _| set_material(node, mat));
     }
-}
 
-// ── Octree helpers ────────────────────────────────────────────────────────────
+    /// Applies a texture to the selected region. If `all_faces` is false, the
+    /// texture only applies to the side matching the selection's orientation.
+    pub fn set_texture(&mut self, sel: &Selection, tex: u16, all_faces: bool) {
+        let orient = if all_faces {
+            None
+        } else {
+            Some(sel.orient as usize)
+        };
+        self.edit_sel(sel, |node, _| set_texture(node, tex, orient));
+    }
 
-fn node_to_ogz(node: &Node) -> OctreeNode {
-    match node {
-        Node::Branch(children) => {
-            let converted: Vec<OctreeNode> = children.iter().map(node_to_ogz).collect();
-            OctreeNode::Children(Box::new(converted.try_into().unwrap()))
+    /// Extrudes (solid) or erases (empty) the volumes bounded by the selection.
+    pub fn fill(&mut self, sel: &Selection, is_solid: bool) {
+        self.edit_sel(sel, |node, _| fill(node, is_solid));
+    }
+
+    /// Extrudes, Pushes, or Deforms faces or corners of the geometry based on the selection.
+    pub fn edit_face(&mut self, sel: &Selection, dir: i32, mode: i32) {
+        use crate::geom::{C, R, dimcoord, dimension, linked_push, optiface};
+
+        let d = dimension(sel.orient as usize);
+        let dc = dimcoord(sel.orient as usize);
+        let seldir = if dc == 1 { -dir } else { dir };
+
+        let mut actual_mode = mode;
+        if actual_mode == 1
+            && (sel.cx > 0 || sel.cy > 0 || (sel.cxs & 1) != 0 || (sel.cys & 1) != 0)
+        {
+            actual_mode = 0; // Partial face extrusion degrades back to standard pushing
         }
-        Node::Leaf(cube) => {
-            let surfaces = Surfaces::Modern(ModernSurfaceData {
-                material: if cube.material != Material::default() {
-                    Some(cube.material)
-                } else {
-                    None
-                },
-                merged: None,
-                surfaces: None,
-            });
-            let info = CubeInfo {
-                textures: cube.textures,
-                surfaces,
-            };
-            if cube.edges == [0x00u8; 12] {
-                OctreeNode::Empty(info)
-            } else if cube.edges == [0x80u8; 12] {
-                OctreeNode::Solid(info)
-            } else {
-                OctreeNode::Normal {
-                    info,
-                    edges: cube.edges,
+
+        let mut local_sel = sel.clone();
+
+        if actual_mode == 1 {
+            let h = local_sel.o[d] + (dc as i32) * local_sel.grid;
+            if ((dir > 0) == (dc == 1) && h <= 0) || ((dir < 0) == (dc == 1) && h >= self.size) {
+                return;
+            }
+            if dir < 0 {
+                local_sel.o[d] += local_sel.grid * seldir;
+            }
+        }
+
+        if dc == 1 {
+            local_sel.o[d] += local_sel.s[d] * local_sel.grid - local_sel.grid;
+        }
+        local_sel.s[d] = 1;
+
+        // If extruding a new block (mode 1, dir < 0), we must inherit textures from the
+        // adjacent block we pulled from. We sample these before mutating the tree.
+        let mut adj_textures = HashMap::new();
+        if actual_mode == 1 && dir < 0 {
+            let r = R[d];
+            let c = C[d];
+            for x in 0..local_sel.s[r] {
+                for y in 0..local_sel.s[c] {
+                    let mut pos = local_sel.o;
+                    pos[r] += x * local_sel.grid;
+                    pos[c] += y * local_sel.grid;
+                    pos[d] -= seldir * local_sel.grid; // Step back one coordinate to sample
+
+                    if let Some((cube, _, _)) = self.get_cube(
+                        pos[0] as f32 + (local_sel.grid as f32 * 0.5),
+                        pos[1] as f32 + (local_sel.grid as f32 * 0.5),
+                        pos[2] as f32 + (local_sel.grid as f32 * 0.5),
+                    ) {
+                        adj_textures.insert([pos[r], pos[c]], cube.textures);
+                    }
                 }
             }
         }
-    }
-}
 
-/// Recursively apply `f` to all leaves whose bounds overlap the closed
-/// selection `[sel_min, sel_max)`.  Leaf nodes coarser than `grid` are
-/// subdivided into eight equal children (each inheriting the parent's cube
-/// data) before recursing.
-fn apply_region(
-    node: &mut Node,
-    node_size: i32,
-    [ox, oy, oz]: [i32; 3],
-    sel_min: [i32; 3],
-    sel_max: [i32; 3],
-    grid: i32,
-    f: &mut impl FnMut(&mut Cube),
-) {
-    // Reject if this node's AABB has no overlap with the selection.
-    if ox >= sel_max[0] || ox + node_size <= sel_min[0] {
-        return;
-    }
-    if oy >= sel_max[1] || oy + node_size <= sel_min[1] {
-        return;
-    }
-    if oz >= sel_max[2] || oz + node_size <= sel_min[2] {
-        return;
-    }
+        self.edit_sel(&local_sel, |node, pos| {
+            // Safely inherit existing textures/materials if we need to collapse a detailed branch.
+            let (inherited_tex, inherited_mat) = match node {
+                Node::Leaf(c) => (c.textures, c.material),
+                Node::Branch(children) => {
+                    let mut curr = &children[0];
+                    while let Node::Branch(c) = curr {
+                        curr = &c[0];
+                    }
+                    if let Node::Leaf(c) = curr {
+                        (c.textures, c.material)
+                    } else {
+                        ([0; 6], Default::default())
+                    }
+                }
+            };
 
-    // If this is a leaf that is coarser than the target grid, subdivide it so
-    // subsequent edits land at the correct resolution.
-    if matches!(node, Node::Leaf(_)) && node_size > grid {
-        let cube = match node {
-            Node::Leaf(c) => c.clone(),
-            _ => unreachable!(),
-        };
-        let children = std::array::from_fn(|_| Node::Leaf(cube.clone()));
-        *node = Node::Branch(Box::new(children));
-    }
-
-    match node {
-        Node::Leaf(cube) => f(cube),
-        Node::Branch(children) => {
-            let half = node_size / 2;
-            for i in 0..8usize {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_origin = [ox + cx * half, oy + cy * half, oz + cz * half];
-                apply_region(
-                    &mut children[i],
-                    half,
-                    child_origin,
-                    sel_min,
-                    sel_max,
-                    grid,
-                    f,
-                );
+            if let Node::Branch(_) = node {
+                // When collapsing a branch into a face edit, Sauerbraten explicitly assumes
+                // it as a solid block before pushing the geometry into it.
+                *node = Node::Leaf(Cube {
+                    edges: [0x80; 12],
+                    textures: inherited_tex,
+                    material: inherited_mat,
+                });
             }
-        }
+
+            if let Node::Leaf(c) = node {
+                if actual_mode == 1 {
+                    // Fill / Delete Mode
+                    if dir < 0 {
+                        c.edges = [0x80; 12];
+                        let rx = pos[R[d]];
+                        let ry = pos[C[d]];
+                        // Inherit the exact texture of the block we pulled from.
+                        if let Some(tex) = adj_textures.get(&[rx, ry]) {
+                            c.textures = *tex;
+                        }
+                    } else {
+                        c.edges = [0x00; 12];
+                    }
+                } else {
+                    // Standard Push / Corner
+                    let bak = [
+                        c.edges[d * 4],
+                        c.edges[d * 4 + 1],
+                        c.edges[d * 4 + 2],
+                        c.edges[d * 4 + 3],
+                    ];
+
+                    if actual_mode == 2 {
+                        // Corner Push
+                        linked_push(
+                            c,
+                            d,
+                            (sel.corner & 1) as usize,
+                            (sel.corner >> 1) as usize,
+                            dc,
+                            seldir,
+                        );
+                    } else {
+                        // Normal Face Push
+                        for mx in 0..2 {
+                            for my in 0..2 {
+                                let rx = (pos[R[d]] - local_sel.o[R[d]]) / local_sel.grid;
+                                let ry = (pos[C[d]] - local_sel.o[C[d]]) / local_sel.grid;
+
+                                if rx == 0 && mx == 0 && sel.cx > 0 {
+                                    continue;
+                                }
+                                if ry == 0 && my == 0 && sel.cy > 0 {
+                                    continue;
+                                }
+                                if rx == local_sel.s[R[d]] - 1
+                                    && mx == 1
+                                    && ((sel.cx + sel.cxs) & 1) != 0
+                                {
+                                    continue;
+                                }
+                                if ry == local_sel.s[C[d]] - 1
+                                    && my == 1
+                                    && ((sel.cy + sel.cys) & 1) != 0
+                                {
+                                    continue;
+                                }
+
+                                if c.edges[d * 4 + mx + my * 2] != bak[mx + my * 2] {
+                                    continue;
+                                }
+
+                                linked_push(c, d, mx, my, dc, seldir);
+                            }
+                        }
+                    }
+                    optiface(c, d);
+                }
+            }
+        });
     }
 }

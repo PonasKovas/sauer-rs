@@ -413,11 +413,7 @@ make_struct!(
     ent_id: i32,
     pos: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
     type_: EntityType,
-    attr1: i32,
-    attr2: i32,
-    attr3: i32,
-    attr4: i32,
-    attr5: i32,
+    attrs: [i32; 5],
 });
 
 make_struct!(

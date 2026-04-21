@@ -31,6 +31,7 @@ impl MapState {
     pub fn to_ogz_bytes(&self) -> Result<Vec<u8>, ogz_rs::OgzError> {
         let mut ogz = self.meta.clone();
         ogz.octree = self.world.to_ogz_octree();
+        ogz.entities = self.world.entities.clone();
         ogz.serialize()
     }
 }
