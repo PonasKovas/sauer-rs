@@ -242,9 +242,22 @@ impl Plugin for BasePlugin {
         let server = ctx.server();
 
         {
-            let p = get_players(server).get(cn);
+            let Some(mut p) = get_players(server).try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Alive {
                 return;
+            }
+            if let Some(state) = p.state.as_mut() {
+                match packet.gun {
+                    sauer_proto::data::Gun::Fist => {}
+                    sauer_proto::data::Gun::Sg => state.ammo.shotgun -= 1,
+                    sauer_proto::data::Gun::Cg => state.ammo.chaingun -= 1,
+                    sauer_proto::data::Gun::Rl => state.ammo.rocket_launcher -= 1,
+                    sauer_proto::data::Gun::Rifle => state.ammo.rifle -= 1,
+                    sauer_proto::data::Gun::Gl => state.ammo.grenade_launcher -= 1,
+                    sauer_proto::data::Gun::Pistol => state.ammo.pistol -= 1,
+                }
             }
         }
 
@@ -436,24 +449,33 @@ impl Plugin for BasePlugin {
         }
 
         let idx = packet.ent_id as usize;
-        let item_placed = {
+        let new_item = {
             let mut items = get_items(ctx.server()).write().unwrap();
             match entity_to_item_type(packet.type_) {
                 Some(item_type) => {
-                    // Entity was set to an item type — ensure the slot exists.
-                    if items.list.len() <= idx {
+                    let existing = items.list.len() > idx;
+                    if !existing {
                         items.list.resize_with(idx + 1, || ServerItem {
                             item_type,
                             spawned: false,
                             spawn_time_ms: 0,
                         });
+                        true
+                    } else {
+                        let item = &mut items.list[idx];
+                        // Only reset and respawn if the type actually changed,
+                        // or if it was previously deactivated (turned into a non-item)
+                        if item.item_type != item_type || (!item.spawned && item.spawn_time_ms == 0)
+                        {
+                            item.item_type = item_type;
+                            item.spawned = false;
+                            item.spawn_time_ms = 0;
+                            true
+                        } else {
+                            // The item just moved or changed an irrelevant attribute, leave its spawn state alone.
+                            false
+                        }
                     }
-                    items.list[idx].item_type = item_type;
-                    // Don't mark spawned yet — broadcast N_ITEMSPAWN below so all
-                    // clients (including the editor) transition from unspawned to spawned.
-                    items.list[idx].spawned = false;
-                    items.list[idx].spawn_time_ms = 0;
-                    true
                 }
                 None => {
                     // Entity changed to a non-item type — deactivate the slot so it
@@ -478,7 +500,7 @@ impl Plugin for BasePlugin {
 
         // After the relay, tell *all* clients (including the editor) that the new
         // item slot is now spawned so they render it as a live pickup.
-        if item_placed {
+        if new_item {
             get_items(ctx.server()).write().unwrap().list[idx].spawned = true;
             ctx.server().broadcast_chan1(&ItemSpawn {
                 item_index: idx as i32,
