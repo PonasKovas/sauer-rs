@@ -93,3 +93,71 @@ impl<R> Default for Writer<R> {
         Self::new()
     }
 }
+
+pub trait PacketSequence<R> {
+    fn push_to(&self, writer: &mut Writer<R>);
+}
+
+// Blanket implementation for references allows us to preserve the old &T API seamlessly
+impl<R, T: PacketSequence<R> + ?Sized> PacketSequence<R> for &T {
+    fn push_to(&self, writer: &mut Writer<R>) {
+        (*self).push_to(writer);
+    }
+}
+
+// Support for homogenously typed slices
+impl<R, T: PacketSequence<R>> PacketSequence<R> for [T] {
+    fn push_to(&self, writer: &mut Writer<R>) {
+        for item in self {
+            item.push_to(writer);
+        }
+    }
+}
+
+// Support for arrays
+impl<R, T: PacketSequence<R>, const N: usize> PacketSequence<R> for [T; N] {
+    fn push_to(&self, writer: &mut Writer<R>) {
+        for item in self {
+            item.push_to(writer);
+        }
+    }
+}
+
+// Support for standard Vecs
+impl<R, T: PacketSequence<R>> PacketSequence<R> for Vec<T> {
+    fn push_to(&self, writer: &mut Writer<R>) {
+        for item in self {
+            item.push_to(writer);
+        }
+    }
+}
+
+// Macro to implement PacketSequence for heterogenous Tuples
+macro_rules! impl_tuple_seq {
+    ( $($name:ident)+ ) => {
+        impl<R, $($name: PacketSequence<R>),+> PacketSequence<R> for ($($name,)+) {
+            fn push_to(&self, writer: &mut Writer<R>) {
+                #[allow(non_snake_case)]
+                let ($($name,)+) = self;
+                $($name.push_to(writer);)+
+            }
+        }
+    };
+}
+
+impl_tuple_seq!(A);
+impl_tuple_seq!(A B);
+impl_tuple_seq!(A B C);
+impl_tuple_seq!(A B C D);
+impl_tuple_seq!(A B C D E);
+impl_tuple_seq!(A B C D E F);
+impl_tuple_seq!(A B C D E F G);
+impl_tuple_seq!(A B C D E F G H);
+impl_tuple_seq!(A B C D E F G H I);
+impl_tuple_seq!(A B C D E F G H I J);
+impl_tuple_seq!(A B C D E F G H I J K);
+impl_tuple_seq!(A B C D E F G H I J K L);
+impl_tuple_seq!(A B C D E F G H I J K L M);
+impl_tuple_seq!(A B C D E F G H I J K L M N);
+impl_tuple_seq!(A B C D E F G H I J K L M N O);
+impl_tuple_seq!(A B C D E F G H I J K L M N O P);

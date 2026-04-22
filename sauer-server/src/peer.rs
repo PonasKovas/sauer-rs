@@ -1,7 +1,7 @@
 //! Networking abstraction module
 
 use sauer_proto::{
-    Encode, Writer,
+    PacketSequence, Writer,
     route::{Chan0, Chan1, Chan2, S2C},
 };
 use std::net::SocketAddr;
@@ -15,9 +15,9 @@ impl Peer {
         Self { raw: peer }
     }
 
-    pub fn try_send_chan0(&self, pkt: &impl Encode<S2C<Chan0>>) {
+    pub fn try_send_chan0(&self, pkt: impl PacketSequence<S2C<Chan0>>) {
         let mut writer = Writer::<S2C<Chan0>>::new();
-        writer.push(pkt);
+        pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
@@ -26,9 +26,9 @@ impl Peer {
         });
     }
 
-    pub fn try_send_chan1(&self, pkt: &impl Encode<S2C<Chan1>>) {
+    pub fn try_send_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>>) {
         let mut writer = Writer::<S2C<Chan1>>::new();
-        writer.push(pkt);
+        pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
@@ -37,9 +37,9 @@ impl Peer {
         });
     }
 
-    pub fn try_send_chan2(&self, pkt: &impl Encode<S2C<Chan2>>) {
+    pub fn try_send_chan2(&self, pkt: impl PacketSequence<S2C<Chan2>>) {
         let mut writer = Writer::<S2C<Chan2>>::new();
-        writer.push(pkt);
+        pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
         let _ = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),

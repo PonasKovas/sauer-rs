@@ -211,6 +211,9 @@ macro_rules! make_packet_enum {
                 crate::internal::SauerReadStateful::sauer_read_stateful(reader, session)
             }
         }
+        impl crate::PacketSequence<$ROUTE> for $variant {
+            fn push_to(&self, writer: &mut crate::Writer<$ROUTE>) { writer.push(self); }
+        }
     };
 
     // 2. N_CLIENT wrapped Base Struct
@@ -245,6 +248,9 @@ macro_rules! make_packet_enum {
                 }
             }
         }
+        impl crate::PacketSequence<$ROUTE> for $client_wrapper<$variant> {
+            fn push_to(&self, writer: &mut crate::Writer<$ROUTE>) { writer.push(self); }
+        }
     };
 
     // 3. N_CLIENT Wrapped Duplicate Struct (e.g. NewMap)
@@ -277,6 +283,9 @@ macro_rules! make_packet_enum {
                 }
             }
         }
+        impl crate::PacketSequence<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
+            fn push_to(&self, writer: &mut crate::Writer<$ROUTE>) { writer.push(self); }
+        }
     };
 
     // 4. Unwrapped Base struct with UPDATE_SESSION
@@ -301,6 +310,9 @@ macro_rules! make_packet_enum {
 
                 Ok(pkt)
             }
+        }
+        impl crate::PacketSequence<$ROUTE> for $variant {
+            fn push_to(&self, writer: &mut crate::Writer<$ROUTE>) { writer.push(self); }
         }
     };
     ////////////////////////////////////////////////////////////////////
@@ -407,6 +419,12 @@ macro_rules! make_packet_enum {
                         Self::$variant(_) => crate::internal::msg_id_to_name($TAG),
                     )+
                 }
+            }
+        }
+
+        impl crate::PacketSequence<$ROUTE> for $name {
+            fn push_to(&self, writer: &mut crate::Writer<$ROUTE>) {
+                writer.push(self);
             }
         }
 

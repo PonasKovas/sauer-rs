@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use peer::Peer;
 use sauer_proto::{
-    Encode,
+    PacketSequence,
     route::{Chan0, Chan1, Chan2, S2C},
 };
 use std::net::SocketAddr;
@@ -30,19 +30,19 @@ impl Server {
 
     // ── Targeted sends ────────────────────────────────────────────────────────
 
-    pub fn send_chan0(&self, cn: u32, pkt: &impl Encode<S2C<Chan0>>) {
+    pub fn send_chan0(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan0>>) {
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan0(pkt);
         }
     }
 
-    pub fn send_chan1(&self, cn: u32, pkt: &impl Encode<S2C<Chan1>>) {
+    pub fn send_chan1(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan1>>) {
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan1(pkt);
         }
     }
 
-    pub fn send_chan2(&self, cn: u32, pkt: &impl Encode<S2C<Chan2>>) {
+    pub fn send_chan2(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan2>>) {
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan2(pkt);
         }
@@ -50,30 +50,30 @@ impl Server {
 
     // ── Broadcast ─────────────────────────────────────────────────────────────
 
-    pub fn broadcast_chan0(&self, pkt: &impl Encode<S2C<Chan0>>) {
+    pub fn broadcast_chan0(&self, pkt: impl PacketSequence<S2C<Chan0>>) {
         for entry in self.clients.iter() {
-            entry.value().try_send_chan0(pkt);
+            entry.value().try_send_chan0(&pkt);
         }
     }
 
-    pub fn broadcast_chan1(&self, pkt: &impl Encode<S2C<Chan1>>) {
+    pub fn broadcast_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>>) {
         for entry in self.clients.iter() {
-            entry.value().try_send_chan1(pkt);
+            entry.value().try_send_chan1(&pkt);
         }
     }
 
-    pub fn broadcast_except_chan0(&self, except: u32, pkt: &impl Encode<S2C<Chan0>>) {
+    pub fn broadcast_except_chan0(&self, except: u32, pkt: impl PacketSequence<S2C<Chan0>>) {
         for entry in self.clients.iter() {
             if *entry.key() != except {
-                entry.value().try_send_chan0(pkt);
+                entry.value().try_send_chan0(&pkt);
             }
         }
     }
 
-    pub fn broadcast_except_chan1(&self, except: u32, pkt: &impl Encode<S2C<Chan1>>) {
+    pub fn broadcast_except_chan1(&self, except: u32, pkt: impl PacketSequence<S2C<Chan1>>) {
         for entry in self.clients.iter() {
             if *entry.key() != except {
-                entry.value().try_send_chan1(pkt);
+                entry.value().try_send_chan1(&pkt);
             }
         }
     }

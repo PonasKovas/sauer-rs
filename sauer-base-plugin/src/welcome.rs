@@ -26,21 +26,17 @@ pub fn welcome(server: &Server, cn: u32) {
         (options.map.clone(), options.mode, notgotitems, spawned)
     };
 
-    server.send_chan1(
-        cn,
-        &MapChange {
-            map_name,
-            mode,
-            has_items: notgotitems,
-        },
-    );
-    if notgotitems {
-        server.send_chan1(
-            cn,
-            &ItemList {
-                items: spawned_items.unwrap_or_default(),
-            },
-        );
+    let mapchange = MapChange {
+        map_name,
+        mode,
+        has_items: notgotitems,
+    };
+
+    // stupid sauer requires N_ITEMLIST to come together with N_MAPCHANGE in the same enet packet, otherwise wont work lol
+    if let Some(items) = spawned_items {
+        server.send_chan1(cn, (mapchange, ItemList { items }));
+    } else {
+        server.send_chan1(cn, mapchange);
     }
 
     // Notify existing players of the new player.
