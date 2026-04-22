@@ -122,12 +122,6 @@ impl Plugin for DeathRun {
         let cn = ctx.cn();
         let server = ctx.server();
 
-        // // temp
-        // sauer_base_plugin::options::get_options(ctx.server())
-        //     .write()
-        //     .unwrap()
-        //     .mode = sauer_proto::data::GameMode::Ffa;
-
         match MapState::from_bytes(data) {
             Ok(state) => {
                 let world_size = state.world.size;
