@@ -62,7 +62,8 @@ fn collect_chunks(
     if node_size <= chunk_size_limit {
         // Skip entirely empty space to optimize the network stream and rendering speed
         if let sauer_map::Node::Leaf(cube) = node {
-            if cube.is_empty() {
+            // Fix: ensure the cube's material is also completely empty
+            if cube.is_empty() && cube.material == ogz_rs::data::Material::default() {
                 return;
             }
         }
@@ -86,7 +87,8 @@ fn collect_chunks(
             }
         }
         sauer_map::Node::Leaf(cube) => {
-            if !cube.is_empty() {
+            // Fix: verify material emptiness here as well
+            if !(cube.is_empty() && cube.material == ogz_rs::data::Material::default()) {
                 out.push((node_pos, node_size, node.clone()));
             }
         }

@@ -41,11 +41,18 @@ pub fn get_cubevector(cube: &Cube, i: usize) -> [i32; 3] {
 }
 
 /// Robustly resolves interpolations of a subdivided Normal leaf grid point.
+/// Guaranteed to be mathematically symmetric regardless of vertex orientation order.
 fn midedge(a: &[i32; 3], b: &[i32; 3], xd: usize, yd: usize, perfect: &mut bool) -> i32 {
-    let ax = a[xd];
-    let ay = a[yd];
-    let bx = b[xd];
-    let by = b[yd];
+    let mut ax = a[xd];
+    let mut ay = a[yd];
+    let mut bx = b[xd];
+    let mut by = b[yd];
+
+    // Enforce strict deterministic order to prevent chunk alignment gaps
+    if ax > bx || (ax == bx && ay > by) {
+        std::mem::swap(&mut ax, &mut bx);
+        std::mem::swap(&mut ay, &mut by);
+    }
 
     if ay == by {
         return ay;
@@ -55,19 +62,25 @@ fn midedge(a: &[i32; 3], b: &[i32; 3], xd: usize, yd: usize, perfect: &mut bool)
         return ay;
     }
 
-    let crossx = (ax < 8 && bx > 8) || (ax > 8 && bx < 8);
+    let crossx = ax < 8 && bx > 8; // Simplified since ax < bx is guaranteed
     let crossy = (ay < 8 && by > 8) || (ay > 8 && by < 8);
 
     if crossy && !crossx {
-        midedge(a, b, yd, xd, perfect);
+        let mut temp_a = [0; 3];
+        let mut temp_b = [0; 3];
+        temp_a[xd] = ax;
+        temp_a[yd] = ay;
+        temp_b[xd] = bx;
+        temp_b[yd] = by;
+        midedge(&temp_a, &temp_b, yd, xd, perfect);
         return 8;
     }
 
-    if ax <= 8 && bx <= 8 {
-        return if ax > bx { ay } else { by };
+    if bx <= 8 {
+        return by; // bx is closest to 8
     }
-    if ax >= 8 && bx >= 8 {
-        return if ax < bx { ay } else { by };
+    if ax >= 8 {
+        return ay; // ax is closest to 8
     }
 
     let risex = (by - ay) * (8 - ax) * 256;
@@ -270,12 +283,8 @@ pub fn optiface(cube: &mut Cube, d: usize) {
     let e2 = cube.edges[d * 4 + 2];
     let e3 = cube.edges[d * 4 + 3];
 
-    // If all edges on this face have their high nibble == low nibble, it's totally flat/crushed.
-    if (e0 >> 4) == (e0 & 0xF)
-        && (e1 >> 4) == (e1 & 0xF)
-        && (e2 >> 4) == (e2 & 0xF)
-        && (e3 >> 4) == (e3 & 0xF)
-    {
+    // Assert all 4 edges on the face are strictly identical and flat
+    if e0 == e1 && e0 == e2 && e0 == e3 && (e0 >> 4) == (e0 & 0xF) {
         cube.edges = [0x00; 12];
     }
 }
