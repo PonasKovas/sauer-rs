@@ -41,18 +41,11 @@ pub fn get_cubevector(cube: &Cube, i: usize) -> [i32; 3] {
 }
 
 /// Robustly resolves interpolations of a subdivided Normal leaf grid point.
-/// Guaranteed to be mathematically symmetric regardless of vertex orientation order.
 fn midedge(a: &[i32; 3], b: &[i32; 3], xd: usize, yd: usize, perfect: &mut bool) -> i32 {
-    let mut ax = a[xd];
-    let mut ay = a[yd];
-    let mut bx = b[xd];
-    let mut by = b[yd];
-
-    // Enforce strict deterministic order to prevent chunk alignment gaps
-    if ax > bx || (ax == bx && ay > by) {
-        std::mem::swap(&mut ax, &mut bx);
-        std::mem::swap(&mut ay, &mut by);
-    }
+    let ax = a[xd];
+    let ay = a[yd];
+    let bx = b[xd];
+    let by = b[yd];
 
     if ay == by {
         return ay;
@@ -62,25 +55,19 @@ fn midedge(a: &[i32; 3], b: &[i32; 3], xd: usize, yd: usize, perfect: &mut bool)
         return ay;
     }
 
-    let crossx = ax < 8 && bx > 8; // Simplified since ax < bx is guaranteed
+    let crossx = (ax < 8 && bx > 8) || (ax > 8 && bx < 8);
     let crossy = (ay < 8 && by > 8) || (ay > 8 && by < 8);
 
     if crossy && !crossx {
-        let mut temp_a = [0; 3];
-        let mut temp_b = [0; 3];
-        temp_a[xd] = ax;
-        temp_a[yd] = ay;
-        temp_b[xd] = bx;
-        temp_b[yd] = by;
-        midedge(&temp_a, &temp_b, yd, xd, perfect);
+        midedge(a, b, yd, xd, perfect);
         return 8;
     }
 
-    if bx <= 8 {
-        return by; // bx is closest to 8
+    if ax <= 8 && bx <= 8 {
+        return if ax > bx { ay } else { by };
     }
-    if ax >= 8 {
-        return ay; // ax is closest to 8
+    if ax >= 8 && bx >= 8 {
+        return if ax < bx { ay } else { by };
     }
 
     let risex = (by - ay) * (8 - ax) * 256;
@@ -102,6 +89,44 @@ fn crosscenter(a: &[i32; 3], b: &[i32; 3], xd: usize, yd: usize) -> bool {
     (((ax <= 8 && bx <= 8) || (ax >= 8 && bx >= 8))
         && ((ay <= 8 && by <= 8) || (ay >= 8 && by >= 8)))
         || (ax + bx == 16 && ay + by == 16)
+}
+
+/// Validates subdivided geometry exactly like Sauerbraten's internal engine loader.
+/// Deletes mathematically malformed cubes (crossed edges, unconnected corners)
+/// to prevent floating artifacts from rendering via clipboard paste.
+pub fn validatec(cube: &mut Cube) {
+    for j in 0..3 {
+        let e0 = cube.edges[j * 4];
+        let e1 = cube.edges[j * 4 + 1];
+        let e2 = cube.edges[j * 4 + 2];
+        let e3 = cube.edges[j * 4 + 3];
+
+        // If start == end for all 4 edges on this face, the cube is collapsed (zero thickness).
+        if (e0 & 0x0F) == (e0 >> 4)
+            && (e1 & 0x0F) == (e1 >> 4)
+            && (e2 & 0x0F) == (e2 >> 4)
+            && (e3 & 0x0F) == (e3 >> 4)
+        {
+            cube.edges = [0x00; 12];
+            break;
+        }
+
+        // If any edge is crossed (end < start) or out of bounds (end > 8), the cube is invalid.
+        let mut valid = true;
+        for e in [e0, e1, e2, e3] {
+            let start = e & 0x0F;
+            let end = e >> 4;
+            if end < start || end > 8 {
+                valid = false;
+                break;
+            }
+        }
+
+        if !valid {
+            cube.edges = [0x00; 12];
+            break;
+        }
+    }
 }
 
 /// Splits any solid, empty or deformed (Normal) leaf grid correctly down to the scale beneath it.
@@ -219,6 +244,11 @@ pub fn subdivide(cube: &Cube) -> [Cube; 8] {
         }
     }
 
+    // Mathematically sanitize children post-subdivision to prevent floating face artifacts
+    for child in &mut ch {
+        validatec(child);
+    }
+
     ch
 }
 
@@ -283,8 +313,12 @@ pub fn optiface(cube: &mut Cube, d: usize) {
     let e2 = cube.edges[d * 4 + 2];
     let e3 = cube.edges[d * 4 + 3];
 
-    // Assert all 4 edges on the face are strictly identical and flat
-    if e0 == e1 && e0 == e2 && e0 == e3 && (e0 >> 4) == (e0 & 0xF) {
+    // Check if the geometry face has been collapsed perfectly flat
+    if (e0 >> 4) == (e0 & 0xF)
+        && (e1 >> 4) == (e1 & 0xF)
+        && (e2 >> 4) == (e2 & 0xF)
+        && (e3 >> 4) == (e3 & 0xF)
+    {
         cube.edges = [0x00; 12];
     }
 }
