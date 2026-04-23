@@ -245,6 +245,32 @@ impl Plugin for BasePlugin {
         }
     }
 
+    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+        let target_cn = packet.spectator_cn as u32;
+
+        let has_privilege =
+            crate::master::get_privilege(server, cn) >= sauer_proto::data::Privilege::Master;
+
+        if target_cn != cn && !has_privilege {
+            return;
+        }
+
+        if let Some(mut p) = get_players(server).try_get_mut(target_cn) {
+            if packet.val {
+                p.client_state = ClientState::Spectator;
+            } else if p.client_state == ClientState::Spectator {
+                p.client_state = ClientState::Dead;
+            }
+        }
+
+        server.broadcast_chan1(&channel1::SpectatorServer {
+            client_num: packet.spectator_cn,
+            is_spectator: packet.val,
+        });
+    }
+
     async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) {
         kill_player(ctx.server(), ctx.cn());
     }

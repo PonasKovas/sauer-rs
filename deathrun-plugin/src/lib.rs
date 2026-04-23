@@ -95,6 +95,12 @@ impl Plugin for DeathRun {
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
         if self.options.is_edit_server && get_map_state(ctx.server()).read().unwrap().is_none() {
+            ctx.cancel();
+        }
+    }
+
+    async fn spawn_client(&self, ctx: &mut Context, _packet: &channel1::SpawnClient) {
+        if self.options.is_edit_server && get_map_state(ctx.server()).read().unwrap().is_none() {
             if let Some(mut p) =
                 sauer_base_plugin::players::get_players(ctx.server()).try_get_mut(ctx.cn())
             {
@@ -183,19 +189,20 @@ impl Plugin for DeathRun {
 
     async fn connect(&self, ctx: &mut Context, _packet: &channel1::Connect) {
         let cn = ctx.cn();
+        let server = ctx.server();
 
         if self.options.is_edit_server {
             // First player gets Master
-            if ctx.server().client_cns().len() == 1 {
+            if server.client_cns().len() == 1 {
                 sauer_base_plugin::master::set_privilege(
-                    ctx.server(),
+                    server,
                     cn,
                     sauer_proto::data::Privilege::Master,
                 );
             }
         }
 
-        if send_map_to(ctx.server(), cn) {
+        if send_map_to(server, cn) {
             info!("sent map state to cn {cn} on connect");
         }
     }
@@ -205,6 +212,21 @@ impl Plugin for DeathRun {
         if send_map_to(ctx.server(), cn) {
             info!("sent map state to cn {cn} on N_GETMAP");
             ctx.cancel();
+        }
+    }
+
+    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
+        if self.options.is_edit_server && get_map_state(ctx.server()).read().unwrap().is_none() {
+            // If they try to unspectate while waiting for a map, cancel it
+            if !packet.val && packet.spectator_cn == ctx.cn() as i32 {
+                ctx.server().send_chan1(
+                    ctx.cn(),
+                    &channel1::ServMsg {
+                        text: "waiting for map, /sendmap".lossy_cubestring(),
+                    },
+                );
+                ctx.cancel();
+            }
         }
     }
 
