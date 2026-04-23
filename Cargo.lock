@@ -226,6 +226,7 @@ dependencies = [
  "sauer-map",
  "sauer-proto",
  "sauer-server",
+ "serde",
  "tokio",
  "tracing",
 ]

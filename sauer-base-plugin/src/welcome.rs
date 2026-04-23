@@ -1,5 +1,6 @@
 use crate::{
     items::get_items,
+    master::send_current_master,
     options::get_options,
     players::{get_players, state::set_initial_state, team::set_initial_team},
     util::broadcast_spawn_state,
@@ -38,6 +39,8 @@ pub fn welcome(server: &Server, cn: u32) {
     } else {
         server.send_chan1(cn, mapchange);
     }
+
+    send_current_master(server, cn);
 
     // Notify existing players of the new player.
     {

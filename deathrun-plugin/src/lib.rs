@@ -1,9 +1,11 @@
 mod map;
+pub mod options;
 mod recreate;
 
 use crate::map::{MapState, get_map_state};
+use crate::options::DeathrunOptions;
 use bytes::Bytes;
-use cube_string::CubeString;
+use cube_string::{CubeString, IntoCubeStringLossy};
 use sauer_proto::{
     Client,
     channel1::{self, EditMode, ServMsg},
@@ -13,20 +15,22 @@ use sauer_server::{
     Server,
     plugin::{Context, Plugin},
 };
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use tracing::{error, info, warn};
 
-pub struct DeathRun {}
+pub struct DeathRun {
+    pub options: DeathrunOptions,
+}
 
 impl DeathRun {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(options: DeathrunOptions) -> Self {
+        Self { options }
     }
 }
 
 impl Default for DeathRun {
     fn default() -> Self {
-        Self::new()
+        Self::new(DeathrunOptions::default())
     }
 }
 
@@ -63,36 +67,8 @@ impl Plugin for DeathRun {
         server.extra.insert(RwLock::new(None::<MapState>));
     }
 
-    async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
-        let text = packet.text.to_utf8();
-        let parts: Vec<&str> = text.trim().split_whitespace().collect();
-        if parts.is_empty() {
-            return;
-        }
-
-        if parts[0] == "#recreate" {
-            let mut divisions_power = 3;
-            let mut delay_ms = 1;
-
-            if parts.len() > 1 {
-                if let Ok(d) = parts[1].parse::<u32>() {
-                    divisions_power = d.clamp(1, 8);
-                }
-            }
-            if parts.len() > 2 {
-                if let Ok(t) = parts[2].parse::<u64>() {
-                    delay_ms = t;
-                }
-            }
-
-            let divisions = 1 << divisions_power;
-            crate::recreate::spawn_recreate_map(
-                Arc::clone(ctx.server()),
-                ctx.cn(),
-                divisions,
-                delay_ms,
-            );
-        }
+    async fn text(&self, _ctx: &mut Context, _packet: &channel1::Text) {
+        // #recreate chat command intentionally removed for now, logic kept in recreate.rs
     }
 
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
@@ -109,10 +85,63 @@ impl Plugin for DeathRun {
                 &ServMsg {
                     text: CubeString::builder()
                         .color(cube_string::Color::Yellow)
-                        .push_str("Server doesnt have the map yet. /sendmap before editing")
+                        .push_str("Server doesn't have the map yet. /sendmap before editing")
                         .build(),
                 },
             );
+            ctx.cancel();
+        }
+    }
+
+    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
+        if self.options.is_edit_server && get_map_state(ctx.server()).read().unwrap().is_none() {
+            if let Some(mut p) =
+                sauer_base_plugin::players::get_players(ctx.server()).try_get_mut(ctx.cn())
+            {
+                if p.client_state != sauer_proto::data::ClientState::Spectator {
+                    p.client_state = sauer_proto::data::ClientState::Spectator;
+                    ctx.server().broadcast_chan1(&channel1::SpectatorServer {
+                        client_num: ctx.cn() as i32,
+                        is_spectator: true,
+                    });
+                    ctx.server().send_chan1(
+                        ctx.cn(),
+                        &channel1::ServMsg {
+                            text: "Waiting for map... Type /map <name> then /sendmap"
+                                .lossy_cubestring(),
+                        },
+                    );
+                }
+            }
+            ctx.cancel();
+        }
+    }
+
+    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
+        if self.options.is_edit_server {
+            let mapchange = channel1::MapChange {
+                map_name: packet.map_name.clone(),
+                mode: sauer_proto::data::GameMode::CoopEdit,
+                has_items: false,
+            };
+            ctx.server().broadcast_chan1(&mapchange);
+
+            // Clear server map state
+            *get_map_state(ctx.server()).write().unwrap() = None;
+
+            // Make everyone spectator
+            for cn in ctx.server().client_cns() {
+                if let Some(mut p) =
+                    sauer_base_plugin::players::get_players(ctx.server()).try_get_mut(cn)
+                {
+                    p.client_state = sauer_proto::data::ClientState::Spectator;
+                }
+                ctx.server().broadcast_chan1(&channel1::SpectatorServer {
+                    client_num: cn as i32,
+                    is_spectator: true,
+                });
+            }
+
             ctx.cancel();
         }
     }
@@ -128,6 +157,25 @@ impl Plugin for DeathRun {
                 state.update_server_items(server);
                 *get_map_state(server).write().unwrap() = Some(state);
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
+
+                if self.options.is_edit_server {
+                    // Unspectate him and allow editing
+                    if let Some(mut p) =
+                        sauer_base_plugin::players::get_players(server).try_get_mut(cn)
+                    {
+                        p.client_state = sauer_proto::data::ClientState::Dead;
+                    }
+                    server.broadcast_chan1(&channel1::SpectatorServer {
+                        client_num: cn as i32,
+                        is_spectator: false,
+                    });
+                    server.send_chan1(
+                        cn,
+                        &channel1::ServMsg {
+                            text: "Map received. You can now spawn and edit.".lossy_cubestring(),
+                        },
+                    );
+                }
             }
             Err(e) => warn!("cn {cn} sent an invalid map: {e}"),
         }
@@ -135,6 +183,18 @@ impl Plugin for DeathRun {
 
     async fn connect(&self, ctx: &mut Context, _packet: &channel1::Connect) {
         let cn = ctx.cn();
+
+        if self.options.is_edit_server {
+            // First player gets Master
+            if ctx.server().client_cns().len() == 1 {
+                sauer_base_plugin::master::set_privilege(
+                    ctx.server(),
+                    cn,
+                    sauer_proto::data::Privilege::Master,
+                );
+            }
+        }
+
         if send_map_to(ctx.server(), cn) {
             info!("sent map state to cn {cn} on connect");
         }

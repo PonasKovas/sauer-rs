@@ -3,6 +3,7 @@ use crate::{
         Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, get_items,
         spawntime,
     },
+    master::MasterState,
     options::{BasePluginOptions, get_options},
     players::{
         ClipboardData, Players, clear_player,
@@ -42,6 +43,7 @@ fn get_map_data(server: &Server) -> &RwLock<MapData> {
 }
 
 pub mod items;
+pub mod master;
 pub mod options;
 pub mod players;
 mod util;
@@ -106,6 +108,7 @@ impl Plugin for BasePlugin {
         server.extra.insert(Players::new());
         server.extra.insert(RwLock::new(MapData(None)));
         server.extra.insert(RwLock::new(Items::new()));
+        server.extra.insert(RwLock::new(MasterState::default()));
     }
 
     async fn start(&self, server: &std::sync::Arc<Server>) {
@@ -171,11 +174,20 @@ impl Plugin for BasePlugin {
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
+        use sauer_proto::data::Privilege;
+        let had_privilege = get_players(ctx.server())
+            .try_get(ctx.cn())
+            .map_or(false, |p| p.privilege != Privilege::None);
+
         clear_player(ctx.server(), ctx.cn());
 
         ctx.server().broadcast_chan1(&channel1::ClientDisconnected {
             client_num: ctx.cn() as i32,
         });
+
+        if had_privilege {
+            master::broadcast_current_master(ctx.server());
+        }
     }
 
     async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {

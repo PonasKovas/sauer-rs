@@ -1,5 +1,5 @@
 use cube_string::CubeString;
-use sauer_proto::data::{ClientState, PlayerModel, PlayerState, Vec3};
+use sauer_proto::data::{ClientState, PlayerModel, PlayerState, Privilege, Vec3};
 
 /// Stored clipboard geometry data for coop edit clipboard relay.
 #[derive(Clone, Debug)]
@@ -23,6 +23,7 @@ pub struct PlayerData {
     pub clipboard: Option<ClipboardData>,
     /// Remaining quad damage milliseconds. Decremented each server tick.
     pub quad_millis: i32,
+    pub privilege: Privilege,
 }
 
 impl PlayerData {
@@ -39,6 +40,7 @@ impl PlayerData {
             deaths: 0,
             clipboard: None,
             quad_millis: 0,
+            privilege: Privilege::None,
         }
     }
 }
