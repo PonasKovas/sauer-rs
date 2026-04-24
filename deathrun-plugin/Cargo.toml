@@ -16,3 +16,4 @@ flate2.workspace = true
 rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 bitcode.workspace = true
+thiserror.workspace = true

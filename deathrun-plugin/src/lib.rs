@@ -1,4 +1,4 @@
-mod entity_poc;
+pub mod entity_store;
 mod map;
 pub mod options;
 mod recreate;
@@ -206,7 +206,58 @@ impl Plugin for DeathRun {
                     s.waiting_for_map = false;
                 }
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
-                entity_poc::on_map_received(server, cn);
+
+                // --- temporary entity_store smoke test ---
+                #[derive(Debug, serde::Serialize, serde::Deserialize)]
+                struct TestData { value: u64, label: String }
+
+                const STORE_VERSION: u8 = 0;
+
+                {
+                    let state = get_server_state(server).read().unwrap();
+                    if let Some(map) = state.map.as_ref() {
+                        match entity_store::read::<TestData>(&map.world, STORE_VERSION) {
+                            Ok(None) => {
+                                info!("[store test] nothing in map yet");
+                                server.broadcast_chan1(&channel1::ServMsg {
+                                    text: "[store test] no data found in map".lossy_cubestring(),
+                                });
+                            }
+                            Ok(Some(d)) => {
+                                info!("[store test] read back: {:?}", d);
+                                server.broadcast_chan1(&channel1::ServMsg {
+                                    text: format!(
+                                        "[store test] read: value={} label='{}'",
+                                        d.value, d.label
+                                    )
+                                    .lossy_cubestring(),
+                                });
+                            }
+                            Err(e) => {
+                                warn!("[store test] read error: {e}");
+                                server.broadcast_chan1(&channel1::ServMsg {
+                                    text: format!("[store test] read error: {e}").lossy_cubestring(),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                {
+                    let rval: u64 = rand::random();
+                    let data = TestData {
+                        value: rval,
+                        label: format!("written at upload by cn {cn}"),
+                    };
+                    let mut state = get_server_state(server).write().unwrap();
+                    if let Some(map) = state.map.as_mut() {
+                        match entity_store::write(&mut map.world, server, cn, &data, STORE_VERSION) {
+                            Ok(()) => info!("[store test] wrote {:?}", data),
+                            Err(e) => warn!("[store test] write error: {e}"),
+                        }
+                    }
+                }
+                // --- end temporary test ---
 
                 if self.options.is_edit_server {
                     let was_spectator = server

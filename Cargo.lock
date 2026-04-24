@@ -263,6 +263,7 @@ dependencies = [
  "sauer-proto",
  "sauer-server",
  "serde",
+ "thiserror",
  "tokio",
  "tracing",
 ]
