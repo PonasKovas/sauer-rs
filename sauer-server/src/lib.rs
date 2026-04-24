@@ -7,26 +7,23 @@ use sauer_proto::{
     data::{GameMode, MasterMode},
     route::{Chan0, Chan1, Chan2, S2C},
 };
-use std::{
-    net::SocketAddr,
-    sync::{Mutex, RwLock},
-};
+use std::{net::SocketAddr, sync::RwLock};
 
 mod builder;
 mod handle_client;
+pub mod items;
 mod peer;
+pub mod players;
 pub mod plugin;
 pub mod utils;
-pub mod players;
-pub mod items;
 mod welcome;
 
 pub use builder::ServerBuilder;
-pub use plugin::{Context, Plugin};
-pub use players::{ClipboardData, PlayerData, Players};
 pub use items::{
     Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, spawntime,
 };
+pub use players::{ClipboardData, PlayerData, Players};
+pub use plugin::{Context, Plugin};
 
 pub struct Server {
     pub(crate) clients: DashMap<u32, Peer>,
@@ -46,9 +43,7 @@ pub struct Server {
     pub has_password: RwLock<bool>,
     pub map_name: RwLock<CubeString>,
     pub game_mode: RwLock<GameMode>,
-    /// Access via [`Server::master_mode`] / [`Server::set_master_mode`] so that
-    /// changes are automatically broadcast to clients.
-    master_mode: Mutex<MasterMode>,
+    pub master_mode: RwLock<MasterMode>,
 }
 
 impl Server {
@@ -71,7 +66,7 @@ impl Server {
             has_password: RwLock::new(has_password),
             map_name: RwLock::new(map_name),
             game_mode: RwLock::new(game_mode),
-            master_mode: Mutex::new(master_mode),
+            master_mode: RwLock::new(master_mode),
         }
     }
 
@@ -148,12 +143,12 @@ impl Server {
     // ── Master mode ───────────────────────────────────────────────────────────
 
     pub fn master_mode(&self) -> MasterMode {
-        *self.master_mode.lock().unwrap()
+        *self.master_mode.read().unwrap()
     }
 
     /// Sets the master mode and broadcasts the updated master state to everyone.
     pub fn set_master_mode(&self, mode: MasterMode) {
-        *self.master_mode.lock().unwrap() = mode;
+        *self.master_mode.write().unwrap() = mode;
         self.broadcast_current_master();
     }
 }

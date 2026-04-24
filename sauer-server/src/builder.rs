@@ -145,7 +145,11 @@ impl<P: Plugin> ServerBuilder<P> {
             let plugin = Arc::clone(&plugin);
             let server = Arc::clone(&server);
             tokio::spawn(async move {
-                let mut ctx = Context { server: Arc::clone(&server), cn, cancelled: false };
+                let mut ctx = Context {
+                    server: Arc::clone(&server),
+                    cn,
+                    cancelled: false,
+                };
 
                 plugin.connected(&mut ctx).await;
 
@@ -209,7 +213,9 @@ impl Server {
 
         clear_player(&self.players, cn);
 
-        self.broadcast_chan1(&ClientDisconnected { client_num: cn as i32 });
+        self.broadcast_chan1(&ClientDisconnected {
+            client_num: cn as i32,
+        });
 
         if had_privilege {
             self.broadcast_current_master();
@@ -221,8 +227,7 @@ impl Server {
     /// - advances item respawn countdowns; broadcasts N_ITEMSPAWN when items respawn
     pub(crate) fn start_tick_task(server: Arc<Server>) {
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_millis(100));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
             loop {
                 interval.tick().await;
 
@@ -255,7 +260,9 @@ impl Server {
                         .collect()
                 };
                 for i in spawning {
-                    server.broadcast_chan1(&ItemSpawn { item_index: i as i32 });
+                    server.broadcast_chan1(&ItemSpawn {
+                        item_index: i as i32,
+                    });
                 }
             }
         });
@@ -264,16 +271,15 @@ impl Server {
 
 // ── Base packet handlers (called from handle_client after plugin dispatch) ────
 
+use crate::items::{ServerItem, apply_pickup, canpickup, entity_to_item_type};
 use sauer_proto::{
-    Client,
-    channel0,
+    Client, channel0,
     channel1::{
         self, ClipboardServer, ExplodeFx, ItemAck, RedoServer, ShotFx, SpawnServer, UndoServer,
     },
     channel2,
     data::{ClientState, MasterMode as MM, Privilege, SetTeamReason},
 };
-use crate::items::{apply_pickup, canpickup, entity_to_item_type, ServerItem};
 
 impl Server {
     pub(crate) fn handle_connect(&self, cn: u32, packet: &channel1::Connect) {
@@ -310,11 +316,15 @@ impl Server {
 
     pub(crate) fn handle_spawn_client(&self, cn: u32, packet: &channel1::SpawnClient) {
         let spawned_state = {
-            let Some(mut p) = self.players.try_get_mut(cn) else { return };
+            let Some(mut p) = self.players.try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Dead {
                 return;
             }
-            let Some(state) = p.state.as_mut() else { return };
+            let Some(state) = p.state.as_mut() else {
+                return;
+            };
             // Sync server life_seq to what the client is using.
             state.life_sequence = packet.life_sequence;
             state.gun_select = packet.gun_select;
@@ -326,7 +336,10 @@ impl Server {
             // Broadcast to all OTHER clients; the spawning client already set itself CS_ALIVE.
             self.broadcast_except_chan1(
                 cn,
-                &Client { client_num: cn as i32, packet: SpawnServer { state } },
+                &Client {
+                    client_num: cn as i32,
+                    packet: SpawnServer { state },
+                },
             );
         }
     }
@@ -362,7 +375,9 @@ impl Server {
         use crate::players::combat::gun_damage_per_ray;
 
         {
-            let Some(mut p) = self.players.try_get_mut(cn) else { return };
+            let Some(mut p) = self.players.try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Alive {
                 return;
             }
@@ -442,7 +457,10 @@ impl Server {
         info!("[CHAT] {name}: {}", packet.text);
         self.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
@@ -465,21 +483,30 @@ impl Server {
     pub(crate) fn handle_client_ping(&self, cn: u32, packet: &channel1::ClientPing) {
         self.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
     pub(crate) fn handle_taunt(&self, cn: u32, packet: &channel1::Taunt) {
         self.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
     pub(crate) fn handle_sound(&self, cn: u32, packet: &channel1::Sound) {
         self.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
@@ -498,7 +525,12 @@ impl Server {
         let map_bytes = self.map_data.read().unwrap().clone();
         let Some(data) = map_bytes else { return };
 
-        self.send_chan2(cn, &channel2::SendMap { data: data.to_vec() });
+        self.send_chan2(
+            cn,
+            &channel2::SendMap {
+                data: data.to_vec(),
+            },
+        );
 
         // Resend all players' clipboards so the client has current state after loading the map.
         let clipboard_packets: Vec<(i32, i32, Vec<u8>)> = self
@@ -514,7 +546,14 @@ impl Server {
             })
             .collect();
         for (owner_cn, unpack_len, data) in clipboard_packets {
-            self.send_chan1(cn, &ClipboardServer { client_num: owner_cn, unpack_len, data });
+            self.send_chan1(
+                cn,
+                &ClipboardServer {
+                    client_num: owner_cn,
+                    unpack_len,
+                    data,
+                },
+            );
         }
     }
 
@@ -527,7 +566,13 @@ impl Server {
         if *self.game_mode.read().unwrap() != sauer_proto::data::GameMode::CoopEdit {
             return;
         }
-        self.broadcast_except_chan1(cn, &Client { client_num: cn as i32, packet: pkt.clone() });
+        self.broadcast_except_chan1(
+            cn,
+            &Client {
+                client_num: cn as i32,
+                packet: pkt.clone(),
+            },
+        );
     }
 
     pub(crate) fn handle_edit_ent(&self, cn: u32, packet: &channel1::EditEnt) {
@@ -549,8 +594,7 @@ impl Server {
                         true
                     } else {
                         let item = &mut items.list[idx];
-                        if item.item_type != item_type
-                            || (!item.spawned && item.spawn_time_ms == 0)
+                        if item.item_type != item_type || (!item.spawned && item.spawn_time_ms == 0)
                         {
                             item.item_type = item_type;
                             item.spawned = false;
@@ -575,13 +619,18 @@ impl Server {
         // Relay the geometry change to all other coop clients.
         self.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
 
         // Tell all clients (including the editor) that the new item slot is spawned.
         if new_item {
             self.items.write().unwrap().list[idx].spawned = true;
-            self.broadcast_chan1(&ItemSpawn { item_index: idx as i32 });
+            self.broadcast_chan1(&ItemSpawn {
+                item_index: idx as i32,
+            });
         }
     }
 
@@ -596,7 +645,10 @@ impl Server {
         }
         self.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
@@ -636,7 +688,9 @@ impl Server {
         let idx = packet.item_index as usize;
 
         let can = {
-            let Some(p) = self.players.try_get(cn) else { return };
+            let Some(p) = self.players.try_get(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Alive {
                 return;
             }
@@ -647,14 +701,19 @@ impl Server {
                     .unwrap()
                     .list
                     .get(idx)
-                    .map_or(false, |item| item.spawned && canpickup(s, quad_millis, item.item_type))
+                    .map_or(false, |item| {
+                        item.spawned && canpickup(s, quad_millis, item.item_type)
+                    })
             })
         };
 
         if !can {
             self.send_chan1(
                 cn,
-                &ItemAck { item_index: packet.item_index, client_num: -1 },
+                &ItemAck {
+                    item_index: packet.item_index,
+                    client_num: -1,
+                },
             );
             return;
         }
@@ -721,7 +780,9 @@ impl Server {
             cn,
             &Client {
                 client_num: cn as i32,
-                packet: channel1::CopyServer { sel: packet.sel.clone() },
+                packet: channel1::CopyServer {
+                    sel: packet.sel.clone(),
+                },
             },
         );
     }
@@ -734,7 +795,9 @@ impl Server {
             cn,
             &Client {
                 client_num: cn as i32,
-                packet: channel1::PasteServer { sel: packet.sel.clone() },
+                packet: channel1::PasteServer {
+                    sel: packet.sel.clone(),
+                },
             },
         );
     }

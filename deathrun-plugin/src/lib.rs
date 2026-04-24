@@ -72,7 +72,11 @@ impl Plugin for DeathRun {
     }
 
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
-        if get_server_state(ctx.server()).read().unwrap().waiting_for_map {
+        if get_server_state(ctx.server())
+            .read()
+            .unwrap()
+            .waiting_for_map
+        {
             ctx.server().send_chan1(
                 ctx.cn(),
                 &Client {
@@ -95,7 +99,10 @@ impl Plugin for DeathRun {
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
         if self.options.is_edit_server
-            && get_server_state(ctx.server()).read().unwrap().waiting_for_map
+            && get_server_state(ctx.server())
+                .read()
+                .unwrap()
+                .waiting_for_map
         {
             ctx.cancel();
         }
@@ -103,7 +110,10 @@ impl Plugin for DeathRun {
 
     async fn spawn_client(&self, ctx: &mut Context, _packet: &channel1::SpawnClient) {
         if self.options.is_edit_server
-            && get_server_state(ctx.server()).read().unwrap().waiting_for_map
+            && get_server_state(ctx.server())
+                .read()
+                .unwrap()
+                .waiting_for_map
         {
             let cn = ctx.cn();
             let server = ctx.server();
@@ -168,8 +178,10 @@ impl Plugin for DeathRun {
         let server = ctx.server();
 
         if self.options.is_edit_server {
-            let is_spectator =
-                server.players.try_get(cn).map_or(false, |p| p.client_state == ClientState::Spectator);
+            let is_spectator = server
+                .players
+                .try_get(cn)
+                .map_or(false, |p| p.client_state == ClientState::Spectator);
             let is_master = server.get_privilege(cn) >= Privilege::Master;
 
             if is_spectator && !is_master {
@@ -249,7 +261,10 @@ impl Plugin for DeathRun {
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
         if self.options.is_edit_server
             && !packet.val
-            && get_server_state(ctx.server()).read().unwrap().waiting_for_map
+            && get_server_state(ctx.server())
+                .read()
+                .unwrap()
+                .waiting_for_map
         {
             ctx.server().send_chan1(
                 ctx.cn(),

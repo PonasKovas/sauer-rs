@@ -2,14 +2,14 @@ use dashmap::DashMap;
 use rand::random;
 use std::ops::{Deref, DerefMut};
 
-mod data;
 pub mod combat;
-pub mod state;
-pub mod privilege;
-pub mod team;
-pub mod name;
+mod data;
 pub mod model;
+pub mod name;
 pub mod position;
+pub mod privilege;
+pub mod state;
+pub mod team;
 
 pub use data::{ClipboardData, PlayerData};
 
@@ -19,7 +19,9 @@ pub struct Players {
 
 impl Default for Players {
     fn default() -> Self {
-        Self { map: DashMap::new() }
+        Self {
+            map: DashMap::new(),
+        }
     }
 }
 
@@ -33,7 +35,9 @@ impl Players {
     }
 
     pub fn get(&self, cn: u32) -> impl Deref<Target = PlayerData> + '_ {
-        self.map.get(&cn).unwrap_or_else(|| panic!("cn {cn} not in Players"))
+        self.map
+            .get(&cn)
+            .unwrap_or_else(|| panic!("cn {cn} not in Players"))
     }
 
     pub fn try_get_mut(&self, cn: u32) -> Option<impl DerefMut<Target = PlayerData> + '_> {

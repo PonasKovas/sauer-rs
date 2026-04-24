@@ -38,7 +38,11 @@ pub fn explosion_damage(gun: Gun, dist: f32, is_self: bool) -> i32 {
         base as i32
     };
     let damage = damage.max(0);
-    if is_self { damage / EXP_SELFDAMDIV } else { damage }
+    if is_self {
+        damage / EXP_SELFDAMDIV
+    } else {
+        damage
+    }
 }
 
 impl Server {
@@ -59,16 +63,19 @@ impl Server {
                 .try_get(actor_cn)
                 .map_or(1, |p| if p.quad_millis > 0 { 4 } else { 1 });
 
-        let Some(mut p) = self.players.try_get_mut(target_cn) else { return };
+        let Some(mut p) = self.players.try_get_mut(target_cn) else {
+            return;
+        };
         if p.client_state != ClientState::Alive {
             return;
         }
         // Inner block: drops the &mut PlayerState borrow before we modify client_state.
         let (health, armour, killed) = {
-            let Some(state) = p.state.as_mut() else { return };
+            let Some(state) = p.state.as_mut() else {
+                return;
+            };
             // Armour absorbs: blue=25%, green=50%, yellow=75%
-            let absorbed =
-                ((damage * (state.armour_type as i32 + 1) * 25) / 100).min(state.armour);
+            let absorbed = ((damage * (state.armour_type as i32 + 1) * 25) / 100).min(state.armour);
             state.armour -= absorbed;
             state.health -= damage - absorbed;
             (state.health, state.armour, state.health <= 0)
@@ -87,7 +94,12 @@ impl Server {
         });
         self.send_chan1(
             target_cn,
-            &HitPush { target_cn: target_cn as i32, gun, damage, dir },
+            &HitPush {
+                target_cn: target_cn as i32,
+                gun,
+                damage,
+                dir,
+            },
         );
 
         if killed {
@@ -97,7 +109,9 @@ impl Server {
 
     /// Kill a player by suicide (frags -= 1).
     pub fn kill_player(&self, cn: u32) {
-        let Some(mut p) = self.players.try_get_mut(cn) else { return };
+        let Some(mut p) = self.players.try_get_mut(cn) else {
+            return;
+        };
         if p.client_state != ClientState::Alive {
             return;
         }

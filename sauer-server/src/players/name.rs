@@ -12,7 +12,10 @@ impl Server {
 
     /// Sets the player's name and broadcasts N_SWITCHNAME to all clients.
     pub fn set_name(&self, cn: u32, name: CubeString) {
-        let pkt = Client { client_num: cn as i32, packet: SwitchName { name } };
+        let pkt = Client {
+            client_num: cn as i32,
+            packet: SwitchName { name },
+        };
         self.broadcast_chan1(&pkt);
         if let Some(mut p) = self.players.try_get_mut(cn) {
             p.name = pkt.packet.name;

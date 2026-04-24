@@ -10,7 +10,6 @@ impl Server {
     /// their clipboards, and N_SPAWNSTATE broadcast.
     ///
     /// For `MasterMode::Private`, a plugin must perform auth and then call this manually.
-    /// For `MasterMode::Locked`, call this then immediately spectate the player if they lack privilege.
     pub fn welcome(&self, cn: u32) {
         self.set_initial_team(cn);
         self.set_initial_state(cn);
@@ -30,7 +29,11 @@ impl Server {
             )
         };
 
-        let mapchange = MapChange { map_name, mode, has_items: notgotitems };
+        let mapchange = MapChange {
+            map_name,
+            mode,
+            has_items: notgotitems,
+        };
 
         // Sauerbraten requires N_ITEMLIST in the same ENet packet as N_MAPCHANGE.
         if let Some(items) = spawned_items {
@@ -97,7 +100,12 @@ impl Server {
 
             self.send_chan1(
                 cn,
-                &InitClient { client_num: other_cn as i32, name, player_model, team },
+                &InitClient {
+                    client_num: other_cn as i32,
+                    name,
+                    player_model,
+                    team,
+                },
             );
             if let Some(cb) = clipboard {
                 self.send_chan1(cn, &cb);

@@ -4,10 +4,7 @@ use sauer_proto::{
     channel1,
     data::{EditVarValue, SelInfo},
 };
-use sauer_server::{
-    Server, ServerItem,
-    delay_spawn, entity_to_item_type, spawntime,
-};
+use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
 use std::sync::RwLock;
 
 /// Converts `sauer_proto` network bounds into `sauer_map` selection areas.
@@ -83,11 +80,18 @@ impl MapState {
 
     pub fn handle_edit_var(&mut self, packet: &channel1::EditVar) {
         let ogz_var = match &packet.val {
-            EditVarValue::Int(v) => Variable::Int { name: packet.name.clone(), value: *v },
-            EditVarValue::Float(v) => Variable::Float { name: packet.name.clone(), value: *v },
-            EditVarValue::String(v) => {
-                Variable::String { name: packet.name.clone(), value: v.clone() }
-            }
+            EditVarValue::Int(v) => Variable::Int {
+                name: packet.name.clone(),
+                value: *v,
+            },
+            EditVarValue::Float(v) => Variable::Float {
+                name: packet.name.clone(),
+                value: *v,
+            },
+            EditVarValue::String(v) => Variable::String {
+                name: packet.name.clone(),
+                value: v.clone(),
+            },
         };
 
         if let ogz_rs::data::MapConfig::Modern { variables } = &mut self.meta.config {
@@ -104,7 +108,11 @@ impl MapState {
     }
 
     pub fn handle_edit_tex(&mut self, packet: &channel1::EditTex) {
-        self.world.set_texture(&to_selection(&packet.sel), packet.tex as u16, packet.all_faces);
+        self.world.set_texture(
+            &to_selection(&packet.sel),
+            packet.tex as u16,
+            packet.all_faces,
+        );
         self.invalidate_cache();
     }
 
@@ -240,7 +248,8 @@ impl MapState {
     }
 
     pub fn handle_edit_face(&mut self, packet: &channel1::EditFace) {
-        self.world.edit_face(&to_selection(&packet.sel), packet.dir, packet.mode as i32);
+        self.world
+            .edit_face(&to_selection(&packet.sel), packet.dir, packet.mode as i32);
         self.invalidate_cache();
     }
 
@@ -262,7 +271,10 @@ pub struct DeathrunState {
 
 impl Default for DeathrunState {
     fn default() -> Self {
-        Self { map: None, waiting_for_map: false }
+        Self {
+            map: None,
+            waiting_for_map: false,
+        }
     }
 }
 

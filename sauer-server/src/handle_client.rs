@@ -28,7 +28,11 @@ pub(crate) async fn handle_client<P: Plugin>(
     cn: u32,
 ) -> Result<()> {
     let mut rx = SauerReceiver::new(peer);
-    let mut ctx = Context { server: Arc::clone(server), cn, cancelled: false };
+    let mut ctx = Context {
+        server: Arc::clone(server),
+        cn,
+        cancelled: false,
+    };
 
     loop {
         let pkt = rx.recv().await?;
@@ -224,9 +228,7 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::ClearBans(p) => plugin.clear_bans(&mut ctx, &p).await,
                 Chan1Client::Kick(p) => plugin.kick(&mut ctx, &p).await,
                 Chan1Client::SetTeamClient(p) => plugin.set_team(&mut ctx, &p).await,
-                Chan1Client::ForceIntermission(p) => {
-                    plugin.force_intermission(&mut ctx, &p).await
-                }
+                Chan1Client::ForceIntermission(p) => plugin.force_intermission(&mut ctx, &p).await,
                 Chan1Client::RecordDemo(p) => plugin.record_demo(&mut ctx, &p).await,
                 Chan1Client::StopDemo(p) => plugin.stop_demo(&mut ctx, &p).await,
                 Chan1Client::ClearDemos(p) => plugin.clear_demos(&mut ctx, &p).await,
@@ -249,9 +251,7 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::InitFlagsClient(p) => plugin.init_flags(&mut ctx, &p).await,
                 Chan1Client::InitTokensClient(p) => plugin.init_tokens(&mut ctx, &p).await,
                 Chan1Client::TakeTokenClient(p) => plugin.take_token(&mut ctx, &p).await,
-                Chan1Client::DepositTokensClient(p) => {
-                    plugin.deposit_tokens(&mut ctx, &p).await
-                }
+                Chan1Client::DepositTokensClient(p) => plugin.deposit_tokens(&mut ctx, &p).await,
             },
 
             Packet::Chan2(data) => {
@@ -289,7 +289,11 @@ impl Packet {
 
 impl SauerReceiver {
     fn new(peer: PeerReceiver) -> Self {
-        Self { rx: peer, session: Session::new(), buffer: VecDeque::new() }
+        Self {
+            rx: peer,
+            session: Session::new(),
+            buffer: VecDeque::new(),
+        }
     }
 
     async fn recv(&mut self) -> Result<Packet> {

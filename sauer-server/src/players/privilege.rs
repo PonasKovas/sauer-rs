@@ -12,9 +12,15 @@ impl Server {
             .map
             .iter()
             .filter(|e| e.privilege != Privilege::None)
-            .map(|e| MasterClient { client_num: *e.key() as i32, privilege: e.privilege })
+            .map(|e| MasterClient {
+                client_num: *e.key() as i32,
+                privilege: e.privilege,
+            })
             .collect();
-        CurrentMaster { master_mode, clients }
+        CurrentMaster {
+            master_mode,
+            clients,
+        }
     }
 
     /// Sends the current master state to a single client (call during welcome).
@@ -29,7 +35,9 @@ impl Server {
 
     /// Returns a player's current privilege level.
     pub fn get_privilege(&self, cn: u32) -> Privilege {
-        self.players.try_get(cn).map_or(Privilege::None, |p| p.privilege)
+        self.players
+            .try_get(cn)
+            .map_or(Privilege::None, |p| p.privilege)
     }
 
     /// Sets a player's privilege level and broadcasts the updated master list to everyone.

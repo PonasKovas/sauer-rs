@@ -36,7 +36,11 @@ impl PlayerData {
             team: CubeString::new(),
             client_state: ClientState::Dead,
             state: None,
-            position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            position: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             frags: 0,
             deaths: 0,
             clipboard: None,

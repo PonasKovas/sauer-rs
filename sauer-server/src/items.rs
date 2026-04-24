@@ -15,7 +15,10 @@ pub struct Items {
 
 impl Default for Items {
     fn default() -> Self {
-        Self { list: Vec::new(), notgotitems: true }
+        Self {
+            list: Vec::new(),
+            notgotitems: true,
+        }
     }
 }
 
@@ -34,7 +37,10 @@ impl Items {
             .iter()
             .enumerate()
             .filter(|(_, item)| item.spawned)
-            .map(|(i, item)| ItemSpawn { item_index: i as i32, item_type: item.item_type })
+            .map(|(i, item)| ItemSpawn {
+                item_index: i as i32,
+                item_type: item.item_type,
+            })
             .collect()
     }
 }

@@ -52,7 +52,9 @@ async fn main() {
         .map_name(config.base.map_cube())
         .game_mode(config.base.mode)
         .master_mode(config.base.master_mode)
-        .plugin(DeathRun::new(DeathrunOptions { is_edit_server: true }))
+        .plugin(DeathRun::new(DeathrunOptions {
+            is_edit_server: true,
+        }))
         .plugin(lua_plugin);
 
     if let Err(e) = server.run().await {

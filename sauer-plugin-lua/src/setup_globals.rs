@@ -48,8 +48,8 @@ fn log(level: Level, name: &str, lua: &Lua, args: Variadic<Value>) -> Result<(),
     match level {
         Level::TRACE => event!(target: "lua", Level::TRACE, file, line, "[{name}] {output}"),
         Level::DEBUG => event!(target: "lua", Level::DEBUG, file, line, "[{name}] {output}"),
-        Level::INFO =>  event!(target: "lua", Level::INFO,  file, line, "[{name}] {output}"),
-        Level::WARN =>  event!(target: "lua", Level::WARN,  file, line, "[{name}] {output}"),
+        Level::INFO => event!(target: "lua", Level::INFO,  file, line, "[{name}] {output}"),
+        Level::WARN => event!(target: "lua", Level::WARN,  file, line, "[{name}] {output}"),
         Level::ERROR => event!(target: "lua", Level::ERROR, file, line, "[{name}] {output}"),
     }
 

@@ -26,7 +26,11 @@ impl Server {
 
     /// Sets a player's team and broadcasts N_SETTEAM to all clients.
     pub fn set_team(&self, cn: u32, team: CubeString, reason: SetTeamReason) {
-        let pkt = SetTeamServer { client_num: cn as i32, team, reason };
+        let pkt = SetTeamServer {
+            client_num: cn as i32,
+            team,
+            reason,
+        };
         self.broadcast_chan1(&pkt);
         if let Some(mut p) = self.players.try_get_mut(cn) {
             p.team = pkt.team;
@@ -34,6 +38,10 @@ impl Server {
     }
 
     pub fn count_players_in(&self, team: &CubeStr) -> u32 {
-        self.players.map.iter().filter(|entry| &entry.team == team).count() as u32
+        self.players
+            .map
+            .iter()
+            .filter(|entry| &entry.team == team)
+            .count() as u32
     }
 }

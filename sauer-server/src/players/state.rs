@@ -38,7 +38,9 @@ impl Server {
         let insta = self.game_mode.read().unwrap().is_insta();
 
         let new_state = {
-            let Some(mut p) = self.players.try_get_mut(cn) else { return };
+            let Some(mut p) = self.players.try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Dead {
                 return;
             }
@@ -51,7 +53,13 @@ impl Server {
             state
         };
 
-        self.send_chan1(cn, &SpawnState { client_num: cn as i32, state: new_state });
+        self.send_chan1(
+            cn,
+            &SpawnState {
+                client_num: cn as i32,
+                state: new_state,
+            },
+        );
     }
 
     /// Broadcasts N_SPAWNSTATE for a newly welcomed player to everyone.
@@ -62,6 +70,9 @@ impl Server {
             .state
             .clone()
             .expect("broadcast_spawn_state called before state was initialized");
-        self.broadcast_chan1(&SpawnState { client_num: cn as i32, state });
+        self.broadcast_chan1(&SpawnState {
+            client_num: cn as i32,
+            state,
+        });
     }
 }
