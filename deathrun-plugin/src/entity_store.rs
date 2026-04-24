@@ -1,7 +1,7 @@
 //! Abstract entity-based data storage for Sauerbraten maps.
 //!
 //! Arbitrary `serde`-serializable types can be encoded (bitcode + zlib) and
-//! stored inside map entities of type Empty (0) placed at sentinel positions.
+//! stored inside map entities of type Particles (5) placed at sentinel positions.
 //!
 //! ## Entity layout
 //!
@@ -43,8 +43,8 @@ use tracing::info;
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
-// Empty (0) in both ogz and protocol — sentinel coordinates distinguish store
-// entities from genuinely empty ones that the engine places at origin.
+// Particles (5) in both ogz and protocol — a non-zero type that maps 1:1
+// between ogz and the network protocol with no filtering or special handling.
 
 const SENTINEL_Y: f32 = -100.0;
 const SENTINEL_Z: f32 = -100.0;
@@ -139,7 +139,7 @@ fn unpack(entities: &[&Entity]) -> Result<Vec<u8>, StoreError> {
 /// Return the store version encoded in `ent`'s X coordinate, or `None` if `ent`
 /// is not a store entity.
 fn entity_version(ent: &Entity) -> Option<u8> {
-    if !matches!(ent.ent_type, EntityType::Empty) {
+    if !matches!(ent.ent_type, EntityType::Particles) {
         return None;
     }
     let x = ent.position[0];
@@ -158,7 +158,7 @@ fn build_entity(attrs: [u16; 5], version: u8) -> Entity {
     Entity {
         position: [sentinel_x(version), SENTINEL_Y, SENTINEL_Z],
         attrs: attrs.map(|v| v as i16),
-        ent_type: EntityType::Empty,
+        ent_type: EntityType::Particles,
         extra_data: vec![],
     }
 }
@@ -173,7 +173,7 @@ fn broadcast_ent(server: &Server, cn: u32, id: usize, attrs: [u16; 5], version: 
                 y: SENTINEL_Y,
                 z: SENTINEL_Z,
             },
-            type_: sauer_proto::data::EntityType::Empty,
+            type_: sauer_proto::data::EntityType::Particles,
             attrs: attrs.map(|v| v as i32),
         },
     });
