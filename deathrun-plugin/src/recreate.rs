@@ -1,4 +1,4 @@
-use crate::map::get_map_state;
+use crate::map::get_server_state;
 use cube_string::IntoCubeStringLossy;
 use flate2::{Compression, write::ZlibEncoder};
 use rand::seq::SliceRandom;
@@ -97,8 +97,8 @@ fn generate_clipboard(node: &sauer_map::Node, size: i32) -> (i32, Vec<u8>) {
 
 /// Transforms the map into the uploaded custom map piece by piece.
 pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms: u64) {
-    let state_lock = get_map_state(&server).read().unwrap();
-    let state = match state_lock.as_ref() {
+    let state_lock = get_server_state(&server).read().unwrap();
+    let state = match state_lock.map.as_ref() {
         Some(s) => s,
         None => {
             server.send_chan1(

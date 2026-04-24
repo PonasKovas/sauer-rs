@@ -272,6 +272,19 @@ impl MapState {
     }
 }
 
-pub(crate) fn get_map_state(server: &Server) -> &RwLock<Option<MapState>> {
-    server.extra.get().expect("MapState not initialised")
+pub struct DeathrunState {
+    pub map: Option<MapState>,
+    /// True while waiting for a player to upload a map after a map vote.
+    /// Spawning and unspectating are blocked until this clears.
+    pub waiting_for_map: bool,
+}
+
+impl Default for DeathrunState {
+    fn default() -> Self {
+        Self { map: None, waiting_for_map: false }
+    }
+}
+
+pub(crate) fn get_server_state(server: &Server) -> &RwLock<DeathrunState> {
+    server.extra.get().expect("DeathrunState not initialised")
 }

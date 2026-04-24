@@ -203,14 +203,17 @@ impl Plugin for BasePlugin {
             }
             MasterMode::Locked => {
                 welcome(server, cn);
-                // Force the new player into spectator — only masters may unspectate them.
-                if let Some(mut p) = get_players(server).try_get_mut(cn) {
-                    p.client_state = ClientState::Spectator;
+                // Force the new player into spectator unless they already have privilege
+                // (a plugin may have granted master before this point).
+                if get_privilege(server, cn) < Privilege::Master {
+                    if let Some(mut p) = get_players(server).try_get_mut(cn) {
+                        p.client_state = ClientState::Spectator;
+                    }
+                    server.broadcast_chan1(&channel1::SpectatorServer {
+                        client_num: cn as i32,
+                        is_spectator: true,
+                    });
                 }
-                server.broadcast_chan1(&channel1::SpectatorServer {
-                    client_num: cn as i32,
-                    is_spectator: true,
-                });
             }
             _ => {
                 welcome(server, cn);
