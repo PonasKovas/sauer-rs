@@ -1,5 +1,5 @@
 use cube_string::{CubeString, IntoCubeStringLossy};
-use sauer_proto::data::GameMode;
+use sauer_proto::data::{GameMode, MasterMode};
 use sauer_server::Server;
 use std::sync::RwLock;
 
@@ -15,15 +15,13 @@ pub struct BasePluginOptions {
     pub has_password: bool,
     pub map: CubeString,
     pub mode: GameMode,
-    /// If true, the base plugin will instantly welcome and add to the world newly connected players
+    /// Controls access to the server.
     ///
-    /// Disable if you want to extra checks or procedures like auth, you can welcome them manually later by using [`crate::welcome`]
-    #[cfg_attr(feature = "serde", serde(default = "r#true"))]
-    pub instant_welcome: bool,
-}
-
-fn r#true() -> bool {
-    true
+    /// - `Open` / `Veto` / `Auth`: players are welcomed immediately on connect.
+    /// - `Locked`: players are welcomed but forced into spectator; only masters can unspectate them.
+    /// - `Private`: players are **not** welcomed automatically — a separate plugin must
+    ///   perform auth and then call [`crate::welcome`] manually.
+    pub master_mode: MasterMode,
 }
 
 impl BasePluginOptions {
@@ -34,7 +32,7 @@ impl BasePluginOptions {
             has_password: false,
             map: "complex".lossy_cubestring(),
             mode: GameMode::Ffa,
-            instant_welcome: true,
+            master_mode: MasterMode::Open,
         }
     }
 }

@@ -3,12 +3,11 @@ use crate::{
         Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, get_items,
         spawntime,
     },
-    master::MasterState,
     options::{BasePluginOptions, get_options},
     players::{
-        ClipboardData, Players, clear_player,
+        ClipboardData, Players, broadcast_current_master, clear_player,
         combat::{apply_damage, explosion_damage, gun_damage_per_ray, kill_player},
-        get_players, init_player,
+        get_master_mode, get_players, get_privilege, init_player,
         model::{init_model, set_model},
         name::{init_name, set_name},
         position::set_position,
@@ -25,7 +24,7 @@ use sauer_proto::{
         SpawnServer, UndoServer,
     },
     channel2,
-    data::{ClientState, GameMode, SetTeamReason},
+    data::{ClientState, GameMode, MasterMode, Privilege, SetTeamReason},
 };
 use sauer_server::{
     Server,
@@ -43,7 +42,6 @@ fn get_map_data(server: &Server) -> &RwLock<MapData> {
 }
 
 pub mod items;
-pub mod master;
 pub mod options;
 pub mod players;
 mod util;
@@ -108,7 +106,6 @@ impl Plugin for BasePlugin {
         server.extra.insert(Players::new());
         server.extra.insert(RwLock::new(MapData(None)));
         server.extra.insert(RwLock::new(Items::new()));
-        server.extra.insert(RwLock::new(MasterState::default()));
     }
 
     async fn start(&self, server: &std::sync::Arc<Server>) {
@@ -186,20 +183,38 @@ impl Plugin for BasePlugin {
         });
 
         if had_privilege {
-            master::broadcast_current_master(ctx.server());
+            broadcast_current_master(ctx.server());
         }
     }
 
     async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
         info!("{} (cn {}) connected.", packet.name, ctx.cn());
 
-        init_name(ctx.server(), ctx.cn(), packet.name.clone());
-        init_model(ctx.server(), ctx.cn(), packet.player_model);
+        let cn = ctx.cn();
+        let server = ctx.server();
 
-        let options = get_options(ctx.server()).read().unwrap();
-        if options.instant_welcome {
-            drop(options);
-            welcome(ctx.server(), ctx.cn());
+        init_name(server, cn, packet.name.clone());
+        init_model(server, cn, packet.player_model);
+
+        let master_mode = get_master_mode(server);
+        match master_mode {
+            MasterMode::Private => {
+                // A separate plugin is responsible for auth and must call welcome() manually.
+            }
+            MasterMode::Locked => {
+                welcome(server, cn);
+                // Force the new player into spectator — only masters may unspectate them.
+                if let Some(mut p) = get_players(server).try_get_mut(cn) {
+                    p.client_state = ClientState::Spectator;
+                }
+                server.broadcast_chan1(&channel1::SpectatorServer {
+                    client_num: cn as i32,
+                    is_spectator: true,
+                });
+            }
+            _ => {
+                welcome(server, cn);
+            }
         }
     }
 
@@ -250,10 +265,11 @@ impl Plugin for BasePlugin {
         let server = ctx.server();
         let target_cn = packet.spectator_cn as u32;
 
-        let has_privilege =
-            crate::master::get_privilege(server, cn) >= sauer_proto::data::Privilege::Master;
+        let has_privilege = get_privilege(server, cn) >= Privilege::Master;
+        let locked = get_master_mode(server) == MasterMode::Locked;
 
-        if target_cn != cn && !has_privilege {
+        // In Locked mode masters control all spectation; otherwise players may only change themselves.
+        if !has_privilege && (target_cn != cn || locked) {
             return;
         }
 

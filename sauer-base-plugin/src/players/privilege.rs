@@ -3,26 +3,13 @@ use sauer_proto::{
     data::{MasterClient, MasterMode, Privilege},
 };
 use sauer_server::Server;
-use std::sync::RwLock;
 
-use crate::players::get_players;
+use crate::options::get_options;
 
-pub struct MasterState {
-    pub master_mode: MasterMode,
-}
-
-impl Default for MasterState {
-    fn default() -> Self {
-        Self { master_mode: MasterMode::Open }
-    }
-}
-
-pub(crate) fn get_master_state(server: &Server) -> &RwLock<MasterState> {
-    server.extra.get().expect("MasterState not initialized")
-}
+use super::get_players;
 
 fn build_current_master(server: &Server) -> CurrentMaster {
-    let master_mode = get_master_state(server).read().unwrap().master_mode;
+    let master_mode = get_options(server).read().unwrap().master_mode;
     let clients: Vec<MasterClient> = get_players(server)
         .map
         .iter()
@@ -45,6 +32,13 @@ pub fn broadcast_current_master(server: &Server) {
     server.broadcast_chan1(&build_current_master(server));
 }
 
+/// Returns a player's current privilege level.
+pub fn get_privilege(server: &Server, cn: u32) -> Privilege {
+    get_players(server)
+        .try_get(cn)
+        .map_or(Privilege::None, |p| p.privilege)
+}
+
 /// Sets a player's privilege level and broadcasts the updated master list to everyone.
 pub fn set_privilege(server: &Server, cn: u32, privilege: Privilege) {
     if let Some(mut p) = get_players(server).try_get_mut(cn) {
@@ -53,20 +47,13 @@ pub fn set_privilege(server: &Server, cn: u32, privilege: Privilege) {
     broadcast_current_master(server);
 }
 
-/// Returns a player's current privilege level.
-pub fn get_privilege(server: &Server, cn: u32) -> Privilege {
-    get_players(server)
-        .try_get(cn)
-        .map_or(Privilege::None, |p| p.privilege)
-}
-
 /// Sets the master mode and broadcasts the updated master state to everyone.
 pub fn set_master_mode(server: &Server, mode: MasterMode) {
-    get_master_state(server).write().unwrap().master_mode = mode;
+    get_options(server).write().unwrap().master_mode = mode;
     broadcast_current_master(server);
 }
 
 /// Returns the current master mode.
 pub fn get_master_mode(server: &Server) -> MasterMode {
-    get_master_state(server).read().unwrap().master_mode
+    get_options(server).read().unwrap().master_mode
 }

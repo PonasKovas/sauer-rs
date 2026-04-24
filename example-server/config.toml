@@ -7,3 +7,4 @@ server_desc = "sauer-rs"
 server_auth = ""
 map = "complex"
 mode = "CoopEdit"
+master_mode = "Locked

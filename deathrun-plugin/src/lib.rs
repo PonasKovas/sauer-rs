@@ -194,7 +194,7 @@ impl Plugin for DeathRun {
         if self.options.is_edit_server {
             // First player gets Master
             if server.client_cns().len() == 1 {
-                sauer_base_plugin::master::set_privilege(
+                sauer_base_plugin::players::set_privilege(
                     server,
                     cn,
                     sauer_proto::data::Privilege::Master,

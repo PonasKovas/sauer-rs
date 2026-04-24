@@ -8,10 +8,15 @@ mod data;
 pub mod model;
 pub mod name;
 pub mod position;
+pub mod privilege;
 pub mod state;
 pub mod team;
 
 pub use data::{ClipboardData, PlayerData};
+pub use privilege::{
+    broadcast_current_master, get_master_mode, get_privilege, send_current_master, set_master_mode,
+    set_privilege,
+};
 
 pub struct Players {
     pub(crate) map: DashMap<u32, PlayerData>,
