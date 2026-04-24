@@ -1,6 +1,7 @@
 use crate::Args;
-use cube_string::{CubeString, IntoCubeStringLossy};
+use cube_string::IntoCubeStringLossy;
 use sauer_proto::data::{GameMode, MasterMode};
+use sauer_server::{Server, plugin::Plugin};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use tokio::fs;
@@ -62,17 +63,14 @@ impl Default for BaseConfig {
     }
 }
 
-impl BaseConfig {
-    pub fn server_desc_cube(&self) -> CubeString {
-        self.server_desc.as_str().lossy_cubestring()
-    }
-
-    pub fn server_auth_cube(&self) -> CubeString {
-        self.server_auth.as_str().lossy_cubestring()
-    }
-
-    pub fn map_cube(&self) -> CubeString {
-        self.map.as_str().lossy_cubestring()
+impl Plugin for BaseConfig {
+    async fn init(&self, server: &mut Server) {
+        *server.server_desc.write().unwrap() = self.server_desc.as_str().lossy_cubestring();
+        *server.server_auth.write().unwrap() = self.server_auth.as_str().lossy_cubestring();
+        *server.has_password.write().unwrap() = self.has_password;
+        *server.map_name.write().unwrap() = self.map.as_str().lossy_cubestring();
+        *server.game_mode.write().unwrap() = self.mode;
+        *server.master_mode.write().unwrap() = self.master_mode;
     }
 }
 

@@ -1,10 +1,20 @@
 use crate::Server;
 use sauer_proto::{
     channel1::CurrentMaster,
-    data::{MasterClient, Privilege},
+    data::{MasterClient, MasterMode, Privilege},
 };
 
 impl Server {
+    pub fn master_mode(&self) -> MasterMode {
+        *self.master_mode.read().unwrap()
+    }
+
+    /// Sets the master mode and broadcasts the updated master state to everyone.
+    pub fn set_master_mode(&self, mode: MasterMode) {
+        *self.master_mode.write().unwrap() = mode;
+        self.broadcast_current_master();
+    }
+
     fn build_current_master(&self) -> CurrentMaster {
         let master_mode = self.master_mode();
         let clients: Vec<MasterClient> = self

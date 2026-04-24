@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use cube_string::CubeString;
+use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
 use peer::Peer;
 use sauer_proto::{
@@ -9,12 +9,14 @@ use sauer_proto::{
 };
 use std::{net::SocketAddr, sync::RwLock};
 
+mod base;
 mod builder;
 mod handle_client;
 pub mod items;
 mod peer;
 pub mod players;
 pub mod plugin;
+mod run;
 pub mod utils;
 mod welcome;
 
@@ -47,26 +49,19 @@ pub struct Server {
 }
 
 impl Server {
-    pub(crate) fn new(
-        server_desc: CubeString,
-        server_auth: CubeString,
-        has_password: bool,
-        map_name: CubeString,
-        game_mode: GameMode,
-        master_mode: MasterMode,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
             clients: DashMap::new(),
             extra: anymap::Map::new(),
             players: Players::new(),
             items: RwLock::new(Items::new()),
             map_data: RwLock::new(None),
-            server_desc: RwLock::new(server_desc),
-            server_auth: RwLock::new(server_auth),
-            has_password: RwLock::new(has_password),
-            map_name: RwLock::new(map_name),
-            game_mode: RwLock::new(game_mode),
-            master_mode: RwLock::new(master_mode),
+            server_desc: RwLock::new("sauer-rs".lossy_cubestring()),
+            server_auth: RwLock::new(CubeString::new()),
+            has_password: RwLock::new(false),
+            map_name: RwLock::new("complex".lossy_cubestring()),
+            game_mode: RwLock::new(GameMode::Ffa),
+            master_mode: RwLock::new(MasterMode::Open),
         }
     }
 
@@ -140,15 +135,10 @@ impl Server {
         self.clients.iter().map(|e| *e.key()).collect()
     }
 
-    // ── Master mode ───────────────────────────────────────────────────────────
+}
 
-    pub fn master_mode(&self) -> MasterMode {
-        *self.master_mode.read().unwrap()
-    }
-
-    /// Sets the master mode and broadcasts the updated master state to everyone.
-    pub fn set_master_mode(&self, mode: MasterMode) {
-        *self.master_mode.write().unwrap() = mode;
-        self.broadcast_current_master();
+impl Default for Server {
+    fn default() -> Self {
+        Self::new()
     }
 }

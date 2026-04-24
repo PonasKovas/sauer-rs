@@ -46,12 +46,7 @@ async fn main() {
     let server = ServerBuilder::new()
         .bind_addr(config.bind_addr)
         .max_peers(config.max_peers)
-        .server_desc(config.base.server_desc_cube())
-        .server_auth(config.base.server_auth_cube())
-        .has_password(config.base.has_password)
-        .map_name(config.base.map_cube())
-        .game_mode(config.base.mode)
-        .master_mode(config.base.master_mode)
+        .plugin(config.base)
         .plugin(DeathRun::new(DeathrunOptions {
             is_edit_server: true,
         }))
