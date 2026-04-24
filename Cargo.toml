@@ -34,3 +34,4 @@ anymap = "0.12.1"
 mlua = "0.11.6"
 toml = "1.1.2"
 clap = "4.6.1"
+bitcode = { version = "0.6", features = ["serde"] }

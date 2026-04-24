@@ -1,3 +1,4 @@
+mod entity_poc;
 mod map;
 pub mod options;
 mod recreate;
@@ -205,6 +206,7 @@ impl Plugin for DeathRun {
                     s.waiting_for_map = false;
                 }
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
+                entity_poc::on_map_received(server, cn);
 
                 if self.options.is_edit_server {
                     let was_spectator = server
