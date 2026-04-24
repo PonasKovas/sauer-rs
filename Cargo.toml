@@ -1,5 +1,5 @@
 [workspace]
-members = ["cube-string", "enet-rs", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "sauer-base-plugin", "enet-rs/enet-interop-test", "sauer-plugin-lua", "example-server", "deathrun-plugin"]
+members = ["cube-string", "enet-rs", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "enet-rs/enet-interop-test", "sauer-plugin-lua", "example-server", "deathrun-plugin"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -10,7 +10,6 @@ sauer-proto.path = "sauer-proto/"
 sauer-server.path = "sauer-server/"
 sauer-map.path = "sauer-map/"
 sauer-plugin-lua.path = "sauer-plugin-lua/"
-sauer-base-plugin.path = "sauer-base-plugin/"
 deathrun-plugin.path = "deathrun-plugin/"
 
 num_enum = "0.7.6"

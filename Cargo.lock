@@ -222,7 +222,6 @@ dependencies = [
  "flate2",
  "ogz-rs",
  "rand",
- "sauer-base-plugin",
  "sauer-map",
  "sauer-proto",
  "sauer-server",
@@ -285,7 +284,6 @@ dependencies = [
  "clap",
  "cube-string",
  "deathrun-plugin",
- "sauer-base-plugin",
  "sauer-plugin-lua",
  "sauer-proto",
  "sauer-server",
@@ -763,21 +761,6 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
-
-[[package]]
-name = "sauer-base-plugin"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "cube-string",
- "dashmap",
- "rand",
- "sauer-proto",
- "sauer-server",
- "serde",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "sauer-map"

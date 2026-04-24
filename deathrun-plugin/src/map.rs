@@ -1,16 +1,16 @@
 use ogz_rs::{OgzMap, data::Variable};
-use sauer_base_plugin::items::{
-    ServerItem, delay_spawn, entity_to_item_type, get_items, spawntime,
-};
 use sauer_map::{Node, Selection, World};
 use sauer_proto::{
     channel1,
     data::{EditVarValue, SelInfo},
 };
-use sauer_server::Server;
+use sauer_server::{
+    Server, ServerItem,
+    delay_spawn, entity_to_item_type, spawntime,
+};
 use std::sync::RwLock;
 
-/// Converts `sauer_proto` network bounds into `sauer_map` selection areas
+/// Converts `sauer_proto` network bounds into `sauer_map` selection areas.
 pub fn to_selection(sel: &SelInfo) -> Selection {
     Selection {
         o: [sel.o.x, sel.o.y, sel.o.z],
@@ -51,7 +51,7 @@ impl MapState {
 
     pub fn update_server_items(&self, server: &Server) {
         let num_players = server.client_cns().len();
-        let mut items = get_items(server).write().unwrap();
+        let mut items = server.items.write().unwrap();
         items.reset();
 
         for (i, ent) in self.world.entities.iter().enumerate() {
@@ -83,18 +83,11 @@ impl MapState {
 
     pub fn handle_edit_var(&mut self, packet: &channel1::EditVar) {
         let ogz_var = match &packet.val {
-            EditVarValue::Int(v) => Variable::Int {
-                name: packet.name.clone(),
-                value: *v,
-            },
-            EditVarValue::Float(v) => Variable::Float {
-                name: packet.name.clone(),
-                value: *v,
-            },
-            EditVarValue::String(v) => Variable::String {
-                name: packet.name.clone(),
-                value: v.clone(),
-            },
+            EditVarValue::Int(v) => Variable::Int { name: packet.name.clone(), value: *v },
+            EditVarValue::Float(v) => Variable::Float { name: packet.name.clone(), value: *v },
+            EditVarValue::String(v) => {
+                Variable::String { name: packet.name.clone(), value: v.clone() }
+            }
         };
 
         if let ogz_rs::data::MapConfig::Modern { variables } = &mut self.meta.config {
@@ -111,11 +104,7 @@ impl MapState {
     }
 
     pub fn handle_edit_tex(&mut self, packet: &channel1::EditTex) {
-        self.world.set_texture(
-            &to_selection(&packet.sel),
-            packet.tex as u16,
-            packet.all_faces,
-        );
+        self.world.set_texture(&to_selection(&packet.sel), packet.tex as u16, packet.all_faces);
         self.invalidate_cache();
     }
 
@@ -130,7 +119,6 @@ impl MapState {
         if packet_filter >= 0 {
             filtermat = (packet_filter & 0xFFFF) as u16;
             filtergeom = packet_filter & !0xFFFF;
-
             filtermask = if (filtermat & 0x1F) != 0 {
                 0x1F
             } else if (filtermat & 0xE0) != 0 {
@@ -140,35 +128,32 @@ impl MapState {
             };
         }
 
-        let mut matid;
-        let mut matmask;
-
-        if packet_mat < 0 {
-            matid = 0;
-            matmask = filtermask;
-            if (filtermat & 0x1C) == 0x0C {
-                matmask &= !0xE0u16;
-            }
-            if (filtermat & 0x1C) == 0x08 {
-                matmask &= !0x0100u16;
-            }
+        let (matid, matmask) = if packet_mat < 0 {
+            let matmask = if (filtermat & 0x1C) == 0x0C {
+                filtermask & !0xE0u16
+            } else if (filtermat & 0x1C) == 0x08 {
+                filtermask & !0x0100u16
+            } else {
+                filtermask
+            };
+            (0u16, matmask)
         } else {
-            matid = (packet_mat & 0xFFFF) as u16;
-            matmask = if (matid & 0x1F) != 0 {
+            let mut matid = (packet_mat & 0xFFFF) as u16;
+            let matmask = if (matid & 0x1F) != 0 {
                 0
             } else if (matid & 0xE0) != 0 {
                 !0xE0u16
             } else {
                 !matid
             };
-
             if (matid & 0x1C) == 0x0C {
                 matid |= 0x40;
             }
             if (matid & 0x1C) == 0x08 {
                 matid |= 0x0100;
             }
-        }
+            (matid, matmask)
+        };
 
         self.world.edit_sel(&to_selection(&packet.sel), |node, _| {
             Self::apply_mat(node, matid, matmask, filtermat, filtermask, filtergeom);
@@ -201,7 +186,6 @@ impl MapState {
                         EDITMATF_NOTSOLID => cube.is_entirely_solid(),
                         _ => false,
                     };
-
                     if !skip {
                         let new_bits = if matid != MAT_AIR {
                             (current & matmask) | matid
@@ -228,7 +212,6 @@ impl MapState {
     pub fn handle_replace(&mut self, packet: &channel1::Replace) {
         let old_tex = packet.old_tex as u16;
         let new_tex = packet.new_tex as u16;
-
         if packet.in_sel != 0 {
             self.world.edit_sel(&to_selection(&packet.sel), |node, _| {
                 Self::replace_tex(node, old_tex, new_tex);
@@ -257,8 +240,7 @@ impl MapState {
     }
 
     pub fn handle_edit_face(&mut self, packet: &channel1::EditFace) {
-        self.world
-            .edit_face(&to_selection(&packet.sel), packet.dir, packet.mode as i32);
+        self.world.edit_face(&to_selection(&packet.sel), packet.dir, packet.mode as i32);
         self.invalidate_cache();
     }
 
@@ -275,7 +257,6 @@ impl MapState {
 pub struct DeathrunState {
     pub map: Option<MapState>,
     /// True while waiting for a player to upload a map after a map vote.
-    /// Spawning and unspectating are blocked until this clears.
     pub waiting_for_map: bool,
 }
 

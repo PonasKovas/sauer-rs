@@ -10,6 +10,7 @@ use sauer_proto::{
     Client,
     channel1::{self, EditMode, ServMsg},
     channel2,
+    data::{ClientState, Privilege},
 };
 use sauer_server::{
     Server,
@@ -104,13 +105,13 @@ impl Plugin for DeathRun {
         if self.options.is_edit_server
             && get_server_state(ctx.server()).read().unwrap().waiting_for_map
         {
-            if let Some(mut p) =
-                sauer_base_plugin::players::get_players(ctx.server()).try_get_mut(ctx.cn())
-            {
-                if p.client_state != sauer_proto::data::ClientState::Spectator {
-                    p.client_state = sauer_proto::data::ClientState::Spectator;
-                    ctx.server().broadcast_chan1(&channel1::SpectatorServer {
-                        client_num: ctx.cn() as i32,
+            let cn = ctx.cn();
+            let server = ctx.server();
+            if let Some(mut p) = server.players.try_get_mut(cn) {
+                if p.client_state != ClientState::Spectator {
+                    p.client_state = ClientState::Spectator;
+                    server.broadcast_chan1(&channel1::SpectatorServer {
+                        client_num: cn as i32,
                         is_spectator: true,
                     });
                 }
@@ -120,65 +121,56 @@ impl Plugin for DeathRun {
     }
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
-        if self.options.is_edit_server {
-            let current_map = sauer_base_plugin::options::get_options(ctx.server())
-                .read()
-                .unwrap()
-                .map
-                .clone();
-
-            if packet.map_name == current_map {
-                ctx.cancel();
-                return;
-            }
-
-            // Update the server's map name so future welcomes are correct.
-            sauer_base_plugin::options::get_options(ctx.server())
-                .write()
-                .unwrap()
-                .map = packet.map_name.clone();
-
-            ctx.server().broadcast_chan1(&channel1::MapChange {
-                map_name: packet.map_name.clone(),
-                mode: sauer_proto::data::GameMode::CoopEdit,
-                has_items: false,
-            });
-
-            {
-                let mut state = get_server_state(ctx.server()).write().unwrap();
-                state.map = None;
-                state.waiting_for_map = true;
-            }
-
-            for cn in ctx.server().client_cns() {
-                if let Some(mut p) =
-                    sauer_base_plugin::players::get_players(ctx.server()).try_get_mut(cn)
-                {
-                    p.client_state = sauer_proto::data::ClientState::Spectator;
-                }
-                ctx.server().broadcast_chan1(&channel1::SpectatorServer {
-                    client_num: cn as i32,
-                    is_spectator: true,
-                });
-            }
-
-            ctx.cancel();
+        if !self.options.is_edit_server {
+            return;
         }
+
+        let current_map = ctx.server().map_name.read().unwrap().clone();
+        if packet.map_name == current_map {
+            ctx.cancel();
+            return;
+        }
+
+        // Update the server's map name so future welcomes are correct.
+        *ctx.server().map_name.write().unwrap() = packet.map_name.clone();
+
+        ctx.server().broadcast_chan1(&channel1::MapChange {
+            map_name: packet.map_name.clone(),
+            mode: sauer_proto::data::GameMode::CoopEdit,
+            has_items: false,
+        });
+
+        {
+            let mut state = get_server_state(ctx.server()).write().unwrap();
+            state.map = None;
+            state.waiting_for_map = true;
+        }
+
+        for cn in ctx.server().client_cns() {
+            if let Some(mut p) = ctx.server().players.try_get_mut(cn) {
+                p.client_state = ClientState::Spectator;
+            }
+            ctx.server().broadcast_chan1(&channel1::SpectatorServer {
+                client_num: cn as i32,
+                is_spectator: true,
+            });
+        }
+
+        ctx.cancel();
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
+        // Always cancel so the base handler does not store the raw bytes
+        // (deathrun parses the map itself for in-memory editing).
         ctx.cancel();
+
         let cn = ctx.cn();
         let server = ctx.server();
 
         if self.options.is_edit_server {
-            let is_spectator = sauer_base_plugin::players::get_players(server)
-                .try_get(cn)
-                .map_or(false, |p| {
-                    p.client_state == sauer_proto::data::ClientState::Spectator
-                });
-            let is_master = sauer_base_plugin::players::get_privilege(server, cn)
-                >= sauer_proto::data::Privilege::Master;
+            let is_spectator =
+                server.players.try_get(cn).map_or(false, |p| p.client_state == ClientState::Spectator);
+            let is_master = server.get_privilege(cn) >= Privilege::Master;
 
             if is_spectator && !is_master {
                 server.send_chan1(
@@ -203,17 +195,14 @@ impl Plugin for DeathRun {
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
 
                 if self.options.is_edit_server {
-                    let was_spectator = sauer_base_plugin::players::get_players(server)
+                    let was_spectator = server
+                        .players
                         .try_get(cn)
-                        .map_or(false, |p| {
-                            p.client_state == sauer_proto::data::ClientState::Spectator
-                        });
+                        .map_or(false, |p| p.client_state == ClientState::Spectator);
 
                     if was_spectator {
-                        if let Some(mut p) =
-                            sauer_base_plugin::players::get_players(server).try_get_mut(cn)
-                        {
-                            p.client_state = sauer_proto::data::ClientState::Dead;
+                        if let Some(mut p) = server.players.try_get_mut(cn) {
+                            p.client_state = ClientState::Dead;
                         }
                         server.broadcast_chan1(&channel1::SpectatorServer {
                             client_num: cn as i32,
@@ -238,13 +227,9 @@ impl Plugin for DeathRun {
         let server = ctx.server();
 
         if self.options.is_edit_server {
-            // First player gets Master
+            // First player gets Master.
             if server.client_cns().len() == 1 {
-                sauer_base_plugin::players::set_privilege(
-                    server,
-                    cn,
-                    sauer_proto::data::Privilege::Master,
-                );
+                server.set_privilege(cn, Privilege::Master);
             }
         }
 
@@ -276,7 +261,7 @@ impl Plugin for DeathRun {
         }
     }
 
-    // ── Coop-edit tracking ────────────────────────────────────────────────────
+    // ── Coop-edit map tracking ────────────────────────────────────────────────
 
     async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
         with_map_state_mut(ctx, |state| state.handle_edit_var(packet));

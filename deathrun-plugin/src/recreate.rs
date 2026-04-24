@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::map::get_server_state;
 use cube_string::IntoCubeStringLossy;
 use flate2::{Compression, write::ZlibEncoder};

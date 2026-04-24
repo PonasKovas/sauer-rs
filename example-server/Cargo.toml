@@ -5,8 +5,7 @@ edition = "2024"
 
 [dependencies]
 sauer-server.workspace = true
-sauer-base-plugin = { workspace = true, features = ["serde"] }
-sauer-proto.workspace = true
+sauer-proto = { workspace = true, features = ["serde"] }
 sauer-plugin-lua.workspace = true
 cube-string.workspace = true
 deathrun-plugin.workspace = true

@@ -1,23 +1,84 @@
 use crate::Args;
-use sauer_base_plugin::options::BasePluginOptions;
+use cube_string::{CubeString, IntoCubeStringLossy};
+use sauer_proto::data::{GameMode, MasterMode};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use tokio::fs;
 
+/// Server configuration loaded from TOML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub max_peers: usize,
     pub plugin_dir: PathBuf,
-    pub base: BasePluginOptions,
+    #[serde(default)]
+    pub base: BaseConfig,
+}
+
+/// Initial server settings (map, mode, description, etc.).
+/// These become the startup state of `Server` and can be changed at runtime by plugins.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseConfig {
+    #[serde(default = "default_server_desc")]
+    pub server_desc: String,
+    #[serde(default)]
+    pub server_auth: String,
+    #[serde(default)]
+    pub has_password: bool,
+    #[serde(default = "default_map")]
+    pub map: String,
+    #[serde(default = "default_game_mode")]
+    pub mode: GameMode,
+    #[serde(default = "default_master_mode")]
+    pub master_mode: MasterMode,
+}
+
+fn default_server_desc() -> String {
+    "sauer-rs".into()
+}
+
+fn default_map() -> String {
+    "complex".into()
+}
+
+fn default_game_mode() -> GameMode {
+    GameMode::Ffa
+}
+
+fn default_master_mode() -> MasterMode {
+    MasterMode::Open
+}
+
+impl Default for BaseConfig {
+    fn default() -> Self {
+        Self {
+            server_desc: default_server_desc(),
+            server_auth: String::new(),
+            has_password: false,
+            map: default_map(),
+            mode: GameMode::Ffa,
+            master_mode: MasterMode::Open,
+        }
+    }
+}
+
+impl BaseConfig {
+    pub fn server_desc_cube(&self) -> CubeString {
+        self.server_desc.as_str().lossy_cubestring()
+    }
+
+    pub fn server_auth_cube(&self) -> CubeString {
+        self.server_auth.as_str().lossy_cubestring()
+    }
+
+    pub fn map_cube(&self) -> CubeString {
+        self.map.as_str().lossy_cubestring()
+    }
 }
 
 impl Config {
     pub async fn load(args: &Args) -> anyhow::Result<Self> {
         let contents = fs::read_to_string(&args.config).await?;
-
-        let toml = toml::from_str(&contents)?;
-
-        Ok(toml)
+        Ok(toml::from_str(&contents)?)
     }
 }
