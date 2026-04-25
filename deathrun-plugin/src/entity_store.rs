@@ -26,7 +26,7 @@
 //!
 //! ## Error behaviour
 //!
-//! [`read`] returns [`Err(StoreError::VersionMismatch)`] when store entities are
+//! [`read`] returns `Err([StoreError::VersionMismatch])` when store entities are
 //! present but carry a different version than requested, so callers can detect
 //! stale or migrated data explicitly.
 
@@ -74,17 +74,19 @@ pub enum StoreError {
 // ─── encoding pipeline ───────────────────────────────────────────────────────
 
 fn compress<T: Serialize>(data: &T) -> Result<Vec<u8>, StoreError> {
-    let raw =
-        bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
+    let raw = bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
     let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
-    enc.write_all(&raw).map_err(|e| StoreError::Serialise(e.to_string()))?;
-    enc.finish().map_err(|e| StoreError::Serialise(e.to_string()))
+    enc.write_all(&raw)
+        .map_err(|e| StoreError::Serialise(e.to_string()))?;
+    enc.finish()
+        .map_err(|e| StoreError::Serialise(e.to_string()))
 }
 
 fn decompress<T: DeserializeOwned>(compressed: &[u8]) -> Result<T, StoreError> {
     let mut dec = ZlibDecoder::new(compressed);
     let mut raw = Vec::new();
-    dec.read_to_end(&mut raw).map_err(|e| StoreError::Corrupt(e.to_string()))?;
+    dec.read_to_end(&mut raw)
+        .map_err(|e| StoreError::Corrupt(e.to_string()))?;
     bitcode::deserialize(&raw).map_err(|e| StoreError::Corrupt(e.to_string()))
 }
 
@@ -102,13 +104,15 @@ fn pack(compressed: &[u8]) -> Result<Vec<[u16; 5]>, StoreError> {
     }
     Ok(stream
         .chunks_exact(10)
-        .map(|c| [
-            u16::from_le_bytes([c[0], c[1]]),
-            u16::from_le_bytes([c[2], c[3]]),
-            u16::from_le_bytes([c[4], c[5]]),
-            u16::from_le_bytes([c[6], c[7]]),
-            u16::from_le_bytes([c[8], c[9]]),
-        ])
+        .map(|c| {
+            [
+                u16::from_le_bytes([c[0], c[1]]),
+                u16::from_le_bytes([c[2], c[3]]),
+                u16::from_le_bytes([c[4], c[5]]),
+                u16::from_le_bytes([c[6], c[7]]),
+                u16::from_le_bytes([c[8], c[9]]),
+            ]
+        })
         .collect())
 }
 
@@ -121,7 +125,9 @@ fn unpack(entities: &[&Entity]) -> Result<Vec<u8>, StoreError> {
         }
     }
     if stream.len() < 2 {
-        return Err(StoreError::Corrupt("stream too short for length header".into()));
+        return Err(StoreError::Corrupt(
+            "stream too short for length header".into(),
+        ));
     }
     let len = u16::from_le_bytes([stream[0], stream[1]]) as usize;
     if stream.len() < 2 + len {
@@ -184,7 +190,11 @@ fn broadcast_ent_clear(server: &Server, cn: u32, id: usize) {
         client_num: cn as i32,
         packet: channel1::EditEnt {
             ent_id: id as i32,
-            pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            pos: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             type_: sauer_proto::data::EntityType::Empty,
             attrs: [0; 5],
         },
@@ -219,7 +229,10 @@ pub fn read<T: DeserializeOwned>(world: &World, version: u8) -> Result<Option<T>
     for (_, ent) in &store_ents {
         let found = entity_version(ent).unwrap();
         if found != version {
-            return Err(StoreError::VersionMismatch { expected: version, found });
+            return Err(StoreError::VersionMismatch {
+                expected: version,
+                found,
+            });
         }
     }
 
