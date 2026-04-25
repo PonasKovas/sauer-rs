@@ -7,7 +7,7 @@ use crate::{
     players::{ClipboardData, clear_player, init_player},
     plugin::{Context, Plugin},
 };
-use cube_string::IntoCubeStringLossy;
+use cube_string::{CubeString, IntoCubeStringLossy};
 use sauer_proto::{
     Client, channel0,
     channel1::{
@@ -17,10 +17,21 @@ use sauer_proto::{
     channel2,
     data::{ClientState, GameMode, MasterMode, PlayerState, Privilege, SetTeamReason},
 };
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tracing::info;
 
-pub(crate) struct Base;
+pub(crate) struct Base<P: Plugin> {
+    /// Weak back-reference to the full `(Base<P>, P)` arc so that `Base` can
+    /// fire semantic hooks back through the complete plugin chain.
+    plugin: Weak<(Base<P>, P)>,
+}
+
+impl<P: Plugin> Base<P> {
+    pub(crate) fn new(plugin: Weak<(Base<P>, P)>) -> Self {
+        Self { plugin }
+    }
+
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +65,7 @@ fn check_hit(server: &Server, target_cn: u32, life_sequence: i32) -> bool {
 // ── Map change helper ─────────────────────────────────────────────────────────
 
 /// Updates server state for a map change, broadcasts `N_MAPCHANGE` to all clients,
-/// clears all outstanding votes, and signals the `map_changed` event hook via `ctx`.
+/// and clears all outstanding votes.
 fn do_map_change(server: &Server, map_name: cube_string::CubeString, mode: GameMode) {
     *server.map_name.write().unwrap() = map_name.clone();
     *server.game_mode.write().unwrap() = mode;
@@ -66,9 +77,35 @@ fn do_map_change(server: &Server, map_name: cube_string::CubeString, mode: GameM
     });
 }
 
+// ── Command arg parser ────────────────────────────────────────────────────────
+
+/// Splits `bytes` (everything after the leading `#`) into command arguments.
+/// Spaces delimit arguments; `"..."` groups tokens into one (quotes stripped).
+fn parse_command_args(bytes: &[u8]) -> Vec<CubeString> {
+    let mut args: Vec<CubeString> = Vec::new();
+    let mut current: Vec<u8> = Vec::new();
+    let mut in_quotes = false;
+
+    for &b in bytes {
+        match b {
+            b'"' => in_quotes = !in_quotes,
+            b' ' if !in_quotes => {
+                if !current.is_empty() {
+                    args.push(CubeString::from_bytes(std::mem::take(&mut current)));
+                }
+            }
+            _ => current.push(b),
+        }
+    }
+    if !current.is_empty() {
+        args.push(CubeString::from_bytes(current));
+    }
+    args
+}
+
 // ── Plugin implementation ─────────────────────────────────────────────────────
 
-impl Plugin for Base {
+impl<P: Plugin> Plugin for Base<P> {
     async fn start(&self, server: &Arc<Server>) {
         let server = Arc::clone(server);
         tokio::spawn(async move {
@@ -142,7 +179,6 @@ impl Plugin for Base {
 
         clear_player(&server.players, cn);
 
-        // Remove any outstanding map vote from this player.
         server.map_votes.write().unwrap().remove(&cn);
 
         server.broadcast_chan1(&channel1::ClientDisconnected {
@@ -163,7 +199,6 @@ impl Plugin for Base {
         server.init_name(cn, packet.name.clone());
         server.init_model(cn, packet.player_model);
 
-        // If the server is locked and the user has no privileges, they start as a spectator.
         if server.master_mode() == MasterMode::Locked
             && server.get_privilege(cn) < Privilege::Master
         {
@@ -173,15 +208,28 @@ impl Plugin for Base {
         }
 
         if matches!(server.master_mode(), MasterMode::Private) {
-            // A plugin is responsible for auth and must call server.welcome(cn) manually.
             return;
         }
 
         server.welcome(cn);
+
+        if let Some(plugin) = self.plugin.upgrade() {
+            ctx.cancelled = false;
+            plugin.on_client_welcomed(ctx).await;
+        }
     }
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
         ctx.server().apply_spawn_state(ctx.cn(), state.clone());
+    }
+
+    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
+        let cn = ctx.cn();
+        if let Some(mut state) = ctx.server().compute_spawn_state(cn) {
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_spawn(ctx, &mut state).await;
+            }
+        }
     }
 
     async fn spawn_client(&self, ctx: &mut Context, packet: &channel1::SpawnClient) {
@@ -198,7 +246,6 @@ impl Plugin for Base {
             let Some(state) = p.state.as_mut() else {
                 return;
             };
-            // Sync server life_seq to what the client is using.
             state.life_sequence = packet.life_sequence;
             state.gun_select = packet.gun_select;
 
@@ -207,7 +254,6 @@ impl Plugin for Base {
         };
 
         if let Some(state) = spawned_state {
-            // Broadcast to all OTHER clients; the spawning client already set itself CS_ALIVE.
             server.broadcast_except_chan1(
                 cn,
                 &Client {
@@ -320,15 +366,31 @@ impl Plugin for Base {
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
-        let name = ctx.server().players.get(ctx.cn()).name.clone();
-        info!("[CHAT] {name}: {}", packet.text);
-        ctx.server().broadcast_except_chan1(
-            ctx.cn(),
-            &Client {
-                client_num: ctx.cn() as i32,
-                packet: packet.clone(),
-            },
-        );
+        let cn = ctx.cn();
+        let bytes = packet.text.as_bytes();
+
+        if bytes.first() == Some(&b'#') {
+            let args = parse_command_args(&bytes[1..]);
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_command(ctx, &args).await;
+            }
+        } else {
+            let mut text = packet.text.clone();
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_chat(ctx, &mut text).await;
+            }
+            if !ctx.cancelled {
+                let name = ctx.server().players.get(cn).name.clone();
+                info!("[CHAT] {name}: {text}");
+                ctx.server().broadcast_except_chan1(
+                    cn,
+                    &Client {
+                        client_num: cn as i32,
+                        packet: channel1::Text { text },
+                    },
+                );
+            }
+        }
     }
 
     async fn switch_name(&self, ctx: &mut Context, packet: &channel1::SwitchName) {
@@ -408,7 +470,6 @@ impl Plugin for Base {
             },
         );
 
-        // Resend all players' clipboards so the client has current state after loading the map.
         let clipboard_packets: Vec<(i32, i32, Vec<u8>)> = server
             .players
             .map
@@ -443,17 +504,16 @@ impl Plugin for Base {
         let cn = ctx.cn();
         let server = ctx.server();
         let privilege = server.get_privilege(cn);
+        let prev_map = server.map_name.read().unwrap().clone();
 
         match server.master_mode() {
             MasterMode::Open => {
-                // Record this player's vote.
                 server
                     .map_votes
                     .write()
                     .unwrap()
                     .insert(cn, packet.map_name.clone());
 
-                // Count how many players voted for this map.
                 let total_clients = server.client_count();
                 let vote_count = server
                     .map_votes
@@ -468,10 +528,18 @@ impl Plugin for Base {
                 }
             }
             _ => {
-                // Locked, Veto, Private: only master/admin can change the map.
                 if privilege >= Privilege::Master {
                     do_map_change(server, packet.map_name.clone(), packet.mode);
                 }
+            }
+        }
+
+        let new_map = server.map_name.read().unwrap().clone();
+        if new_map != prev_map {
+            let mode = *server.game_mode.read().unwrap();
+            if let Some(plugin) = self.plugin.upgrade() {
+                ctx.cancelled = false;
+                plugin.map_changed(ctx, &new_map, mode).await;
             }
         }
     }
@@ -555,7 +623,6 @@ impl Plugin for Base {
             }
         };
 
-        // Relay the geometry change to all other coop clients.
         server.broadcast_except_chan1(
             cn,
             &Client {

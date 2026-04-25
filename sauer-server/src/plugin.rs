@@ -91,6 +91,28 @@ pub trait Plugin: Send + Sync + 'static {
         async move {}
     }
 
+    /// Fired when a player sends a chat message (not a `#`-command).
+    /// `text` holds the message and may be modified in-place before relay.
+    /// Call `ctx.cancel()` to suppress relaying the message entirely.
+    fn on_chat(
+        &self,
+        ctx: &mut Context,
+        text: &mut CubeString,
+    ) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
+    /// Fired when a player sends a `#`-prefixed command.
+    /// `args[0]` is the command name; remaining elements are the arguments.
+    /// Quoted arguments have their outer `"` stripped.
+    fn on_command(
+        &self,
+        ctx: &mut Context,
+        args: &[CubeString],
+    ) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
     /// `CHANNEL_2` (Maps) raw map data from the client
     fn map(&self, ctx: &mut Context, packet: &Bytes) -> impl Future<Output = ()> + Send + Sync {
         async move {}
@@ -243,6 +265,22 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
             return;
         }
         self.0.on_spawn(ctx, state).await;
+    }
+
+    async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) {
+        self.1.on_chat(ctx, text).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.on_chat(ctx, text).await;
+    }
+
+    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
+        self.1.on_command(ctx, args).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.on_command(ctx, args).await;
     }
 
     async fn map(&self, ctx: &mut Context, p: &Bytes) {

@@ -7,7 +7,6 @@ use bytes::Bytes;
 use enet_rs::PeerReceiver;
 use sauer_proto::{
     Chan0Client, Chan1Client, Reader, Session,
-    data::MasterMode,
     route::{C2S, Chan0, Chan1},
 };
 use std::{collections::VecDeque, sync::Arc};
@@ -39,13 +38,7 @@ pub(crate) async fn handle_client<P: Plugin>(
             },
 
             Packet::Chan1(pkt) => match pkt {
-                Chan1Client::Connect(p) => {
-                    plugin.connect(&mut ctx, &p).await;
-                    if !ctx.cancelled && server.master_mode() != MasterMode::Private {
-                        ctx.cancelled = false;
-                        plugin.on_client_welcomed(&mut ctx).await;
-                    }
-                }
+                Chan1Client::Connect(p) => plugin.connect(&mut ctx, &p).await,
                 Chan1Client::AuthAnswer(p) => plugin.auth_answer(&mut ctx, &p).await,
                 Chan1Client::Ping(p) => plugin.ping(&mut ctx, &p).await,
                 Chan1Client::FromAi(p) => plugin.from_ai(&mut ctx, &p).await,
@@ -53,15 +46,7 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::EditMode(p) => plugin.edit_mode(&mut ctx, &p).await,
                 Chan1Client::MapCrc(p) => plugin.map_crc(&mut ctx, &p).await,
                 Chan1Client::CheckMaps(p) => plugin.check_maps(&mut ctx, &p).await,
-                Chan1Client::TrySpawn(p) => {
-                    plugin.try_spawn(&mut ctx, &p).await;
-                    if !ctx.cancelled {
-                        if let Some(mut state) = server.compute_spawn_state(cn) {
-                            ctx.cancelled = false;
-                            plugin.on_spawn(&mut ctx, &mut state).await;
-                        }
-                    }
-                }
+                Chan1Client::TrySpawn(p) => plugin.try_spawn(&mut ctx, &p).await,
                 Chan1Client::GunSelect(p) => plugin.gun_select(&mut ctx, &p).await,
                 Chan1Client::SpawnClient(p) => plugin.spawn_client(&mut ctx, &p).await,
                 Chan1Client::Suicide(p) => plugin.suicide(&mut ctx, &p).await,
@@ -73,16 +58,7 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::SwitchName(p) => plugin.switch_name(&mut ctx, &p).await,
                 Chan1Client::SwitchModel(p) => plugin.switch_model(&mut ctx, &p).await,
                 Chan1Client::SwitchTeam(p) => plugin.switch_team(&mut ctx, &p).await,
-                Chan1Client::MapVote(p) => {
-                    let prev_map = server.map_name.read().unwrap().clone();
-                    plugin.map_vote(&mut ctx, &p).await;
-                    let new_map = server.map_name.read().unwrap().clone();
-                    if new_map != prev_map {
-                        ctx.cancelled = false;
-                        let mode = *server.game_mode.read().unwrap();
-                        plugin.map_changed(&mut ctx, &new_map, mode).await;
-                    }
-                }
+                Chan1Client::MapVote(p) => plugin.map_vote(&mut ctx, &p).await,
                 Chan1Client::ItemList(p) => plugin.item_list(&mut ctx, &p).await,
                 Chan1Client::EditEnt(p) => plugin.edit_ent(&mut ctx, &p).await,
                 Chan1Client::EditVar(p) => plugin.edit_var(&mut ctx, &p).await,

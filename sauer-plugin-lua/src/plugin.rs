@@ -170,6 +170,51 @@ impl Plugin for LuaPlugin {
         *state = ud.0;
     }
 
+    async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) {
+        let mut event = EventUD::new();
+
+        for callback in &self.callbacks.on_chat {
+            let r = self.lua.scope(|scope| {
+                let text_lua = self.lua.create_string(text.as_bytes())?;
+                let event = scope.create_userdata_ref_mut(&mut event)?;
+                callback.callback.call::<()>((ctx.cn(), text_lua, event))
+            });
+
+            if let Err(e) = r {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+
+            if event.cancelled {
+                ctx.cancel();
+                break;
+            }
+        }
+    }
+
+    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
+        let mut event = EventUD::new();
+
+        for callback in &self.callbacks.on_command {
+            let r = self.lua.scope(|scope| {
+                let args_table = self.lua.create_table()?;
+                for (i, arg) in args.iter().enumerate() {
+                    args_table.raw_set(i + 1, self.lua.create_string(arg.as_bytes())?)?;
+                }
+                let event = scope.create_userdata_ref_mut(&mut event)?;
+                callback.callback.call::<()>((ctx.cn(), args_table, event))
+            });
+
+            if let Err(e) = r {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+
+            if event.cancelled {
+                ctx.cancel();
+                break;
+            }
+        }
+    }
+
     async fn map(&self, ctx: &mut Context, packet: &Bytes) {
         let mut event = EventUD::new();
 

@@ -6,7 +6,7 @@ use crate::{
     plugin::{Context, Plugin},
 };
 use enet_rs::{Host, HostConfig};
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::{Arc, Weak}};
 use tracing::error;
 
 pub(crate) async fn run<P: Plugin>(
@@ -27,7 +27,11 @@ pub(crate) async fn run<P: Plugin>(
     .await?;
 
     // Base is always the innermost plugin — user plugins run first and can cancel it.
-    let plugin = Arc::new((Base, plugin));
+    // Arc::new_cyclic lets Base hold a Weak back-reference to the full arc so it
+    // can fire semantic hooks through the complete plugin chain.
+    let plugin = Arc::new_cyclic(|weak: &Weak<(Base<P>, P)>| {
+        (Base::new(weak.clone()), plugin)
+    });
     let mut server = Server::new();
     plugin.init(&mut server).await;
 

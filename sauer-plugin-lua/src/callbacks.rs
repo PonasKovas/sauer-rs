@@ -8,6 +8,8 @@ pub(crate) struct Callbacks {
     pub on_client_welcomed: Vec<LuaCallback>,
     pub map_changed: Vec<LuaCallback>,
     pub on_spawn: Vec<LuaCallback>,
+    pub on_chat: Vec<LuaCallback>,
+    pub on_command: Vec<LuaCallback>,
     pub map: Vec<LuaCallback>,
 
     // Channel 0
@@ -116,6 +118,8 @@ pub(crate) fn add_callbacks_from_env(
     add_callback!(on_client_welcomed);
     add_callback!(map_changed);
     add_callback!(on_spawn);
+    add_callback!(on_chat);
+    add_callback!(on_command);
     add_callback!(map);
 
     add_callback!(pos);
