@@ -454,7 +454,7 @@ impl Plugin for Base {
                     .insert(cn, packet.map_name.clone());
 
                 // Count how many players voted for this map.
-                let total_clients = server.clients.len();
+                let total_clients = server.client_count();
                 let vote_count = server
                     .map_votes
                     .read()
@@ -594,7 +594,7 @@ impl Plugin for Base {
         if !items.notgotitems || is_spectator {
             return;
         }
-        let num_players = server.clients.len();
+        let num_players = server.client_count();
         for item in &packet.items {
             let idx = item.item_index as usize;
             while items.list.len() <= idx {
@@ -653,7 +653,7 @@ impl Plugin for Base {
             return;
         }
 
-        let num_players = server.clients.len();
+        let num_players = server.client_count();
         let item_type = {
             let mut items = server.items.write().unwrap();
             let item = &mut items.list[idx];

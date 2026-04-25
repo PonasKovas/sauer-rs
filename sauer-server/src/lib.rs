@@ -138,6 +138,10 @@ impl Server {
         self.clients.iter().map(|e| *e.key()).collect()
     }
 
+    pub fn client_count(&self) -> usize {
+        self.clients.len()
+    }
+
 }
 
 impl Default for Server {

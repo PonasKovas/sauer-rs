@@ -49,7 +49,7 @@ impl MapState {
     }
 
     pub fn update_server_items(&self, server: &Server) {
-        let num_players = server.client_cns().len();
+        let num_players = server.client_count();
         let mut items = server.items.write().unwrap();
         items.reset();
 
@@ -282,6 +282,10 @@ impl Default for DeathrunState {
 
 pub(crate) fn get_server_state(server: &Server) -> &RwLock<DeathrunState> {
     server.extra.get().expect("DeathrunState not initialised")
+}
+
+pub(crate) fn is_waiting_for_map(server: &Server) -> bool {
+    get_server_state(server).read().unwrap().waiting_for_map
 }
 
 pub(crate) fn with_map_state_mut<F>(ctx: &Context, f: F)
