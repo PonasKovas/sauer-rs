@@ -1,12 +1,15 @@
 use crate::Server;
 use bytes::Bytes;
-use sauer_proto::{channel0, channel1};
+use cube_string::CubeString;
+use sauer_proto::{channel0, channel1, data::GameMode};
 use std::sync::Arc;
 
 pub struct Context {
     pub(crate) server: Arc<Server>,
     pub(crate) cn: u32,
     pub(crate) cancelled: bool,
+    /// Set by the base plugin when a map change was performed, to trigger `map_changed` hooks.
+    pub(crate) map_changed: Option<(CubeString, GameMode)>,
 }
 impl Context {
     pub fn server(&self) -> &Arc<Server> {
@@ -57,6 +60,17 @@ pub trait Plugin: Send + Sync + 'static {
     }
     /// On peer disconnection, this cannot be cancelled as it's essential for resource cleanup
     fn disconnected(&self, ctx: &mut Context) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
+    /// Fired after a map change is committed (vote passed or master forced it).
+    /// `cn` is the client who cast the deciding vote.
+    fn map_changed(
+        &self,
+        ctx: &mut Context,
+        map_name: &CubeString,
+        mode: GameMode,
+    ) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
 
@@ -188,6 +202,14 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         // run the right (newer) plugin, and the left - older
         self.1.disconnected(ctx).await;
         self.0.disconnected(ctx).await;
+    }
+
+    async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {
+        self.1.map_changed(ctx, map_name, mode).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.map_changed(ctx, map_name, mode).await;
     }
 
     async fn map(&self, ctx: &mut Context, p: &Bytes) {

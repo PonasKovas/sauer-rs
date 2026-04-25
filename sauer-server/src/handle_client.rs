@@ -19,7 +19,7 @@ pub(crate) async fn handle_client<P: Plugin>(
     cn: u32,
 ) -> Result<()> {
     let mut rx = SauerReceiver::new(peer);
-    let mut ctx = Context { server: Arc::clone(server), cn, cancelled: false };
+    let mut ctx = Context { server: Arc::clone(server), cn, cancelled: false, map_changed: None };
 
     loop {
         let pkt = rx.recv().await?;
@@ -58,7 +58,13 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::SwitchName(p) => plugin.switch_name(&mut ctx, &p).await,
                 Chan1Client::SwitchModel(p) => plugin.switch_model(&mut ctx, &p).await,
                 Chan1Client::SwitchTeam(p) => plugin.switch_team(&mut ctx, &p).await,
-                Chan1Client::MapVote(p) => plugin.map_vote(&mut ctx, &p).await,
+                Chan1Client::MapVote(p) => {
+                    plugin.map_vote(&mut ctx, &p).await;
+                    if let Some((map_name, mode)) = ctx.map_changed.take() {
+                        ctx.cancelled = false;
+                        plugin.map_changed(&mut ctx, &map_name, mode).await;
+                    }
+                }
                 Chan1Client::ItemList(p) => plugin.item_list(&mut ctx, &p).await,
                 Chan1Client::EditEnt(p) => plugin.edit_ent(&mut ctx, &p).await,
                 Chan1Client::EditVar(p) => plugin.edit_var(&mut ctx, &p).await,

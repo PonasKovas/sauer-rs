@@ -12,8 +12,8 @@ use sauer_proto::{
     Client,
     channel0,
     channel1::{
-        self, ClipboardServer, ExplodeFx, ItemAck, ItemSpawn, RedoServer, ServInfo, ShotFx,
-        SpawnServer, UndoServer,
+        self, ClipboardServer, ExplodeFx, ItemAck, ItemSpawn, MapChange, RedoServer, ServInfo,
+        ShotFx, SpawnServer, UndoServer,
     },
     channel2,
     data::{ClientState, GameMode, MasterMode, Privilege, SetTeamReason},
@@ -44,6 +44,22 @@ fn check_hit(server: &Server, target_cn: u32, life_sequence: i32) -> bool {
         p.client_state == ClientState::Alive
             && matches!(p.state.as_ref(), Some(s) if s.life_sequence == life_sequence)
     })
+}
+
+// ── Map change helper ─────────────────────────────────────────────────────────
+
+/// Updates server state for a map change, broadcasts `N_MAPCHANGE` to all clients,
+/// clears all outstanding votes, and signals the `map_changed` event hook via `ctx`.
+fn do_map_change(ctx: &mut Context, map_name: cube_string::CubeString, mode: GameMode) {
+    let server = ctx.server();
+
+    *server.map_name.write().unwrap() = map_name.clone();
+    *server.game_mode.write().unwrap() = mode;
+    server.map_votes.write().unwrap().clear();
+
+    server.broadcast_chan1(&MapChange { map_name: map_name.clone(), mode, has_items: true });
+
+    ctx.map_changed = Some((map_name, mode));
 }
 
 // ── Plugin implementation ─────────────────────────────────────────────────────
@@ -120,6 +136,9 @@ impl Plugin for Base {
             .map_or(false, |p| p.privilege != Privilege::None);
 
         clear_player(&server.players, cn);
+
+        // Remove any outstanding map vote from this player.
+        server.map_votes.write().unwrap().remove(&cn);
 
         server.broadcast_chan1(&channel1::ClientDisconnected { client_num: cn as i32 });
 
@@ -388,6 +407,39 @@ impl Plugin for Base {
     async fn master_mode(&self, ctx: &mut Context, packet: &channel1::MasterModeClient) {
         if ctx.server().get_privilege(ctx.cn()) >= Privilege::Master {
             ctx.server().set_master_mode(packet.mode);
+        }
+    }
+
+    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+        let privilege = server.get_privilege(cn);
+
+        match server.master_mode() {
+            MasterMode::Open => {
+                // Record this player's vote.
+                server.map_votes.write().unwrap().insert(cn, packet.map_name.clone());
+
+                // Count how many players voted for this map.
+                let total_clients = server.clients.len();
+                let vote_count = server
+                    .map_votes
+                    .read()
+                    .unwrap()
+                    .values()
+                    .filter(|v| **v == packet.map_name)
+                    .count();
+
+                if vote_count * 2 > total_clients {
+                    do_map_change(ctx, packet.map_name.clone(), packet.mode);
+                }
+            }
+            _ => {
+                // Locked, Veto, Private: only master/admin can change the map.
+                if privilege >= Privilege::Master {
+                    do_map_change(ctx, packet.map_name.clone(), packet.mode);
+                }
+            }
         }
     }
 

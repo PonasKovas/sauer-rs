@@ -4,7 +4,7 @@ use cube_string::{CubeString, IntoCubeStringLossy};
 use sauer_proto::{
     Client,
     channel1::{self, EditMode, ServMsg},
-    data::{ClientState, Privilege},
+    data::{ClientState, GameMode, Privilege},
 };
 use sauer_server::{
     Server,
@@ -69,38 +69,26 @@ impl Plugin for DeathrunEdit {
         }
     }
 
-    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
-        let current_map = ctx.server().map_name.read().unwrap().clone();
-        if packet.map_name == current_map {
-            ctx.cancel();
-            return;
-        }
-
-        *ctx.server().map_name.write().unwrap() = packet.map_name.clone();
-
-        ctx.server().broadcast_chan1(&channel1::MapChange {
-            map_name: packet.map_name.clone(),
-            mode: sauer_proto::data::GameMode::CoopEdit,
-            has_items: false,
-        });
+    async fn map_changed(&self, ctx: &mut Context, _map_name: &CubeString, _mode: GameMode) {
+        let server = ctx.server();
 
         {
-            let mut state = get_server_state(ctx.server()).write().unwrap();
+            let mut state = get_server_state(server).write().unwrap();
             state.map = None;
             state.waiting_for_map = true;
         }
 
-        for cn in ctx.server().client_cns() {
-            if let Some(mut p) = ctx.server().players.try_get_mut(cn) {
-                p.client_state = ClientState::Spectator;
+        for cn in server.client_cns() {
+            if let Some(mut p) = server.players.try_get_mut(cn) {
+                if p.client_state != ClientState::Spectator {
+                    p.client_state = ClientState::Spectator;
+                    server.broadcast_chan1(&channel1::SpectatorServer {
+                        client_num: cn as i32,
+                        is_spectator: true,
+                    });
+                }
             }
-            ctx.server().broadcast_chan1(&channel1::SpectatorServer {
-                client_num: cn as i32,
-                is_spectator: true,
-            });
         }
-
-        ctx.cancel();
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {

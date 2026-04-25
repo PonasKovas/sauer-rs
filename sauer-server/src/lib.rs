@@ -7,7 +7,7 @@ use sauer_proto::{
     data::{GameMode, MasterMode},
     route::{Chan0, Chan1, Chan2, S2C},
 };
-use std::{net::SocketAddr, sync::RwLock};
+use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
 
 mod base;
 mod builder;
@@ -46,6 +46,8 @@ pub struct Server {
     pub map_name: RwLock<CubeString>,
     pub game_mode: RwLock<GameMode>,
     pub master_mode: RwLock<MasterMode>,
+    /// Tracks each player's current map vote (cn → map name). Cleared on map change.
+    pub map_votes: RwLock<HashMap<u32, CubeString>>,
 }
 
 impl Server {
@@ -62,6 +64,7 @@ impl Server {
             map_name: RwLock::new("complex".lossy_cubestring()),
             game_mode: RwLock::new(GameMode::Ffa),
             master_mode: RwLock::new(MasterMode::Open),
+            map_votes: RwLock::new(HashMap::new()),
         }
     }
 
