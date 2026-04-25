@@ -4,7 +4,7 @@ use cube_string::{CubeString, IntoCubeStringLossy};
 use sauer_proto::{
     Client,
     channel1::{self, EditMode, ServMsg},
-    data::{ClientState, GameMode, Privilege},
+    data::{ClientState, GameMode, PlayerState, Privilege},
 };
 use sauer_server::{
     Server,
@@ -46,25 +46,8 @@ impl Plugin for DeathrunEdit {
         }
     }
 
-    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
+    async fn on_spawn(&self, ctx: &mut Context, _state: &mut PlayerState) {
         if get_server_state(ctx.server()).read().unwrap().waiting_for_map {
-            ctx.cancel();
-        }
-    }
-
-    async fn spawn_client(&self, ctx: &mut Context, _packet: &channel1::SpawnClient) {
-        if get_server_state(ctx.server()).read().unwrap().waiting_for_map {
-            let cn = ctx.cn();
-            let server = ctx.server();
-            if let Some(mut p) = server.players.try_get_mut(cn) {
-                if p.client_state != ClientState::Spectator {
-                    p.client_state = ClientState::Spectator;
-                    server.broadcast_chan1(&channel1::SpectatorServer {
-                        client_num: cn as i32,
-                        is_spectator: true,
-                    });
-                }
-            }
             ctx.cancel();
         }
     }

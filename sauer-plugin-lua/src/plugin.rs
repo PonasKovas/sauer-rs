@@ -1,10 +1,12 @@
 use crate::{
     LuaPlugin,
     extra::LuaExtraRegistry,
-    userdata::{event::EventUD, server::LuaServer},
+    userdata::{event::EventUD, server::LuaServer, spawn_state::SpawnStateUD},
 };
 use bytes::Bytes;
-use sauer_proto::{channel0, channel1};
+use cube_string::CubeString;
+use sauer_proto::{channel0, channel1, data::GameMode};
+use sauer_proto::data::PlayerState;
 use sauer_server::{Context, Plugin, Server};
 use std::sync::Arc;
 use tracing::error;
@@ -100,6 +102,52 @@ impl Plugin for LuaPlugin {
                 break;
             }
         }
+    }
+
+    async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {
+        let mut event = EventUD::new();
+
+        for callback in &self.callbacks.map_changed {
+            let r = self.lua.scope(|scope| {
+                let event = scope.create_userdata_ref_mut(&mut event)?;
+                callback.callback.call::<()>((ctx.cn(), map_name.clone(), mode, event))
+            });
+
+            if let Err(e) = r {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+
+            if event.cancelled {
+                ctx.cancel();
+                break;
+            }
+        }
+    }
+
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
+        let mut ud = SpawnStateUD(state.clone());
+        let mut event = EventUD::new();
+
+        for callback in &self.callbacks.on_spawn {
+            let r = self.lua.scope(|scope| {
+                let state_ref = scope.create_userdata_ref_mut(&mut ud)?;
+                let event_ref = scope.create_userdata_ref_mut(&mut event)?;
+                callback.callback.call::<()>((ctx.cn(), state_ref, event_ref))
+            });
+
+            if let Err(e) = r {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+
+            if event.cancelled {
+                ctx.cancel();
+                break;
+            }
+        }
+
+        // Copy any modifications back regardless of cancellation — the caller
+        // (handle_client) will drop the state if cancelled, so no harm done.
+        *state = ud.0;
     }
 
     async fn map(&self, ctx: &mut Context, packet: &Bytes) {

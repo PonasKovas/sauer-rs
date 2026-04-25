@@ -1,7 +1,7 @@
 use crate::Server;
 use bytes::Bytes;
 use cube_string::CubeString;
-use sauer_proto::{channel0, channel1, data::GameMode};
+use sauer_proto::{channel0, channel1, data::{GameMode, PlayerState}};
 use std::sync::Arc;
 
 pub struct Context {
@@ -10,6 +10,8 @@ pub struct Context {
     pub(crate) cancelled: bool,
     /// Set by the base plugin when a map change was performed, to trigger `map_changed` hooks.
     pub(crate) map_changed: Option<(CubeString, GameMode)>,
+    /// Set by the base plugin after validating a spawn request, to trigger `on_spawn` hooks.
+    pub(crate) pending_spawn: Option<PlayerState>,
 }
 impl Context {
     pub fn server(&self) -> &Arc<Server> {
@@ -70,6 +72,17 @@ pub trait Plugin: Send + Sync + 'static {
         ctx: &mut Context,
         map_name: &CubeString,
         mode: GameMode,
+    ) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
+    /// Fired when a player is about to spawn (in response to `N_TRYSPAWN`).
+    /// `state` holds the default spawn stats; modify it to customise the loadout.
+    /// Call `ctx.cancel()` to prevent the spawn entirely (the client stays in Dead state).
+    fn on_spawn(
+        &self,
+        ctx: &mut Context,
+        state: &mut PlayerState,
     ) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
@@ -210,6 +223,14 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
             return;
         }
         self.0.map_changed(ctx, map_name, mode).await;
+    }
+
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
+        self.1.on_spawn(ctx, state).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.on_spawn(ctx, state).await;
     }
 
     async fn map(&self, ctx: &mut Context, p: &Bytes) {

@@ -16,7 +16,7 @@ use sauer_proto::{
         ShotFx, SpawnServer, UndoServer,
     },
     channel2,
-    data::{ClientState, GameMode, MasterMode, Privilege, SetTeamReason},
+    data::{ClientState, GameMode, MasterMode, PlayerState, Privilege, SetTeamReason},
 };
 use std::sync::Arc;
 use tracing::info;
@@ -177,7 +177,13 @@ impl Plugin for Base {
     }
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
-        ctx.server().prepare_spawn(ctx.cn());
+        if let Some(state) = ctx.server().compute_spawn_state(ctx.cn()) {
+            ctx.pending_spawn = Some(state);
+        }
+    }
+
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
+        ctx.server().apply_spawn_state(ctx.cn(), state.clone());
     }
 
     async fn spawn_client(&self, ctx: &mut Context, packet: &channel1::SpawnClient) {

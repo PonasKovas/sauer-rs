@@ -19,7 +19,13 @@ pub(crate) async fn handle_client<P: Plugin>(
     cn: u32,
 ) -> Result<()> {
     let mut rx = SauerReceiver::new(peer);
-    let mut ctx = Context { server: Arc::clone(server), cn, cancelled: false, map_changed: None };
+    let mut ctx = Context {
+        server: Arc::clone(server),
+        cn,
+        cancelled: false,
+        map_changed: None,
+        pending_spawn: None,
+    };
 
     loop {
         let pkt = rx.recv().await?;
@@ -46,7 +52,13 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::EditMode(p) => plugin.edit_mode(&mut ctx, &p).await,
                 Chan1Client::MapCrc(p) => plugin.map_crc(&mut ctx, &p).await,
                 Chan1Client::CheckMaps(p) => plugin.check_maps(&mut ctx, &p).await,
-                Chan1Client::TrySpawn(p) => plugin.try_spawn(&mut ctx, &p).await,
+                Chan1Client::TrySpawn(p) => {
+                    plugin.try_spawn(&mut ctx, &p).await;
+                    if let Some(mut state) = ctx.pending_spawn.take() {
+                        ctx.cancelled = false;
+                        plugin.on_spawn(&mut ctx, &mut state).await;
+                    }
+                }
                 Chan1Client::GunSelect(p) => plugin.gun_select(&mut ctx, &p).await,
                 Chan1Client::SpawnClient(p) => plugin.spawn_client(&mut ctx, &p).await,
                 Chan1Client::Suicide(p) => plugin.suicide(&mut ctx, &p).await,
