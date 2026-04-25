@@ -47,13 +47,7 @@ pub(crate) async fn run<P: Plugin>(
         let plugin = Arc::clone(&plugin);
         let server = Arc::clone(&server);
         tokio::spawn(async move {
-            let mut ctx = Context {
-                server: Arc::clone(&server),
-                cn,
-                cancelled: false,
-                map_changed: None,
-                pending_spawn: None,
-            };
+            let mut ctx = Context { server: Arc::clone(&server), cn, cancelled: false };
 
             plugin.connected(&mut ctx).await;
 

@@ -1,4 +1,6 @@
-use crate::map_state::{DeathrunState, MapState, get_server_state, send_map_to, with_map_state_mut};
+use crate::map_state::{
+    DeathrunState, MapState, get_server_state, send_map_to, with_map_state_mut,
+};
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
 use sauer_proto::{
@@ -25,7 +27,11 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
-        if get_server_state(ctx.server()).read().unwrap().waiting_for_map {
+        if get_server_state(ctx.server())
+            .read()
+            .unwrap()
+            .waiting_for_map
+        {
             ctx.server().send_chan1(
                 ctx.cn(),
                 &Client {
@@ -47,7 +53,11 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn on_spawn(&self, ctx: &mut Context, _state: &mut PlayerState) {
-        if get_server_state(ctx.server()).read().unwrap().waiting_for_map {
+        if get_server_state(ctx.server())
+            .read()
+            .unwrap()
+            .waiting_for_map
+        {
             ctx.cancel();
         }
     }
@@ -62,15 +72,7 @@ impl Plugin for DeathrunEdit {
         }
 
         for cn in server.client_cns() {
-            if let Some(mut p) = server.players.try_get_mut(cn) {
-                if p.client_state != ClientState::Spectator {
-                    p.client_state = ClientState::Spectator;
-                    server.broadcast_chan1(&channel1::SpectatorServer {
-                        client_num: cn as i32,
-                        is_spectator: true,
-                    });
-                }
-            }
+            server.set_spectator(cn, true);
         }
     }
 
@@ -109,20 +111,7 @@ impl Plugin for DeathrunEdit {
                 }
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
 
-                let was_spectator = server
-                    .players
-                    .try_get(cn)
-                    .map_or(false, |p| p.client_state == ClientState::Spectator);
-
-                if was_spectator {
-                    if let Some(mut p) = server.players.try_get_mut(cn) {
-                        p.client_state = ClientState::Dead;
-                    }
-                    server.broadcast_chan1(&channel1::SpectatorServer {
-                        client_num: cn as i32,
-                        is_spectator: false,
-                    });
-                }
+                server.set_spectator(cn, false);
 
                 server.send_chan1(
                     cn,
@@ -135,17 +124,19 @@ impl Plugin for DeathrunEdit {
         }
     }
 
-    async fn connect(&self, ctx: &mut Context, _packet: &channel1::Connect) {
+    async fn on_client_welcomed(&self, ctx: &mut Context) {
         let cn = ctx.cn();
         let server = ctx.server();
 
-        // First player gets Master.
+        // First player to complete the handshake gets Master and is unspectated
+        // (the client auto-spectates itself when it sees Locked master mode).
         if server.client_cns().len() == 1 {
             server.set_privilege(cn, Privilege::Master);
+            server.set_spectator(cn, false);
         }
 
         if send_map_to(server, cn) {
-            info!("sent map state to cn {cn} on connect");
+            info!("sent map state to cn {cn} after welcome");
         }
     }
 
@@ -158,7 +149,12 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
-        if !packet.val && get_server_state(ctx.server()).read().unwrap().waiting_for_map {
+        if !packet.val
+            && get_server_state(ctx.server())
+                .read()
+                .unwrap()
+                .waiting_for_map
+        {
             ctx.server().send_chan1(
                 ctx.cn(),
                 &channel1::ServMsg {

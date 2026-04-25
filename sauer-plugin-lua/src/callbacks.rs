@@ -5,6 +5,7 @@ pub(crate) struct Callbacks {
     pub start: Vec<LuaCallback>,
     pub connected: Vec<LuaCallback>,
     pub disconnected: Vec<LuaCallback>,
+    pub on_client_welcomed: Vec<LuaCallback>,
     pub map_changed: Vec<LuaCallback>,
     pub on_spawn: Vec<LuaCallback>,
     pub map: Vec<LuaCallback>,
@@ -112,6 +113,7 @@ pub(crate) fn add_callbacks_from_env(
     add_callback!(start);
     add_callback!(connected);
     add_callback!(disconnected);
+    add_callback!(on_client_welcomed);
     add_callback!(map_changed);
     add_callback!(on_spawn);
     add_callback!(map);

@@ -4,14 +4,11 @@ use cube_string::CubeString;
 use sauer_proto::{channel0, channel1, data::{GameMode, PlayerState}};
 use std::sync::Arc;
 
+
 pub struct Context {
     pub(crate) server: Arc<Server>,
     pub(crate) cn: u32,
     pub(crate) cancelled: bool,
-    /// Set by the base plugin when a map change was performed, to trigger `map_changed` hooks.
-    pub(crate) map_changed: Option<(CubeString, GameMode)>,
-    /// Set by the base plugin after validating a spawn request, to trigger `on_spawn` hooks.
-    pub(crate) pending_spawn: Option<PlayerState>,
 }
 impl Context {
     pub fn server(&self) -> &Arc<Server> {
@@ -62,6 +59,13 @@ pub trait Plugin: Send + Sync + 'static {
     }
     /// On peer disconnection, this cannot be cancelled as it's essential for resource cleanup
     fn disconnected(&self, ctx: &mut Context) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
+    /// Fired at the end of the welcome sequence, after the client has received
+    /// `N_WELCOME`, `N_MAPCHANGE`, `N_CURRENTMASTER`, and `N_SPAWNSTATE`.
+    /// Safe to send custom map data or other state-dependent packets here.
+    fn on_client_welcomed(&self, ctx: &mut Context) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
 
@@ -215,6 +219,14 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         // run the right (newer) plugin, and the left - older
         self.1.disconnected(ctx).await;
         self.0.disconnected(ctx).await;
+    }
+
+    async fn on_client_welcomed(&self, ctx: &mut Context) {
+        self.1.on_client_welcomed(ctx).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.0.on_client_welcomed(ctx).await;
     }
 
     async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {

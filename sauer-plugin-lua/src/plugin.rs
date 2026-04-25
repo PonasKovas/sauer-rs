@@ -104,6 +104,26 @@ impl Plugin for LuaPlugin {
         }
     }
 
+    async fn on_client_welcomed(&self, ctx: &mut Context) {
+        let mut event = EventUD::new();
+
+        for callback in &self.callbacks.on_client_welcomed {
+            let r = self.lua.scope(|scope| {
+                let event = scope.create_userdata_ref_mut(&mut event)?;
+                callback.callback.call::<()>((ctx.cn(), event))
+            });
+
+            if let Err(e) = r {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+
+            if event.cancelled {
+                ctx.cancel();
+                break;
+            }
+        }
+    }
+
     async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {
         let mut event = EventUD::new();
 

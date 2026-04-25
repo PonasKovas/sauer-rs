@@ -8,6 +8,7 @@ pub mod model;
 pub mod name;
 pub mod position;
 pub mod privilege;
+pub mod spectator;
 pub mod state;
 pub mod team;
 

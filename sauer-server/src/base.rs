@@ -3,14 +3,13 @@
 use crate::{
     Server,
     items::{ServerItem, apply_pickup, canpickup, entity_to_item_type, spawntime},
-    players::{ClipboardData, clear_player, init_player},
     players::combat::{explosion_damage, gun_damage_per_ray},
+    players::{ClipboardData, clear_player, init_player},
     plugin::{Context, Plugin},
 };
 use cube_string::IntoCubeStringLossy;
 use sauer_proto::{
-    Client,
-    channel0,
+    Client, channel0,
     channel1::{
         self, ClipboardServer, ExplodeFx, ItemAck, ItemSpawn, MapChange, RedoServer, ServInfo,
         ShotFx, SpawnServer, UndoServer,
@@ -34,7 +33,13 @@ where
     if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
         return;
     }
-    server.broadcast_except_chan1(cn, &Client { client_num: cn as i32, packet: pkt.clone() });
+    server.broadcast_except_chan1(
+        cn,
+        &Client {
+            client_num: cn as i32,
+            packet: pkt.clone(),
+        },
+    );
 }
 
 /// Returns true if `target_cn` is alive with a matching `life_sequence`.
@@ -50,16 +55,15 @@ fn check_hit(server: &Server, target_cn: u32, life_sequence: i32) -> bool {
 
 /// Updates server state for a map change, broadcasts `N_MAPCHANGE` to all clients,
 /// clears all outstanding votes, and signals the `map_changed` event hook via `ctx`.
-fn do_map_change(ctx: &mut Context, map_name: cube_string::CubeString, mode: GameMode) {
-    let server = ctx.server();
-
+fn do_map_change(server: &Server, map_name: cube_string::CubeString, mode: GameMode) {
     *server.map_name.write().unwrap() = map_name.clone();
     *server.game_mode.write().unwrap() = mode;
     server.map_votes.write().unwrap().clear();
-
-    server.broadcast_chan1(&MapChange { map_name: map_name.clone(), mode, has_items: true });
-
-    ctx.map_changed = Some((map_name, mode));
+    server.broadcast_chan1(&MapChange {
+        map_name,
+        mode,
+        has_items: true,
+    });
 }
 
 // ── Plugin implementation ─────────────────────────────────────────────────────
@@ -68,8 +72,7 @@ impl Plugin for Base {
     async fn start(&self, server: &Arc<Server>) {
         let server = Arc::clone(server);
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_millis(100));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
             loop {
                 interval.tick().await;
 
@@ -102,7 +105,9 @@ impl Plugin for Base {
                         .collect()
                 };
                 for i in spawning {
-                    server.broadcast_chan1(&ItemSpawn { item_index: i as i32 });
+                    server.broadcast_chan1(&ItemSpawn {
+                        item_index: i as i32,
+                    });
                 }
             }
         });
@@ -140,7 +145,9 @@ impl Plugin for Base {
         // Remove any outstanding map vote from this player.
         server.map_votes.write().unwrap().remove(&cn);
 
-        server.broadcast_chan1(&channel1::ClientDisconnected { client_num: cn as i32 });
+        server.broadcast_chan1(&channel1::ClientDisconnected {
+            client_num: cn as i32,
+        });
 
         if had_privilege {
             server.broadcast_current_master();
@@ -156,30 +163,21 @@ impl Plugin for Base {
         server.init_name(cn, packet.name.clone());
         server.init_model(cn, packet.player_model);
 
-        match server.master_mode() {
-            MasterMode::Private => {
-                // A plugin is responsible for auth and must call server.welcome(cn) manually.
+        // If the server is locked and the user has no privileges, they start as a spectator.
+        if server.master_mode() == MasterMode::Locked
+            && server.get_privilege(cn) < Privilege::Master
+        {
+            if let Some(mut p) = server.players.try_get_mut(cn) {
+                p.client_state = ClientState::Spectator;
             }
-            MasterMode::Locked => {
-                server.welcome(cn);
-                if server.get_privilege(cn) < Privilege::Master {
-                    if let Some(mut p) = server.players.try_get_mut(cn) {
-                        p.client_state = ClientState::Spectator;
-                    }
-                    server.broadcast_chan1(&channel1::SpectatorServer {
-                        client_num: cn as i32,
-                        is_spectator: true,
-                    });
-                }
-            }
-            _ => server.welcome(cn),
         }
-    }
 
-    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
-        if let Some(state) = ctx.server().compute_spawn_state(ctx.cn()) {
-            ctx.pending_spawn = Some(state);
+        if matches!(server.master_mode(), MasterMode::Private) {
+            // A plugin is responsible for auth and must call server.welcome(cn) manually.
+            return;
         }
+
+        server.welcome(cn);
     }
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
@@ -191,14 +189,19 @@ impl Plugin for Base {
         let server = ctx.server();
 
         let spawned_state = {
-            let Some(mut p) = server.players.try_get_mut(cn) else { return };
+            let Some(mut p) = server.players.try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Dead {
                 return;
             }
-            let Some(state) = p.state.as_mut() else { return };
+            let Some(state) = p.state.as_mut() else {
+                return;
+            };
             // Sync server life_seq to what the client is using.
             state.life_sequence = packet.life_sequence;
             state.gun_select = packet.gun_select;
+
             p.client_state = ClientState::Alive;
             p.state.clone()
         };
@@ -207,7 +210,10 @@ impl Plugin for Base {
             // Broadcast to all OTHER clients; the spawning client already set itself CS_ALIVE.
             server.broadcast_except_chan1(
                 cn,
-                &Client { client_num: cn as i32, packet: SpawnServer { state } },
+                &Client {
+                    client_num: cn as i32,
+                    packet: SpawnServer { state },
+                },
             );
         }
     }
@@ -224,18 +230,7 @@ impl Plugin for Base {
             return;
         }
 
-        if let Some(mut p) = server.players.try_get_mut(target_cn) {
-            if packet.val {
-                p.client_state = ClientState::Spectator;
-            } else if p.client_state == ClientState::Spectator {
-                p.client_state = ClientState::Dead;
-            }
-        }
-
-        server.broadcast_chan1(&channel1::SpectatorServer {
-            client_num: packet.spectator_cn,
-            is_spectator: packet.val,
-        });
+        server.set_spectator(target_cn, packet.val);
     }
 
     async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) {
@@ -247,7 +242,9 @@ impl Plugin for Base {
         let server = ctx.server();
 
         {
-            let Some(mut p) = server.players.try_get_mut(cn) else { return };
+            let Some(mut p) = server.players.try_get_mut(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Alive {
                 return;
             }
@@ -327,7 +324,10 @@ impl Plugin for Base {
         info!("[CHAT] {name}: {}", packet.text);
         ctx.server().broadcast_except_chan1(
             ctx.cn(),
-            &Client { client_num: ctx.cn() as i32, packet: packet.clone() },
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
@@ -340,31 +340,42 @@ impl Plugin for Base {
     }
 
     async fn switch_team(&self, ctx: &mut Context, packet: &channel1::SwitchTeam) {
-        ctx.server().set_team(ctx.cn(), packet.team.clone(), SetTeamReason::Switched);
+        ctx.server()
+            .set_team(ctx.cn(), packet.team.clone(), SetTeamReason::Switched);
     }
 
     async fn ping(&self, ctx: &mut Context, packet: &channel1::Ping) {
-        ctx.server().send_chan1(ctx.cn(), &channel1::Pong { ping: packet.time });
+        ctx.server()
+            .send_chan1(ctx.cn(), &channel1::Pong { ping: packet.time });
     }
 
     async fn client_ping(&self, ctx: &mut Context, packet: &channel1::ClientPing) {
         ctx.server().broadcast_except_chan1(
             ctx.cn(),
-            &Client { client_num: ctx.cn() as i32, packet: packet.clone() },
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
     async fn taunt(&self, ctx: &mut Context, packet: &channel1::Taunt) {
         ctx.server().broadcast_except_chan1(
             ctx.cn(),
-            &Client { client_num: ctx.cn() as i32, packet: packet.clone() },
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
     async fn sound(&self, ctx: &mut Context, packet: &channel1::Sound) {
         ctx.server().broadcast_except_chan1(
             ctx.cn(),
-            &Client { client_num: ctx.cn() as i32, packet: packet.clone() },
+            &Client {
+                client_num: ctx.cn() as i32,
+                packet: packet.clone(),
+            },
         );
     }
 
@@ -390,7 +401,12 @@ impl Plugin for Base {
         let map_bytes = server.map_data.read().unwrap().clone();
         let Some(data) = map_bytes else { return };
 
-        server.send_chan2(cn, &channel2::SendMap { data: data.to_vec() });
+        server.send_chan2(
+            cn,
+            &channel2::SendMap {
+                data: data.to_vec(),
+            },
+        );
 
         // Resend all players' clipboards so the client has current state after loading the map.
         let clipboard_packets: Vec<(i32, i32, Vec<u8>)> = server
@@ -406,7 +422,14 @@ impl Plugin for Base {
             })
             .collect();
         for (owner_cn, unpack_len, data) in clipboard_packets {
-            server.send_chan1(cn, &ClipboardServer { client_num: owner_cn, unpack_len, data });
+            server.send_chan1(
+                cn,
+                &ClipboardServer {
+                    client_num: owner_cn,
+                    unpack_len,
+                    data,
+                },
+            );
         }
     }
 
@@ -424,7 +447,11 @@ impl Plugin for Base {
         match server.master_mode() {
             MasterMode::Open => {
                 // Record this player's vote.
-                server.map_votes.write().unwrap().insert(cn, packet.map_name.clone());
+                server
+                    .map_votes
+                    .write()
+                    .unwrap()
+                    .insert(cn, packet.map_name.clone());
 
                 // Count how many players voted for this map.
                 let total_clients = server.clients.len();
@@ -437,13 +464,13 @@ impl Plugin for Base {
                     .count();
 
                 if vote_count * 2 > total_clients {
-                    do_map_change(ctx, packet.map_name.clone(), packet.mode);
+                    do_map_change(server, packet.map_name.clone(), packet.mode);
                 }
             }
             _ => {
                 // Locked, Veto, Private: only master/admin can change the map.
                 if privilege >= Privilege::Master {
-                    do_map_change(ctx, packet.map_name.clone(), packet.mode);
+                    do_map_change(server, packet.map_name.clone(), packet.mode);
                 }
             }
         }
@@ -507,8 +534,7 @@ impl Plugin for Base {
                         true
                     } else {
                         let item = &mut items.list[idx];
-                        if item.item_type != item_type
-                            || (!item.spawned && item.spawn_time_ms == 0)
+                        if item.item_type != item_type || (!item.spawned && item.spawn_time_ms == 0)
                         {
                             item.item_type = item_type;
                             item.spawned = false;
@@ -532,12 +558,17 @@ impl Plugin for Base {
         // Relay the geometry change to all other coop clients.
         server.broadcast_except_chan1(
             cn,
-            &Client { client_num: cn as i32, packet: packet.clone() },
+            &Client {
+                client_num: cn as i32,
+                packet: packet.clone(),
+            },
         );
 
         if new_item {
             server.items.write().unwrap().list[idx].spawned = true;
-            server.broadcast_chan1(&ItemSpawn { item_index: idx as i32 });
+            server.broadcast_chan1(&ItemSpawn {
+                item_index: idx as i32,
+            });
         }
     }
 
@@ -591,7 +622,9 @@ impl Plugin for Base {
         let idx = packet.item_index as usize;
 
         let can = {
-            let Some(p) = server.players.try_get(cn) else { return };
+            let Some(p) = server.players.try_get(cn) else {
+                return;
+            };
             if p.client_state != ClientState::Alive {
                 return;
             }
@@ -603,12 +636,20 @@ impl Plugin for Base {
                     .unwrap()
                     .list
                     .get(idx)
-                    .map_or(false, |item| item.spawned && canpickup(s, quad_millis, item.item_type))
+                    .map_or(false, |item| {
+                        item.spawned && canpickup(s, quad_millis, item.item_type)
+                    })
             })
         };
 
         if !can {
-            server.send_chan1(cn, &ItemAck { item_index: packet.item_index, client_num: -1 });
+            server.send_chan1(
+                cn,
+                &ItemAck {
+                    item_index: packet.item_index,
+                    client_num: -1,
+                },
+            );
             return;
         }
 
@@ -674,7 +715,9 @@ impl Plugin for Base {
             ctx.cn(),
             &Client {
                 client_num: ctx.cn() as i32,
-                packet: channel1::CopyServer { sel: packet.sel.clone() },
+                packet: channel1::CopyServer {
+                    sel: packet.sel.clone(),
+                },
             },
         );
     }
@@ -687,7 +730,9 @@ impl Plugin for Base {
             ctx.cn(),
             &Client {
                 client_num: ctx.cn() as i32,
-                packet: channel1::PasteServer { sel: packet.sel.clone() },
+                packet: channel1::PasteServer {
+                    sel: packet.sel.clone(),
+                },
             },
         );
     }
@@ -696,8 +741,10 @@ impl Plugin for Base {
         let cn = ctx.cn();
         let server = ctx.server();
 
-        let is_spectator =
-            server.players.try_get(cn).map_or(false, |p| p.client_state == ClientState::Spectator);
+        let is_spectator = server
+            .players
+            .try_get(cn)
+            .map_or(false, |p| p.client_state == ClientState::Spectator);
         if is_spectator {
             return;
         }

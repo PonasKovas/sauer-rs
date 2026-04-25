@@ -1,7 +1,7 @@
 use crate::Server;
 use sauer_proto::{
     channel1::{ClipboardServer, InitClient, ItemList, MapChange, Resume, Welcome},
-    data::ClientResumeState,
+    data::{ClientResumeState, ClientState},
 };
 
 impl Server {
@@ -112,6 +112,15 @@ impl Server {
             }
         }
 
-        self.broadcast_spawn_state(cn);
+        let is_spectator = self.players.get(cn).client_state == ClientState::Spectator;
+
+        if is_spectator {
+            self.broadcast_chan1(&sauer_proto::channel1::SpectatorServer {
+                client_num: cn as i32,
+                is_spectator: true,
+            });
+        } else {
+            self.broadcast_spawn_state(cn);
+        }
     }
 }
