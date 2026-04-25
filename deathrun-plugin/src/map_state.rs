@@ -1,11 +1,13 @@
 use ogz_rs::{OgzMap, data::Variable};
 use sauer_map::{Node, Selection, World};
 use sauer_proto::{
-    channel1,
+    channel1, channel2,
     data::{EditVarValue, SelInfo},
 };
 use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
+use sauer_server::plugin::Context;
 use std::sync::RwLock;
+use tracing::error;
 
 /// Converts `sauer_proto` network bounds into `sauer_map` selection areas.
 pub fn to_selection(sel: &SelInfo) -> Selection {
@@ -280,4 +282,31 @@ impl Default for DeathrunState {
 
 pub(crate) fn get_server_state(server: &Server) -> &RwLock<DeathrunState> {
     server.extra.get().expect("DeathrunState not initialised")
+}
+
+pub(crate) fn with_map_state_mut<F>(ctx: &Context, f: F)
+where
+    F: FnOnce(&mut MapState),
+{
+    if let Some(map) = get_server_state(ctx.server()).write().unwrap().map.as_mut() {
+        f(map);
+    }
+}
+
+pub(crate) fn send_map_to(server: &Server, cn: u32) -> bool {
+    let bytes = {
+        let lock = get_server_state(server).read().unwrap();
+        match lock.map.as_ref() {
+            None => return false,
+            Some(state) => match state.to_ogz_bytes() {
+                Ok(b) => b,
+                Err(e) => {
+                    error!("failed to serialize map state: {e}");
+                    return false;
+                }
+            },
+        }
+    };
+    server.send_chan2(cn, &channel2::SendMap { data: bytes });
+    true
 }
