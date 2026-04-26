@@ -256,6 +256,7 @@ dependencies = [
  "bitcode",
  "bytes",
  "cube-string",
+ "dashmap",
  "flate2",
  "ogz-rs",
  "rand",

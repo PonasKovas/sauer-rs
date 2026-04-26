@@ -1,10 +1,11 @@
 // TEMPORARY TEST CODE — remove once button placement is verified working
 use crate::map_state::get_server_state;
+use dashmap::DashMap;
 use sauer_map::{Selection, raycast::raycast};
 use sauer_proto::{
     Client,
     channel0, channel1,
-    data::{EditFaceMode, EntityType, Orient, SelInfo, Vec3},
+    data::{Direction, EditFaceMode, EntityType, Orient, SelInfo, Vec3},
 };
 use sauer_server::plugin::{Context, Plugin};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,12 +19,15 @@ const BUTTON_TEX: u16 = 2;
 
 pub struct DeathrunPlay {
     last_raycast_ms: AtomicU64,
+    /// Last known view direction per player, updated every N_POS
+    player_dirs: DashMap<u32, Direction>,
 }
 
 impl DeathrunPlay {
     pub fn new() -> Self {
         Self {
             last_raycast_ms: AtomicU64::new(0),
+            player_dirs: DashMap::new(),
         }
     }
 }
@@ -32,6 +36,9 @@ impl Plugin for DeathrunPlay {
     // ── crosshair fire-particle test ─────────────────────────────────────────
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+        // Always keep direction current regardless of throttle
+        self.player_dirs.insert(packet.client_num, packet.dir);
+
         // Throttle to ~10 Hz on channel 1 (reliable)
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -82,19 +89,30 @@ impl Plugin for DeathrunPlay {
 
     // ── button placement on shoot ─────────────────────────────────────────────
 
-    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
-        let dx = packet.to.x - packet.from.x;
-        let dy = packet.to.y - packet.from.y;
-        let dz = packet.to.z - packet.from.z;
-        let mag = (dx * dx + dy * dy + dz * dz).sqrt();
-        if mag < 1e-5 {
-            return;
-        }
-        let ray = [dx / mag, dy / mag, dz / mag];
-        let origin = [packet.from.x, packet.from.y, packet.from.z];
+    async fn shoot(&self, ctx: &mut Context, _packet: &channel1::Shoot) {
+        // Use the player's exact view direction from the last N_POS, not the shot direction
+        // (shots have spread; the crosshair is always exact)
+        let cn = ctx.cn();
+        let dir = match self.player_dirs.get(&cn) {
+            Some(d) => *d,
+            None => return,
+        };
+        let pos = match ctx.server().players.try_get(cn) {
+            Some(p) => p.position,
+            None => return,
+        };
+
+        let yaw_rad = (dir.yaw as f32).to_radians();
+        let pitch_rad = (dir.pitch as f32).to_radians();
+        let ray = [
+            -yaw_rad.sin() * pitch_rad.cos(),
+             yaw_rad.cos() * pitch_rad.cos(),
+             pitch_rad.sin(),
+        ];
+        // N_POS sends feet position; eye is 14 units above
+        let origin = [pos.x, pos.y, pos.z + 14.0];
 
         let server = ctx.server().clone();
-        let cn = ctx.cn();
 
         let mut state = get_server_state(&server).write().unwrap();
         let map = match state.map.as_mut() {
@@ -109,8 +127,7 @@ impl Plugin for DeathrunPlay {
                 Some(h) => (h.pos, h.size, h.orient, h.dist),
             };
 
-        // Button size is fixed; clamp so it never exceeds the hit cube (keeps alignment valid)
-        let button_size = BUTTON_SIZE.min(hit_size);
+        let button_size = BUTTON_SIZE;
 
         // Decompose orientation into normal axis d and face side dc (0=near, 1=far)
         let d = (hit_orient >> 1) as usize;  // 0=X, 1=Y, 2=Z
@@ -129,12 +146,13 @@ impl Plugin for DeathrunPlay {
 
         let snap = |v: f32| -> i32 { (v / button_size as f32).floor() as i32 * button_size };
 
-        // Face coordinate along the normal axis
-        let face_coord = hit_pos[d] + if dc == 1 { hit_size } else { 0 };
+        // Snap the hit point along the normal axis — avoids placing on the AABB boundary of
+        // deformed/curved cubes and always places the button flush with the visible surface.
+        let snap_d = (hit_pt[d] / button_size as f32).floor() as i32 * button_size;
 
         // Button cube (the empty space just outside the wall face)
         let mut adj = [0i32; 3];
-        adj[d]      = if dc == 0 { face_coord - button_size } else { face_coord };
+        adj[d]      = if dc == 0 { snap_d - button_size } else { snap_d };
         adj[r_axis] = snap(hit_pt[r_axis]);
         adj[c_axis] = snap(hit_pt[c_axis]);
 
