@@ -12,7 +12,7 @@ use std::{io::Write, sync::Arc, time::Duration};
 use tokio::time::sleep;
 
 /// Packs a sauer_map::Node into the binary format expected by Sauerbraten's clipboard `block3` structure
-fn pack_cube(node: &sauer_map::Node, out: &mut Vec<u8>) {
+pub(crate) fn pack_cube(node: &sauer_map::Node, out: &mut Vec<u8>) {
     match node {
         sauer_map::Node::Branch(children) => {
             out.push(0xFF);
@@ -74,7 +74,7 @@ fn collect_chunks(
 }
 
 /// Generates a valid zlib-compressed clipboard packet enclosing the given node
-fn generate_clipboard(node: &sauer_map::Node, size: i32) -> (i32, Vec<u8>) {
+pub(crate) fn generate_clipboard(node: &sauer_map::Node, size: i32) -> (i32, Vec<u8>) {
     let mut uncompressed = Vec::new();
     for val in [0i32, 0, 0] {
         uncompressed.extend_from_slice(&val.to_le_bytes());
