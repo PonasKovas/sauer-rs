@@ -265,10 +265,18 @@ impl MapState {
     }
 }
 
+/// A placed trap button in the map.
+pub struct Trap {
+    pub button_pos: [i32; 3],
+    pub button_size: i32,
+    pub button_orient: u8,
+}
+
 pub struct DeathrunState {
     pub map: Option<MapState>,
     /// True while waiting for a player to upload a map after a map vote.
     pub waiting_for_map: bool,
+    pub traps: Vec<Trap>,
 }
 
 impl Default for DeathrunState {
@@ -276,6 +284,7 @@ impl Default for DeathrunState {
         Self {
             map: None,
             waiting_for_map: false,
+            traps: Vec::new(),
         }
     }
 }

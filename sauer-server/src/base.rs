@@ -568,6 +568,14 @@ impl<P: Plugin> Plugin for Base<P> {
         relay_coop(ctx.server(), ctx.cn(), packet);
     }
     async fn edit_mode(&self, ctx: &mut Context, packet: &channel1::EditMode) {
+        let cn = ctx.cn();
+        if let Some(mut p) = ctx.server().players.try_get_mut(cn) {
+            p.client_state = if packet.is_editing {
+                ClientState::Editing
+            } else {
+                ClientState::Dead
+            };
+        }
         relay_coop(ctx.server(), ctx.cn(), packet);
     }
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {

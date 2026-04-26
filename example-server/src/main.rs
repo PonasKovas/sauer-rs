@@ -46,7 +46,7 @@ async fn main() {
         .bind_addr(config.bind_addr)
         .max_peers(config.max_peers)
         .plugin(config.base)
-        .plugin(DeathrunEdit)
+        .plugin(DeathrunEdit::new())
         .plugin(DeathrunPlay::new())
         .plugin(lua_plugin);
 
