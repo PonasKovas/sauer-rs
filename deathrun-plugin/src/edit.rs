@@ -50,10 +50,12 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
-        if packet.text.strip_colors().to_utf8().trim() != "#newtrap" {
+        let cmd = packet.text.strip_colors().to_utf8();
+        let cmd = cmd.trim();
+        if cmd != "#newtrap" && cmd != "#deltrap" {
             return;
         }
-        ctx.cancel(); // don't echo the command in chat
+        ctx.cancel();
 
         let cn = ctx.cn();
         let server = ctx.server().clone();
@@ -93,23 +95,73 @@ impl Plugin for DeathrunEdit {
             Some(m) => m,
         };
 
-        let (_hit_pos, _hit_size, hit_orient, hit_dist) =
-            match raycast(&map.world, origin, ray, 2048.0) {
-                None => return,
-                Some(h) => (h.pos, h.size, h.orient, h.dist),
+        let hit = match raycast(&map.world, origin, ray, 2048.0) {
+            None => return,
+            Some(h) => h,
+        };
+        let hit_pt = [
+            origin[0] + ray[0] * hit.dist,
+            origin[1] + ray[1] * hit.dist,
+            origin[2] + ray[2] * hit.dist,
+        ];
+
+        // ── #deltrap ──────────────────────────────────────────────────────────
+        if cmd == "#deltrap" {
+            let trap_idx = state.traps.iter().position(|t| {
+                (0..3).all(|ax| {
+                    hit_pt[ax] >= t.button_pos[ax] as f32
+                        && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+                })
+            });
+            let trap_idx = match trap_idx {
+                None => {
+                    server.send_chan1(
+                        cn,
+                        &ServMsg {
+                            text: "Not looking at a trap.".lossy_cubestring(),
+                        },
+                    );
+                    return;
+                }
+                Some(i) => i,
             };
+            let trap = state.traps.remove(trap_idx);
+
+            let map = state.map.as_mut().unwrap();
+            let sel = Selection {
+                o: trap.button_pos, s: [1, 1, 1], grid: trap.button_size,
+                orient: trap.button_orient, cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+            };
+            map.world.fill(&sel, false);
+            drop(state);
+
+            let proto_orient = match trap.button_orient {
+                0 => Orient::Left, 1 => Orient::Right, 2 => Orient::Back,
+                3 => Orient::Front, 4 => Orient::Bottom, _ => Orient::Top,
+            };
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::DelCube {
+                    sel: SelInfo {
+                        o: Vec3 { x: trap.button_pos[0], y: trap.button_pos[1], z: trap.button_pos[2] },
+                        s: Vec3 { x: 1, y: 1, z: 1 },
+                        grid: trap.button_size,
+                        orient: proto_orient,
+                        cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+                    },
+                },
+            });
+            return;
+        }
+
+        // ── #newtrap ──────────────────────────────────────────────────────────
+        let hit_orient = hit.orient;
 
         let button_size = BUTTON_SIZE;
         let d = (hit_orient >> 1) as usize;
         let dc = (hit_orient & 1) as usize;
         let r_axis = [1usize, 2, 0][d];
         let c_axis = [2usize, 0, 1][d];
-
-        let hit_pt = [
-            origin[0] + ray[0] * hit_dist,
-            origin[1] + ray[1] * hit_dist,
-            origin[2] + ray[2] * hit_dist,
-        ];
 
         let snap = |v: f32| -> i32 { (v / button_size as f32).floor() as i32 * button_size };
         let snap_d = if dc == 0 {
