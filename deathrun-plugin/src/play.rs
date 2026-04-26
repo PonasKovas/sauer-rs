@@ -1,6 +1,7 @@
 // TEMPORARY TEST CODE — remove once button placement is verified working
 use crate::map_state::get_server_state;
 use dashmap::DashMap;
+use ogz_rs::data::Material;
 use sauer_map::{Selection, raycast::raycast};
 use sauer_proto::{
     Client,
@@ -11,11 +12,10 @@ use sauer_server::plugin::{Context, Plugin};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// Buttons are always this many world units on a side, regardless of hit cube size
 const BUTTON_SIZE: i32 = 8;
-
-// Placeholder texture — swap once button placement is confirmed
-const BUTTON_TEX: u16 = 2;
+const BUTTON_FRONT_TEX: u16 = 248;
+const BUTTON_SIDE_TEX: u16 = 242;
+const BUTTON_COLOR: [f32; 3] = [0.2, 0.2, 0.2];
 
 pub struct DeathrunPlay {
     last_raycast_ms: AtomicU64,
@@ -121,7 +121,7 @@ impl Plugin for DeathrunPlay {
         };
 
         // Copy scalars immediately to release the immutable borrow on map.world
-        let (hit_pos, hit_size, hit_orient, hit_dist) =
+        let (_hit_pos, _hit_size, hit_orient, hit_dist) =
             match raycast(&map.world, origin, ray, 2048.0) {
                 None => return,
                 Some(h) => (h.pos, h.size, h.orient, h.dist),
@@ -146,9 +146,15 @@ impl Plugin for DeathrunPlay {
 
         let snap = |v: f32| -> i32 { (v / button_size as f32).floor() as i32 * button_size };
 
-        // Snap the hit point along the normal axis — avoids placing on the AABB boundary of
-        // deformed/curved cubes and always places the button flush with the visible surface.
-        let snap_d = (hit_pt[d] / button_size as f32).floor() as i32 * button_size;
+        // dc=0 (near face, player at -d): floor snap → button ends at or before the surface.
+        // dc=1 (far face, player at +d): ceil snap → button starts at or after the surface,
+        // preventing it from snapping back into the same grid cell as an inset/deformed cube.
+        // Small epsilon before ceil guards against hit points that land exactly on a grid line.
+        let snap_d = if dc == 0 {
+            (hit_pt[d] / button_size as f32).floor() as i32 * button_size
+        } else {
+            ((hit_pt[d] - 0.001) / button_size as f32).ceil() as i32 * button_size
+        };
 
         // Button cube (the empty space just outside the wall face)
         let mut adj = [0i32; 3];
@@ -181,7 +187,12 @@ impl Plugin for DeathrunPlay {
             corner: 0,
         };
         map.world.fill(&sel, true);
-        map.world.set_texture(&sel, BUTTON_TEX, true);
+        map.world.set_texture(&sel, BUTTON_SIDE_TEX, true);
+        map.world.set_texture(&sel, BUTTON_FRONT_TEX, false);
+        map.world.set_material(&sel, Material { alpha: true, ..Default::default() });
+        for _ in 0..6 {
+            map.world.edit_face(&sel, 1, 0);
+        }
         drop(state);
 
         let proto_orient = match hit_orient {
@@ -193,39 +204,108 @@ impl Plugin for DeathrunPlay {
             _ => Orient::Top,
         };
 
-        // N_EDITF: selection is the wall cube; mpeditface shifts it into adj and fills solid
-        server.broadcast_chan1(&Client {
-            client_num: cn as i32,
-            packet: channel1::EditFace {
-                sel: SelInfo {
-                    o: Vec3 { x: editf_o[0], y: editf_o[1], z: editf_o[2] },
-                    s: Vec3 { x: 1, y: 1, z: 1 },
-                    grid: button_size,
-                    orient: proto_orient,
-                    cx: 0, cxs: 2, cy: 0, cys: 2,
-                    corner: 0,
-                },
-                dir: -1,
-                mode: EditFaceMode::Fill,
-            },
-        });
+        let adj_sel = SelInfo {
+            o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+            s: Vec3 { x: 1, y: 1, z: 1 },
+            grid: button_size,
+            orient: proto_orient,
+            cx: 0, cxs: 2, cy: 0, cys: 2,
+            corner: 0,
+        };
+        let fill_sel = SelInfo {
+            o: Vec3 { x: editf_o[0], y: editf_o[1], z: editf_o[2] },
+            ..adj_sel
+        };
 
-        // N_EDITT: selection is adj directly — overrides the inherited wall texture
-        server.broadcast_chan1(&Client {
-            client_num: cn as i32,
-            packet: channel1::EditTex {
-                sel: SelInfo {
-                    o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
-                    s: Vec3 { x: 1, y: 1, z: 1 },
-                    grid: button_size,
-                    orient: proto_orient,
-                    cx: 0, cxs: 2, cy: 0, cys: 2,
-                    corner: 0,
+        tokio::spawn(async move {
+            use std::time::Duration;
+            use tokio::time::sleep;
+
+            // Immediately: fill solid + all visual properties
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditFace { sel: fill_sel, dir: -1, mode: EditFaceMode::Fill },
+            });
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditTex {
+                    sel: adj_sel.clone(), tex: BUTTON_SIDE_TEX as i32,
+                    all_faces: true, extra_data: vec![],
                 },
-                tex: BUTTON_TEX as i32,
-                all_faces: true,
-                extra_data: vec![],
-            },
+            });
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditTex {
+                    sel: adj_sel.clone(), tex: BUTTON_FRONT_TEX as i32,
+                    all_faces: false, extra_data: vec![],
+                },
+            });
+            let color_vslot = {
+                let mut d = vec![7u8];
+                for &f in &BUTTON_COLOR { d.extend_from_slice(&f.to_le_bytes()); }
+                d.push(0xFF); d
+            };
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditVSlot {
+                    sel: adj_sel.clone(), delta: 0, all_faces: true, extra_data: color_vslot,
+                },
+            });
+            let scale_vslot = {
+                let mut d = vec![1u8];
+                d.extend_from_slice(&2.0f32.to_le_bytes());
+                d.push(0xFF); d
+            };
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditVSlot {
+                    sel: adj_sel.clone(), delta: 0, all_faces: false, extra_data: scale_vslot,
+                },
+            });
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditMat { sel: adj_sel.clone(), mat: 1024, filter: -1 },
+            });
+            let alpha_vslot = {
+                let mut d = vec![6u8];
+                d.extend_from_slice(&0.8f32.to_le_bytes());
+                d.extend_from_slice(&0.8f32.to_le_bytes());
+                d.push(0xFF); d
+            };
+            server.broadcast_chan1(&Client {
+                client_num: cn as i32,
+                packet: channel1::EditVSlot {
+                    sel: adj_sel.clone(), delta: 0, all_faces: true, extra_data: alpha_vslot,
+                },
+            });
+
+            // 4 corners × 6 pushes each = 24 events at random times within 0..400ms
+            // Generate all times before any await (ThreadRng is not Send)
+            let mut events: Vec<(u64, i32)> = {
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                (0i32..4)
+                    .flat_map(|c| std::iter::repeat(c).take(6))
+                    .map(|c| (rng.gen_range(0u64..=400), c))
+                    .collect()
+            };
+            events.sort_by_key(|&(t, _)| t);
+
+            let mut elapsed = 0u64;
+            for (t, corner) in events {
+                if t > elapsed {
+                    sleep(Duration::from_millis(t - elapsed)).await;
+                    elapsed = t;
+                }
+                server.broadcast_chan1(&Client {
+                    client_num: cn as i32,
+                    packet: channel1::EditFace {
+                        sel: SelInfo { corner, ..adj_sel.clone() },
+                        dir: 1,
+                        mode: EditFaceMode::Corner,
+                    },
+                });
+            }
         });
     }
 }
