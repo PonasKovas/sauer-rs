@@ -64,6 +64,7 @@ type ButtonSetupPackets = (
     Client<channel1::EditVSlot>,
 );
 
+// Generates the exact sequence of network packets that the client expects
 fn build_setup_packets(cn: i32, adj_sel: &SelInfo, fill_sel: &SelInfo) -> ButtonSetupPackets {
     let mut color_vslot = vec![7u8];
     for &f in &BUTTON_COLOR {
@@ -143,6 +144,53 @@ fn build_setup_packets(cn: i32, adj_sel: &SelInfo, fill_sel: &SelInfo) -> Button
             },
         },
     )
+}
+
+// Emits standard format VSlot properties specifically to correctly update the server's tracking
+// map state. Explicitly merging properties fixes map_state.rs dropping them for /getmap.
+fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
+    let mut putint = |v: &mut Vec<u8>, n: i32| {
+        if n < 128 && n > -127 {
+            v.push(n as u8);
+        } else if n < 0x8000 && n >= -0x8000 {
+            v.push(0x80);
+            v.extend_from_slice(&(n as i16).to_le_bytes());
+        } else {
+            v.push(0x81);
+            v.extend_from_slice(&n.to_le_bytes());
+        }
+    };
+
+    // 1. Color and Alpha (all_faces: true)
+    let mut data1 = Vec::new();
+    putint(&mut data1, (1 << 6) | (1 << 7)); // VSLOT_ALPHA | VSLOT_COLOR
+    data1.extend_from_slice(&0.8f32.to_le_bytes()); // alpha front
+    data1.extend_from_slice(&0.8f32.to_le_bytes()); // alpha back
+    for &f in &BUTTON_COLOR {
+        data1.extend_from_slice(&f.to_le_bytes()); // RGB
+    }
+    map.handle_edit_v_slot(&channel1::EditVSlot {
+        sel: sel.clone(),
+        delta: 0,
+        all_faces: true,
+        extra_data: data1,
+    });
+
+    // 2. Color, Alpha AND Scale (all_faces: false - completely overrides front face to guarantee saving)
+    let mut data2 = Vec::new();
+    putint(&mut data2, (1 << 1) | (1 << 6) | (1 << 7)); // VSLOT_SCALE | VSLOT_ALPHA | VSLOT_COLOR
+    data2.extend_from_slice(&2.0f32.to_le_bytes()); // scale
+    data2.extend_from_slice(&0.8f32.to_le_bytes()); // alpha front
+    data2.extend_from_slice(&0.8f32.to_le_bytes()); // alpha back
+    for &f in &BUTTON_COLOR {
+        data2.extend_from_slice(&f.to_le_bytes()); // RGB
+    }
+    map.handle_edit_v_slot(&channel1::EditVSlot {
+        sel: sel.clone(),
+        delta: 0,
+        all_faces: false,
+        extra_data: data2,
+    });
 }
 
 fn corner_pushes(
@@ -277,9 +325,20 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
                     ..Default::default()
                 },
             );
-            for _ in 0..6 {
-                map.world.edit_face(&sel, 1, 0);
+
+            // Correctly sculpt the internal tracked representation geometry with corner pushes
+            for corner in 0..4 {
+                let mut csel = sel.clone();
+                csel.corner = corner;
+                for _ in 0..6 {
+                    map.world.edit_face(&csel, 1, 2);
+                }
             }
+
+            let (adj_sel, _) =
+                get_selections(trap.button_pos, trap.button_size, trap.button_orient);
+            apply_internal_vslots(map, &adj_sel);
+
             map.invalidate_cache();
         }
         send_atomic_rebuild(
@@ -402,9 +461,22 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             ..Default::default()
         },
     );
-    for _ in 0..6 {
-        map.world.edit_face(&sel, 1, 0);
+
+    // Sculpt the internal geometry tracker correctly so the button saves as a pyramid
+    for corner in 0..4 {
+        let mut csel = sel.clone();
+        csel.corner = corner;
+        for _ in 0..6 {
+            map.world.edit_face(&csel, 1, 2);
+        }
     }
+
+    let target_cn = cn as i32;
+    let (adj_sel, fill_sel) = get_selections(adj, BUTTON_SIZE, hit_orient);
+    let setup = build_setup_packets(target_cn, &adj_sel, &fill_sel);
+
+    // Securely tracks combined VSlot mapping strictly for the server's tracking memory
+    apply_internal_vslots(map, &adj_sel);
 
     state.traps.push(Trap {
         button_pos: adj,
@@ -413,11 +485,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     drop(state);
 
-    // Re-use animation exclusively for new placements for the cosmetic factor
-    let target_cn = cn as i32;
-    let (adj_sel, fill_sel) = get_selections(adj, BUTTON_SIZE, hit_orient);
-    let setup = build_setup_packets(target_cn, &adj_sel, &fill_sel);
-
+    // Broadcast sequence over time to animate the block rising to the clients visually.
     tokio::spawn(async move {
         use tokio::time::{Duration, sleep};
         server.broadcast_chan1(setup);
