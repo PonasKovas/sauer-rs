@@ -1,5 +1,6 @@
 use crate::map_state::{
-    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to, with_map_state_mut,
+    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to,
+    with_map_state_mut,
 };
 use crate::trap::{
     check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_bounds, intersects_edit_face,
@@ -35,7 +36,11 @@ impl DeathrunEdit {
 
 impl Plugin for DeathrunEdit {
     async fn init(&self, server: &mut Server) {
-        server.extra.insert(RwLock::new(DeathrunState::default()));
+        *server.map_name.write().unwrap() = "".lossy_cubestring();
+        *server.game_mode.write().unwrap() = GameMode::CoopEdit;
+        let mut state = DeathrunState::default();
+        state.map = Some(MapState::default_empty());
+        server.extra.insert(RwLock::new(state));
     }
 
     async fn pos(&self, _ctx: &mut Context, packet: &channel0::Position) {

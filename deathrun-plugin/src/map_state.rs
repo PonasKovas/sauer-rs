@@ -1,5 +1,5 @@
-use ogz_rs::{OgzMap, data::Variable};
-use sauer_map::{Node, Selection, World};
+use ogz_rs::{OgzMap, data::{MapConfig, Variable}};
+use sauer_map::{Cube, Node, Selection, World};
 use sauer_proto::{
     channel1, channel2,
     data::{EditVarValue, SelInfo},
@@ -30,6 +30,33 @@ pub struct MapState {
 }
 
 impl MapState {
+    pub fn default_empty() -> Self {
+        let solid = Node::Leaf(Cube { edges: [0x80; 12], textures: [1; 6], material: Default::default() });
+        let air = Node::Leaf(Cube { edges: [0x00; 12], textures: [0; 6], material: Default::default() });
+        let root = Node::Branch(Box::new([
+            solid.clone(), solid.clone(), solid.clone(), solid,
+            air.clone(), air.clone(), air.clone(), air,
+        ]));
+        let world = World { size: 512, root, entities: vec![] };
+        let meta = OgzMap {
+            version: 33,
+            world_size: 512,
+            config: MapConfig::Modern { variables: vec![] },
+            game_type: None,
+            eif: 0,
+            extra_game_data: vec![],
+            mru_textures: vec![],
+            entities: vec![],
+            vslots: vec![None, None],
+            octree: world.to_ogz_octree(),
+            lightmaps: vec![],
+            pvs: vec![],
+            blendmap_resolution: 0,
+            blendmap_data: None,
+        };
+        Self { world, meta }
+    }
+
     pub fn from_bytes(data: &[u8]) -> Result<Self, ogz_rs::OgzError> {
         let ogz = OgzMap::parse(data)?;
         let world = World::from_ogz(&ogz);
