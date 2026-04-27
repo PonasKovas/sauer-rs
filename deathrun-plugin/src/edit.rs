@@ -277,6 +277,113 @@ impl Plugin for DeathrunEdit {
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
+    async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
+        let cn = ctx.cn();
+        let server = ctx.server().clone();
+
+        if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
+            return;
+        }
+
+        // 1. Clear previous clipboard immediately
+        if let Some(mut p) = server.players.try_get_mut(cn) {
+            p.clipboard = None;
+        }
+
+        // 2. Extract map geometry into binary clipboard format
+        if let Some(mut state) = crate::map_state::get_server_state(&server)
+            .write()
+            .unwrap()
+            .map
+            .as_mut()
+        {
+            let sel = crate::map_state::to_selection(&packet.sel);
+
+            let d = (sel.orient >> 1) as usize;
+            let r_dim = [1usize, 2, 0][d];
+            let c_dim = [2usize, 0, 1][d];
+            let d_dim = [0usize, 1, 2][d];
+
+            let s_r = sel.s[r_dim] as i32;
+            let s_c = sel.s[c_dim] as i32;
+            let s_d = sel.s[d_dim] as i32;
+            let dc = sel.orient & 1;
+
+            let total_nodes = (s_r * s_c * s_d) as usize;
+            let mut extracted_nodes = vec![
+                sauer_map::Node::Leaf(sauer_map::Cube {
+                    edges: [0; 12],
+                    textures: [0; 6],
+                    material: Default::default()
+                });
+                total_nodes
+            ];
+
+            // Cleanly extract nodes mapping the bounds into Sauerbraten's clipboard layout
+            state.world.edit_sel(&sel, |node, pos| {
+                let dx = (pos[r_dim] - sel.o[r_dim]) / sel.grid;
+                let dy = (pos[c_dim] - sel.o[c_dim]) / sel.grid;
+                let pos_d = (pos[d_dim] - sel.o[d_dim]) / sel.grid;
+                let dz = if dc != 0 { s_d - 1 - pos_d } else { pos_d };
+
+                if dx >= 0 && dx < s_r && dy >= 0 && dy < s_c && dz >= 0 && dz < s_d {
+                    let idx = (dz * s_c * s_r + dy * s_r + dx) as usize;
+                    if idx < extracted_nodes.len() {
+                        extracted_nodes[idx] = node.clone();
+                    }
+                }
+            });
+
+            // Pack selection header
+            let mut uncompressed = Vec::new();
+            for val in [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z] {
+                uncompressed.extend_from_slice(&val.to_le_bytes());
+            }
+            for val in [packet.sel.s.x, packet.sel.s.y, packet.sel.s.z] {
+                uncompressed.extend_from_slice(&val.to_le_bytes());
+            }
+            uncompressed.extend_from_slice(&packet.sel.grid.to_le_bytes());
+            uncompressed.extend_from_slice(&(packet.sel.orient as i32).to_le_bytes());
+
+            // Pack cubes
+            for node in extracted_nodes {
+                crate::recreate::pack_cube(&node, &mut uncompressed);
+            }
+
+            // Critical: Add empty VSlots terminator
+            uncompressed.extend_from_slice(&0u32.to_le_bytes());
+
+            // Zlib compress matching C++ protocol mechanics
+            use flate2::{Compression, write::ZlibEncoder};
+            use std::io::Write;
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+            encoder.write_all(&uncompressed).unwrap();
+
+            if let Ok(compressed) = encoder.finish() {
+                if let Some(mut p) = server.players.try_get_mut(cn) {
+                    p.clipboard = Some(sauer_server::ClipboardData {
+                        unpack_len: uncompressed.len() as i32,
+                        data: compressed,
+                    });
+                }
+            }
+        }
+
+        // 3. Cancel the context so `Base::copy` doesn't execute and wipe our newly saved clipboard
+        ctx.cancel();
+
+        // 4. Manually broadcast N_COPY to everyone else, preserving standard multiplayer sync
+        server.broadcast_except_chan1(
+            cn,
+            &sauer_proto::Client {
+                client_num: cn as i32,
+                packet: sauer_proto::channel1::CopyServer {
+                    sel: packet.sel.clone(),
+                },
+            },
+        );
+    }
+
     async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
         let cn = ctx.cn();
         let server = ctx.server().clone();
