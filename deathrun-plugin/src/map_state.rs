@@ -620,16 +620,17 @@ pub struct Trap {
     pub button_size: i32,
     pub button_orient: u8,
 
+    /// Geometry/entities to show when trap fires.
     pub trigger_clipboard: Vec<u8>,
     pub trigger_unpack_len: i32,
     pub trigger_entities: HashMap<usize, ogz_rs::data::Entity>,
 
-    pub restore_clipboard: Vec<u8>,
-    pub restore_unpack_len: i32,
-    pub original_entities: HashMap<usize, ogz_rs::data::Entity>,
+    /// Entity IDs that were touched during trap recording.
+    /// The restore entity state is captured dynamically at trigger time from the live map.
+    pub affected_entity_ids: std::collections::HashSet<usize>,
 
     /// Paste origin, cell counts, and grid from generate_region_clipboard.
-    /// Use clip_pos/clip_s/clip_grid for both the companion DelCube and PasteServer sel.
+    /// Used for both the companion DelCube and the PasteServer sel.
     pub clip_pos: [i32; 3],
     pub clip_s: [i32; 3],
     pub clip_grid: i32,

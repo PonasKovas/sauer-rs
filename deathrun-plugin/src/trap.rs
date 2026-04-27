@@ -339,20 +339,23 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
     let cn = ctx.cn();
     let mut state = get_server_state(&server).write().unwrap();
 
+    // Never rebuild the trap currently being recorded — the user is intentionally editing
+    // that area and auto-rebuilds would corrupt the server map state and fight the user.
+    let recording_idx = state.trap_edit.as_ref().map(|e| e.trap_idx);
+
     let to_rebuild: Vec<_> = state
         .traps
         .iter()
-        .filter(|t| intersects(t))
-        .map(|t| Trap {
+        .enumerate()
+        .filter(|(i, t)| intersects(t) && Some(*i) != recording_idx)
+        .map(|(_, t)| Trap {
             button_pos: t.button_pos,
             button_size: t.button_size,
             button_orient: t.button_orient,
             trigger_clipboard: t.trigger_clipboard.clone(),
             trigger_unpack_len: t.trigger_unpack_len,
             trigger_entities: t.trigger_entities.clone(),
-            restore_clipboard: t.restore_clipboard.clone(),
-            restore_unpack_len: t.restore_unpack_len,
-            original_entities: t.original_entities.clone(),
+            affected_entity_ids: t.affected_entity_ids.clone(),
             clip_pos: t.clip_pos,
             clip_s: t.clip_s,
             clip_grid: t.clip_grid,
@@ -546,9 +549,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         trigger_clipboard: Vec::new(),
         trigger_unpack_len: 0,
         trigger_entities: std::collections::HashMap::new(),
-        restore_clipboard: Vec::new(),
-        restore_unpack_len: 0,
-        original_entities: std::collections::HashMap::new(),
+        affected_entity_ids: std::collections::HashSet::new(),
         clip_pos: [0; 3],
         clip_s: [1; 3],
         clip_grid: 1,
@@ -700,7 +701,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         max[2] - min[2]
     );
 
-    // Generate ONE restore clipboard (from original map, pre-edit state)
+    // Restore clipboard: from original_map — sent immediately to revert clients.
     let (clip_pos, clip_s, clip_grid, restore_unpack_len, restore_compressed) =
         crate::recreate::generate_region_clipboard(
             &edit_state.original_map.world.root,
@@ -709,51 +710,29 @@ pub fn cmd_endtrap(ctx: &Context) {
             max,
         );
 
-    // Generate ONE trigger clipboard (from CURRENT map, post-edit state)
+    // Trigger clipboard: from current (post-edit) map.
     let (_, _, _, trigger_unpack_len, trigger_compressed) =
         crate::recreate::generate_region_clipboard(&current_map.world.root, world_size, min, max);
 
-    let mut original_entities = std::collections::HashMap::new();
+    // Collect trigger entities (post-edit state).
     let mut trigger_entities = std::collections::HashMap::new();
     for &ent_id in &edit_state.affected_entities {
-        // Original entity
-        if let Some(ent) = edit_state.original_map.world.entities.get(ent_id) {
-            original_entities.insert(ent_id, ent.clone());
-        } else {
-            original_entities.insert(
-                ent_id,
-                ogz_rs::data::Entity {
-                    position: [0.0, 0.0, 0.0],
-                    attrs: [0; 5],
-                    ent_type: ogz_rs::data::EntityType::Empty,
-                    extra_data: vec![],
-                },
-            );
-        }
-
-        // Trigger entity
-        if let Some(ent) = current_map.world.entities.get(ent_id) {
-            trigger_entities.insert(ent_id, ent.clone());
-        } else {
-            trigger_entities.insert(
-                ent_id,
-                ogz_rs::data::Entity {
-                    position: [0.0, 0.0, 0.0],
-                    attrs: [0; 5],
-                    ent_type: ogz_rs::data::EntityType::Empty,
-                    extra_data: vec![],
-                },
-            );
-        }
+        let ent = current_map.world.entities.get(ent_id).cloned()
+            .unwrap_or(ogz_rs::data::Entity {
+                position: [0.0; 3], attrs: [0; 5],
+                ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![],
+            });
+        trigger_entities.insert(ent_id, ent);
     }
+
+    // Entity IDs only — restore state captured dynamically at trigger time.
+    let affected_entity_ids = edit_state.affected_entities.clone();
 
     let trap = &mut state.traps[edit_state.trap_idx];
     trap.trigger_clipboard = trigger_compressed;
     trap.trigger_unpack_len = trigger_unpack_len;
     trap.trigger_entities = trigger_entities;
-    trap.restore_clipboard = restore_compressed.clone();
-    trap.restore_unpack_len = restore_unpack_len;
-    trap.original_entities = original_entities;
+    trap.affected_entity_ids = affected_entity_ids;
     trap.clip_pos = clip_pos;
     trap.clip_s = clip_s;
     trap.clip_grid = clip_grid;
@@ -761,31 +740,18 @@ pub fn cmd_endtrap(ctx: &Context) {
     trap.affected_max = max;
 
     let target_cn = ctx.cn() as i32;
-
-    // DelCube uses the SAME padded region and grid as the clipboard.
-    // This is far cheaper than grid=1 (at most 8^3=512 cells vs millions).
-    let del_sel = SelInfo {
-        o: sauer_proto::data::Vec3 {
-            x: clip_pos[0],
-            y: clip_pos[1],
-            z: clip_pos[2],
-        },
-        s: sauer_proto::data::Vec3 {
-            x: clip_s[0],
-            y: clip_s[1],
-            z: clip_s[2],
-        },
+    let paste_sel = SelInfo {
+        o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
+        s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
         grid: clip_grid,
         orient: sauer_proto::data::Orient::Left,
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
+        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
     };
+
+    // Revert clients to pre-recording state.
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::DelCube { sel: del_sel },
+        packet: channel1::DelCube { sel: paste_sel.clone() },
     });
     server.broadcast_chan1(&channel1::ClipboardServer {
         client_num: target_cn,
@@ -794,45 +760,26 @@ pub fn cmd_endtrap(ctx: &Context) {
     });
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::PasteServer {
-            sel: SelInfo {
-                o: sauer_proto::data::Vec3 {
-                    x: clip_pos[0],
-                    y: clip_pos[1],
-                    z: clip_pos[2],
-                },
-                s: sauer_proto::data::Vec3 {
-                    x: clip_s[0],
-                    y: clip_s[1],
-                    z: clip_s[2],
-                },
-                grid: clip_grid,
-                orient: sauer_proto::data::Orient::Left,
-                cx: 0,
-                cxs: 0,
-                cy: 0,
-                cys: 0,
-                corner: 0,
-            },
-        },
+        packet: channel1::PasteServer { sel: paste_sel },
     });
 
-    for (&ent_id, ent) in &trap.original_entities {
-        let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-            .unwrap_or(sauer_proto::data::EntityType::Empty);
-        server.broadcast_chan1(&Client {
-            client_num: target_cn,
-            packet: channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
+    // Restore entities to pre-recording state (from original_map snapshot).
+    for &ent_id in &state.traps[edit_state.trap_idx].affected_entity_ids {
+        if let Some(ent) = edit_state.original_map.world.entities.get(ent_id) {
+            let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
+                .unwrap_or(sauer_proto::data::EntityType::Empty);
+            server.broadcast_chan1(&Client {
+                client_num: target_cn,
+                packet: channel1::EditEnt {
+                    ent_id: ent_id as i32,
+                    pos: sauer_proto::data::Vec3 {
+                        x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                    },
+                    type_: ent_type,
+                    attrs: ent.attrs.map(|x| x as i32),
                 },
-                type_: ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            },
-        });
+            });
+        }
     }
 
     state.map = Some(*edit_state.original_map);
@@ -861,9 +808,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     let trigger_clipboard = trap.trigger_clipboard.clone();
     let trigger_unpack_len = trap.trigger_unpack_len;
     let trigger_entities = trap.trigger_entities.clone();
-    let restore_clipboard = trap.restore_clipboard.clone();
-    let restore_unpack_len = trap.restore_unpack_len;
-    let original_entities = trap.original_entities.clone();
+    let affected_entity_ids = trap.affected_entity_ids.clone();
     let clip_pos = trap.clip_pos;
     let clip_s = trap.clip_s;
     let clip_grid = trap.clip_grid;
@@ -872,6 +817,24 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
     let server_clone = std::sync::Arc::clone(server);
     tokio::spawn(async move {
+        // Capture the current (pre-trigger) map state for dynamic restore.
+        // This ensures the restore reflects any environment changes made after trap was defined.
+        let (restore_unpack_len, restore_compressed, restore_entities) = {
+            let state = get_server_state(&server_clone).read().unwrap();
+            let map = match state.map.as_ref() {
+                Some(m) => m,
+                None => return,
+            };
+            let (unpack_len, compressed) = crate::recreate::generate_clipboard_for_region(
+                &map.world.root, map.world.size, clip_pos, clip_s, clip_grid,
+            );
+            let entities: std::collections::HashMap<usize, ogz_rs::data::Entity> = affected_entity_ids
+                .iter()
+                .filter_map(|&id| map.world.entities.get(id).map(|e| (id, e.clone())))
+                .collect();
+            (unpack_len, compressed, entities)
+        };
+
         // DelCube uses the same padded region and grid as the clipboard — at most 8^3=512 cells.
         let del_sel = SelInfo {
             o: sauer_proto::data::Vec3 {
@@ -987,14 +950,14 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         server_clone.broadcast_chan1(&channel1::ClipboardServer {
             client_num: actor_cn as i32,
             unpack_len: restore_unpack_len,
-            data: restore_clipboard.clone(),
+            data: restore_compressed.clone(),
         });
         server_clone.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
             packet: channel1::PasteServer { sel: paste_sel },
         });
 
-        for (&ent_id, ent) in &original_entities {
+        for (&ent_id, ent) in &restore_entities {
             let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
                 .unwrap_or(sauer_proto::data::EntityType::Empty);
             server_clone.broadcast_chan1(&Client {
@@ -1017,8 +980,8 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             let mut state = get_server_state(&server_clone).write().unwrap();
             if let Some(map) = state.map.as_mut() {
                 map.handle_del_cube(&channel1::DelCube { sel: del_sel });
-                apply_clipboard_to_map(map, &restore_clipboard);
-                for (&ent_id, ent) in &original_entities {
+                apply_clipboard_to_map(map, &restore_compressed);
+                for (&ent_id, ent) in &restore_entities {
                     let ent_type =
                         sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
                             .unwrap_or(sauer_proto::data::EntityType::Empty);

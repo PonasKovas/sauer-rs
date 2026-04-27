@@ -178,37 +178,23 @@ pub(crate) fn diff_bounds(
     }
 }
 
-/// Builds ONE multi-cell clipboard covering the entire min..max region, exactly like a
-/// vanilla player copy-paste. Returns (padded_min, s, grid, unpack_len, compressed).
-/// `s` is [sx, sy, sz] cell counts — use the same values for the companion DelCube sel.
-pub(crate) fn generate_region_clipboard(
+/// Builds a clipboard for a pre-computed padded region.
+/// Call this when the grid/bounds are already known (e.g. at trigger time for dynamic restore).
+pub(crate) fn generate_clipboard_for_region(
     root: &sauer_map::Node,
     world_size: i32,
-    min: [i32; 3],
-    max: [i32; 3],
-) -> ([i32; 3], [i32; 3], i32, i32, Vec<u8>) {
-    let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-    let grid = choose_grid(spans);
-
-    let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
-    let padded_max: [i32; 3] = std::array::from_fn(|i| {
-        (((max[i] + grid - 1).div_euclid(grid)) * grid).min(world_size)
-    });
-
-    let sx = (padded_max[0] - padded_min[0]) / grid;
-    let sy = (padded_max[1] - padded_min[1]) / grid;
-    let sz = (padded_max[2] - padded_min[2]) / grid;
-
+    padded_min: [i32; 3],
+    s: [i32; 3],
+    grid: i32,
+) -> (i32, Vec<u8>) {
+    let [sx, sy, sz] = s;
     let mut uncompressed = Vec::new();
     for &v in &padded_min { uncompressed.extend_from_slice(&v.to_le_bytes()); }
-    for &v in &[sx, sy, sz]  { uncompressed.extend_from_slice(&v.to_le_bytes()); }
+    for &v in &[sx, sy, sz] { uncompressed.extend_from_slice(&v.to_le_bytes()); }
     uncompressed.extend_from_slice(&grid.to_le_bytes());
     uncompressed.extend_from_slice(&0i32.to_le_bytes()); // Orient::Left
 
-    // Pack matching vanilla loopxyz order for Orient::Left (d=0, D=0, R=1, C=2):
-    //   outer z → s[D]=s[0]=sx,  middle y → s[C]=s[2]=sz,  inner x → s[R]=s[1]=sy
-    // blockcube maps: world_x = o.x+z*grid, world_y = o.y+x*grid, world_z = o.z+y*grid
-    // So: xi↔z, yi↔x, zi↔y → loop order is xi (outer), zi (middle), yi (inner).
+    // Pack matching vanilla loopxyz for Orient::Left: outer xi(z), middle zi(y), inner yi(x).
     for xi in 0..sx {
         for zi in 0..sz {
             for yi in 0..sy {
@@ -228,13 +214,38 @@ pub(crate) fn generate_region_clipboard(
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(&uncompressed).unwrap();
     let compressed = encoder.finish().unwrap();
+    (unpack_len, compressed)
+}
+
+/// Builds ONE multi-cell clipboard covering the entire min..max region, exactly like a
+/// vanilla player copy-paste. Returns (padded_min, s, grid, unpack_len, compressed).
+/// `s` is [sx, sy, sz] cell counts — use the same values for the companion DelCube sel.
+pub(crate) fn generate_region_clipboard(
+    root: &sauer_map::Node,
+    world_size: i32,
+    min: [i32; 3],
+    max: [i32; 3],
+) -> ([i32; 3], [i32; 3], i32, i32, Vec<u8>) {
+    let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    let grid = choose_grid(spans);
+
+    let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
+    let padded_max: [i32; 3] = std::array::from_fn(|i| {
+        (((max[i] + grid - 1).div_euclid(grid)) * grid).min(world_size)
+    });
+    let sx = (padded_max[0] - padded_min[0]) / grid;
+    let sy = (padded_max[1] - padded_min[1]) / grid;
+    let sz = (padded_max[2] - padded_min[2]) / grid;
+    let s = [sx, sy, sz];
+
+    let (unpack_len, compressed) = generate_clipboard_for_region(root, world_size, padded_min, s, grid);
 
     eprintln!(
         "[clipboard] grid={} cells={}x{}x{}={} uncompressed={} compressed={}",
         grid, sx, sy, sz, sx * sy * sz, unpack_len, compressed.len()
     );
 
-    (padded_min, [sx, sy, sz], grid, unpack_len, compressed)
+    (padded_min, s, grid, unpack_len, compressed)
 }
 
 /// Generates a valid zlib-compressed clipboard packet enclosing the given node
