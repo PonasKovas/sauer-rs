@@ -205,10 +205,13 @@ pub(crate) fn generate_region_clipboard(
     uncompressed.extend_from_slice(&grid.to_le_bytes());
     uncompressed.extend_from_slice(&0i32.to_le_bytes()); // Orient::Left
 
-    // Pack in X→Y→Z world order, matching vanilla blockcopy / loopxyz
+    // Pack matching vanilla loopxyz order for Orient::Left (d=0, D=0, R=1, C=2):
+    //   outer z → s[D]=s[0]=sx,  middle y → s[C]=s[2]=sz,  inner x → s[R]=s[1]=sy
+    // blockcube maps: world_x = o.x+z*grid, world_y = o.y+x*grid, world_z = o.z+y*grid
+    // So: xi↔z, yi↔x, zi↔y → loop order is xi (outer), zi (middle), yi (inner).
     for xi in 0..sx {
-        for yi in 0..sy {
-            for zi in 0..sz {
+        for zi in 0..sz {
+            for yi in 0..sy {
                 let cell_pos = [
                     padded_min[0] + xi * grid,
                     padded_min[1] + yi * grid,

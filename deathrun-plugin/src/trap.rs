@@ -649,7 +649,6 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     });
 }
 
-
 pub fn cmd_endtrap(ctx: &Context) {
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
@@ -694,7 +693,11 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     eprintln!(
         "[trap] diff bounds: {:?}..{:?} (spans {}x{}x{})",
-        min, max, max[0]-min[0], max[1]-min[1], max[2]-min[2]
+        min,
+        max,
+        max[0] - min[0],
+        max[1] - min[1],
+        max[2] - min[2]
     );
 
     // Generate ONE restore clipboard (from original map, pre-edit state)
@@ -708,12 +711,7 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     // Generate ONE trigger clipboard (from CURRENT map, post-edit state)
     let (_, _, _, trigger_unpack_len, trigger_compressed) =
-        crate::recreate::generate_region_clipboard(
-            &current_map.world.root,
-            world_size,
-            min,
-            max,
-        );
+        crate::recreate::generate_region_clipboard(&current_map.world.root, world_size, min, max);
 
     let mut original_entities = std::collections::HashMap::new();
     let mut trigger_entities = std::collections::HashMap::new();
@@ -767,11 +765,23 @@ pub fn cmd_endtrap(ctx: &Context) {
     // DelCube uses the SAME padded region and grid as the clipboard.
     // This is far cheaper than grid=1 (at most 8^3=512 cells vs millions).
     let del_sel = SelInfo {
-        o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-        s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+        o: sauer_proto::data::Vec3 {
+            x: clip_pos[0],
+            y: clip_pos[1],
+            z: clip_pos[2],
+        },
+        s: sauer_proto::data::Vec3 {
+            x: clip_s[0],
+            y: clip_s[1],
+            z: clip_s[2],
+        },
         grid: clip_grid,
         orient: sauer_proto::data::Orient::Left,
-        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+        cx: 0,
+        cxs: 0,
+        cy: 0,
+        cys: 0,
+        corner: 0,
     };
     server.broadcast_chan1(&Client {
         client_num: target_cn,
@@ -786,11 +796,23 @@ pub fn cmd_endtrap(ctx: &Context) {
         client_num: target_cn,
         packet: channel1::PasteServer {
             sel: SelInfo {
-                o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-                s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+                o: sauer_proto::data::Vec3 {
+                    x: clip_pos[0],
+                    y: clip_pos[1],
+                    z: clip_pos[2],
+                },
+                s: sauer_proto::data::Vec3 {
+                    x: clip_s[0],
+                    y: clip_s[1],
+                    z: clip_s[2],
+                },
                 grid: clip_grid,
                 orient: sauer_proto::data::Orient::Left,
-                cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+                cx: 0,
+                cxs: 0,
+                cy: 0,
+                cys: 0,
+                corner: 0,
             },
         },
     });
@@ -852,24 +874,50 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     tokio::spawn(async move {
         // DelCube uses the same padded region and grid as the clipboard — at most 8^3=512 cells.
         let del_sel = SelInfo {
-            o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-            s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+            o: sauer_proto::data::Vec3 {
+                x: clip_pos[0],
+                y: clip_pos[1],
+                z: clip_pos[2],
+            },
+            s: sauer_proto::data::Vec3 {
+                x: clip_s[0],
+                y: clip_s[1],
+                z: clip_s[2],
+            },
             grid: clip_grid,
             orient: sauer_proto::data::Orient::Left,
-            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
         };
         let paste_sel = SelInfo {
-            o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-            s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+            o: sauer_proto::data::Vec3 {
+                x: clip_pos[0],
+                y: clip_pos[1],
+                z: clip_pos[2],
+            },
+            s: sauer_proto::data::Vec3 {
+                x: clip_s[0],
+                y: clip_s[1],
+                z: clip_s[2],
+            },
             grid: clip_grid,
             orient: sauer_proto::data::Orient::Left,
-            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
         };
 
         // --- 1. APPLY TRIGGERED STATE ---
         server_clone.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
-            packet: channel1::DelCube { sel: del_sel.clone() },
+            packet: channel1::DelCube {
+                sel: del_sel.clone(),
+            },
         });
         server_clone.broadcast_chan1(&channel1::ClipboardServer {
             client_num: actor_cn as i32,
@@ -878,7 +926,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         });
         server_clone.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
-            packet: channel1::PasteServer { sel: paste_sel.clone() },
+            packet: channel1::PasteServer {
+                sel: paste_sel.clone(),
+            },
         });
 
         for (&ent_id, ent) in &trigger_entities {
@@ -889,7 +939,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 packet: channel1::EditEnt {
                     ent_id: ent_id as i32,
                     pos: sauer_proto::data::Vec3 {
-                        x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                        x: ent.position[0],
+                        y: ent.position[1],
+                        z: ent.position[2],
                     },
                     type_: ent_type,
                     attrs: ent.attrs.map(|x| x as i32),
@@ -901,16 +953,20 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         {
             let mut state = get_server_state(&server_clone).write().unwrap();
             if let Some(map) = state.map.as_mut() {
-                map.handle_del_cube(&channel1::DelCube { sel: del_sel.clone() });
+                map.handle_del_cube(&channel1::DelCube {
+                    sel: del_sel.clone(),
+                });
                 apply_clipboard_to_map(map, &trigger_clipboard);
                 for (&ent_id, ent) in &trigger_entities {
-                    let ent_type = sauer_proto::data::EntityType::try_from(
-                        u8::from(ent.ent_type) as i32,
-                    ).unwrap_or(sauer_proto::data::EntityType::Empty);
+                    let ent_type =
+                        sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
+                            .unwrap_or(sauer_proto::data::EntityType::Empty);
                     map.handle_edit_ent(&channel1::EditEnt {
                         ent_id: ent_id as i32,
                         pos: sauer_proto::data::Vec3 {
-                            x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                            x: ent.position[0],
+                            y: ent.position[1],
+                            z: ent.position[2],
                         },
                         type_: ent_type,
                         attrs: ent.attrs.map(|x| x as i32),
@@ -919,12 +975,14 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         // --- 2. RESTORE ORIGINAL STATE ---
         server_clone.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
-            packet: channel1::DelCube { sel: del_sel.clone() },
+            packet: channel1::DelCube {
+                sel: del_sel.clone(),
+            },
         });
         server_clone.broadcast_chan1(&channel1::ClipboardServer {
             client_num: actor_cn as i32,
@@ -944,7 +1002,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 packet: channel1::EditEnt {
                     ent_id: ent_id as i32,
                     pos: sauer_proto::data::Vec3 {
-                        x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                        x: ent.position[0],
+                        y: ent.position[1],
+                        z: ent.position[2],
                     },
                     type_: ent_type,
                     attrs: ent.attrs.map(|x| x as i32),
@@ -959,13 +1019,15 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 map.handle_del_cube(&channel1::DelCube { sel: del_sel });
                 apply_clipboard_to_map(map, &restore_clipboard);
                 for (&ent_id, ent) in &original_entities {
-                    let ent_type = sauer_proto::data::EntityType::try_from(
-                        u8::from(ent.ent_type) as i32,
-                    ).unwrap_or(sauer_proto::data::EntityType::Empty);
+                    let ent_type =
+                        sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
+                            .unwrap_or(sauer_proto::data::EntityType::Empty);
                     map.handle_edit_ent(&channel1::EditEnt {
                         ent_id: ent_id as i32,
                         pos: sauer_proto::data::Vec3 {
-                            x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                            x: ent.position[0],
+                            y: ent.position[1],
+                            z: ent.position[2],
                         },
                         type_: ent_type,
                         attrs: ent.attrs.map(|x| x as i32),
@@ -992,10 +1054,12 @@ fn apply_clipboard_to_map(map: &mut crate::map_state::MapState, compressed: &[u8
     let ox = cb_sel.o.x;
     let oy = cb_sel.o.y;
     let oz = cb_sel.o.z;
+    // Match the xi,zi,yi packing order from generate_region_clipboard.
+    // flat idx = xi*sz*sy + zi*sy + yi
     for xi in 0..sx {
-        for yi in 0..sy {
-            for zi in 0..sz {
-                let idx = (xi * sy * sz + yi * sz + zi) as usize;
+        for zi in 0..sz {
+            for yi in 0..sy {
+                let idx = (xi * sz * sy + zi * sy + yi) as usize;
                 if idx >= nodes.len() {
                     continue;
                 }
