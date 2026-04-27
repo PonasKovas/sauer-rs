@@ -4,8 +4,8 @@ use sauer_proto::{
     channel1, channel2,
     data::{EditVarValue, SelInfo},
 };
-use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
 use sauer_server::plugin::Context;
+use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
 use std::sync::RwLock;
 use tracing::error;
 
@@ -263,6 +263,71 @@ impl MapState {
             packet.attrs.map(|x| x as i16),
         );
     }
+
+    pub fn apply_block(&mut self, sel: &SelInfo, nodes: Vec<sauer_map::Node>, transparent: bool) {
+        if nodes.is_empty() {
+            return;
+        }
+
+        let orient = sel.orient as usize;
+        let d = orient >> 1;
+        let r_dim = [1usize, 2, 0][d];
+        let c_dim = [2usize, 0, 1][d];
+        let d_dim = [0usize, 1, 2][d];
+
+        let s_arr = [sel.s.x, sel.s.y, sel.s.z];
+        let s_r = s_arr[r_dim];
+        let s_c = s_arr[c_dim];
+        let s_d = s_arr[d_dim];
+
+        let sel_o = [sel.o.x, sel.o.y, sel.o.z];
+
+        self.world.edit_sel(&to_selection(sel), |dest_node, pos| {
+            let dx = (pos[r_dim] - sel_o[r_dim]) / sel.grid;
+            let dy = (pos[c_dim] - sel_o[c_dim]) / sel.grid;
+
+            // Sauerbraten maps the Z-axis backwards in the array when dimcoord(orient) != 0
+            let dc = orient & 1;
+            let pos_d = (pos[d_dim] - sel_o[d_dim]) / sel.grid;
+            let dz = if dc != 0 { s_d - 1 - pos_d } else { pos_d };
+
+            if dx >= 0 && dx < s_r && dy >= 0 && dy < s_c && dz >= 0 && dz < s_d {
+                let idx = (dz * s_c * s_r + dy * s_r + dx) as usize;
+                if idx < nodes.len() {
+                    let src_node = &nodes[idx];
+                    let should_paste = if transparent {
+                        match src_node {
+                            sauer_map::Node::Leaf(cube) => {
+                                !cube.is_empty() || cube.material != Default::default()
+                            }
+                            sauer_map::Node::Branch(_) => true,
+                        }
+                    } else {
+                        true
+                    };
+                    if should_paste {
+                        *dest_node = src_node.clone();
+                    }
+                }
+            }
+        });
+        self.invalidate_cache();
+    }
+
+    pub fn handle_paste(&mut self, packet: &channel1::PasteClient, clipboard_data: &[u8]) {
+        if let Some((cb_sel, nodes)) = crate::block_reader::decode_clipboard(clipboard_data) {
+            let mut paste_sel = packet.sel.clone();
+            paste_sel.s = cb_sel.s; // Paste dynamically replaces bounds...
+            paste_sel.orient = cb_sel.orient; // ...and mapping orientation.
+            self.apply_block(&paste_sel, nodes, true); // Paste is natively transparent
+        }
+    }
+
+    pub fn handle_undo_redo(&mut self, data: &[u8]) {
+        if let Some((sel, nodes)) = crate::block_reader::decode_undo(data) {
+            self.apply_block(&sel, nodes, false); // Undo uses absolute overwrites
+        }
+    }
 }
 
 /// A placed trap button in the map.
@@ -322,4 +387,49 @@ pub(crate) fn send_map_to(server: &Server, cn: u32) -> bool {
     };
     server.send_chan2(cn, &channel2::SendMap { data: bytes });
     true
+}
+
+fn unpack_cube(bytes: &[u8], pos: &mut usize) -> Option<Node> {
+    if *pos >= bytes.len() {
+        return None;
+    }
+    let b = bytes[*pos];
+    *pos += 1;
+    if b == 255 {
+        // OCTSAV_CHILDREN
+        let mut children = Vec::with_capacity(8);
+        for _ in 0..8 {
+            children.push(unpack_cube(bytes, pos)?);
+        }
+        Some(Node::Branch(Box::new(children.try_into().unwrap())))
+    } else {
+        if *pos >= bytes.len() {
+            return None;
+        }
+        let mat_hi = bytes[*pos];
+        *pos += 1;
+        let mat = (b as u16) | ((mat_hi as u16) << 8);
+
+        let mut edges = [0u8; 12];
+        if *pos + 12 > bytes.len() {
+            return None;
+        }
+        edges.copy_from_slice(&bytes[*pos..*pos + 12]);
+        *pos += 12;
+
+        let mut textures = [0u16; 6];
+        for i in 0..6 {
+            if *pos + 2 > bytes.len() {
+                return None;
+            }
+            textures[i] = u16::from_le_bytes([bytes[*pos], bytes[*pos + 1]]);
+            *pos += 2;
+        }
+
+        Some(Node::Leaf(sauer_map::Cube {
+            edges,
+            textures,
+            material: ogz_rs::data::Material::from_bits(mat),
+        }))
+    }
 }

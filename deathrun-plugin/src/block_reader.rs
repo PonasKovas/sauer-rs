@@ -1,94 +1,133 @@
 use flate2::read::ZlibDecoder;
+use sauer_proto::data::{Orient, SelInfo, Vec3};
 use std::io::Read;
 
-fn getint(bytes: &[u8], pos: &mut usize) -> Option<i32> {
+pub fn unpack_cube(bytes: &[u8], pos: &mut usize) -> Option<sauer_map::Node> {
     if *pos >= bytes.len() {
         return None;
     }
-    let c = bytes[*pos] as i8;
+    let mat = bytes[*pos];
     *pos += 1;
-    if c == -128 {
-        if *pos + 1 >= bytes.len() {
-            return None;
+    if mat == 0xFF {
+        let mut children = Vec::with_capacity(8);
+        for _ in 0..8 {
+            children.push(unpack_cube(bytes, pos)?);
         }
-        let b0 = bytes[*pos] as u8 as i32;
-        let b1 = bytes[*pos + 1] as i8 as i32;
-        *pos += 2;
-        Some(b0 | (b1 << 8))
-    } else if c == -127 {
-        if *pos + 3 >= bytes.len() {
-            return None;
-        }
-        let b0 = bytes[*pos] as u8 as i32;
-        let b1 = bytes[*pos + 1] as u8 as i32;
-        let b2 = bytes[*pos + 2] as u8 as i32;
-        let b3 = bytes[*pos + 3] as i8 as i32;
-        *pos += 4;
-        Some(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24))
+        Some(sauer_map::Node::Branch(Box::new(
+            children.try_into().unwrap(),
+        )))
     } else {
-        Some(c as i32)
-    }
-}
-
-fn skip_undo_ents(bytes: &[u8], pos: &mut usize) -> Option<()> {
-    let numents = getint(bytes, pos)?;
-    for _ in 0..numents {
-        getint(bytes, pos)?; // id
-        getint(bytes, pos)?; // type
-        getint(bytes, pos)?; // x
-        getint(bytes, pos)?; // y
-        getint(bytes, pos)?; // z
-        for _ in 0..5 {
-            getint(bytes, pos)?; // attr 0-4
+        if *pos >= bytes.len() {
+            return None;
         }
+        let mat_hi = bytes[*pos];
+        *pos += 1;
+        let material = (mat as u16) | ((mat_hi as u16) << 8);
+
+        let mut edges = [0u8; 12];
+        if *pos + 12 > bytes.len() {
+            return None;
+        }
+        edges.copy_from_slice(&bytes[*pos..*pos + 12]);
+        *pos += 12;
+
+        let mut textures = [0u16; 6];
+        for i in 0..6 {
+            if *pos + 2 > bytes.len() {
+                return None;
+            }
+            textures[i] = u16::from_le_bytes([bytes[*pos], bytes[*pos + 1]]);
+            *pos += 2;
+        }
+
+        Some(sauer_map::Node::Leaf(sauer_map::Cube {
+            edges,
+            textures,
+            material: ogz_rs::data::Material::from_bits(material),
+        }))
     }
-    Some(())
 }
 
-pub fn get_undo_redo_bounds(data: &[u8]) -> Option<([i32; 3], [i32; 3], i32)> {
+pub fn unpack_block(bytes: &[u8], pos: &mut usize) -> Option<(SelInfo, Vec<sauer_map::Node>)> {
+    if *pos + 32 > bytes.len() {
+        return None;
+    }
+    let mut get_i32 = |offset: usize| {
+        let start = *pos + offset * 4;
+        i32::from_le_bytes(bytes[start..start + 4].try_into().unwrap())
+    };
+
+    let o_x = get_i32(0);
+    let o_y = get_i32(1);
+    let o_z = get_i32(2);
+    let s_x = get_i32(3);
+    let s_y = get_i32(4);
+    let s_z = get_i32(5);
+    let grid = get_i32(6);
+    let orient = get_i32(7);
+    *pos += 32;
+
+    let total = (s_x * s_y * s_z) as usize;
+    let mut nodes = Vec::with_capacity(total);
+    for _ in 0..total {
+        nodes.push(unpack_cube(bytes, pos)?);
+    }
+
+    let sel = SelInfo {
+        o: Vec3 {
+            x: o_x,
+            y: o_y,
+            z: o_z,
+        },
+        s: Vec3 {
+            x: s_x,
+            y: s_y,
+            z: s_z,
+        },
+        grid,
+        orient: Orient::try_from(orient).unwrap_or(Orient::Left),
+        cx: 0,
+        cxs: 0,
+        cy: 0,
+        cys: 0,
+        corner: 0,
+    };
+
+    Some((sel, nodes))
+}
+
+pub fn decode_clipboard(data: &[u8]) -> Option<(SelInfo, Vec<sauer_map::Node>)> {
     let mut decoder = ZlibDecoder::new(data);
     let mut decompressed = Vec::new();
-    decoder
-        .by_ref()
-        .take(4096)
-        .read_to_end(&mut decompressed)
-        .ok()?;
 
-    let mut pos = 0;
-    skip_undo_ents(&decompressed, &mut pos)?;
-
-    if pos >= decompressed.len() {
+    // CRITICAL FIX: Ignore broken Sauerbraten footers. As long as decompressed isn't empty, it worked.
+    let _ = decoder.read_to_end(&mut decompressed);
+    if decompressed.is_empty() {
         return None;
     }
 
-    let x = getint(&decompressed, &mut pos)?;
-    let y = getint(&decompressed, &mut pos)?;
-    let z = getint(&decompressed, &mut pos)?;
-    let xs = getint(&decompressed, &mut pos)?;
-    let ys = getint(&decompressed, &mut pos)?;
-    let zs = getint(&decompressed, &mut pos)?;
-    let grid = getint(&decompressed, &mut pos)?;
-
-    Some(([x, y, z], [xs, ys, zs], grid))
+    let mut pos = 0;
+    unpack_block(&decompressed, &mut pos)
 }
 
-pub fn get_clipboard_bounds(data: &[u8]) -> Option<([i32; 3], [i32; 3], i32)> {
+pub fn decode_undo(data: &[u8]) -> Option<(SelInfo, Vec<sauer_map::Node>)> {
     let mut decoder = ZlibDecoder::new(data);
     let mut decompressed = Vec::new();
-    decoder
-        .by_ref()
-        .take(256)
-        .read_to_end(&mut decompressed)
-        .ok()?;
+
+    let _ = decoder.read_to_end(&mut decompressed);
+    if decompressed.is_empty() {
+        return None;
+    }
 
     let mut pos = 0;
-    let x = getint(&decompressed, &mut pos)?;
-    let y = getint(&decompressed, &mut pos)?;
-    let z = getint(&decompressed, &mut pos)?;
-    let xs = getint(&decompressed, &mut pos)?;
-    let ys = getint(&decompressed, &mut pos)?;
-    let zs = getint(&decompressed, &mut pos)?;
-    let grid = getint(&decompressed, &mut pos)?;
+    if pos + 2 > decompressed.len() {
+        return None;
+    }
+    let numents = u16::from_le_bytes([decompressed[0], decompressed[1]]);
+    pos += 2;
 
-    Some(([x, y, z], [xs, ys, zs], grid))
+    if numents > 0 {
+        return None;
+    } // We don't care about entity-only undos
+    unpack_block(&decompressed, &mut pos)
 }

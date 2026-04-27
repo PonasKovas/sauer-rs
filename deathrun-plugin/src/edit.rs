@@ -1,4 +1,3 @@
-use crate::block_reader::{get_clipboard_bounds, get_undo_redo_bounds};
 use crate::map_state::{
     DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to, with_map_state_mut,
 };
@@ -281,41 +280,61 @@ impl Plugin for DeathrunEdit {
     async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
         let cn = ctx.cn();
         let server = ctx.server().clone();
-        let mut clipboard_bounds = None;
+
         if let Some(p) = server.players.try_get(cn) {
             if let Some(cb) = &p.clipboard {
-                clipboard_bounds = get_clipboard_bounds(&cb.data);
+                let cb_data = cb.data.clone();
+                // Safely update server map octree tracking memory
+                with_map_state_mut(ctx, |state| state.handle_paste(packet, &cb_data));
+
+                if let Some((cb_sel, _)) = crate::block_reader::decode_clipboard(&cb_data) {
+                    let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+                    let max = [
+                        min[0] + cb_sel.s.x * packet.sel.grid,
+                        min[1] + cb_sel.s.y * packet.sel.grid,
+                        min[2] + cb_sel.s.z * packet.sel.grid,
+                    ];
+                    crate::trap::check_and_rebuild_traps(ctx, |trap| {
+                        crate::trap::intersects_bounds(min, max, trap)
+                    });
+                    return;
+                }
             }
         }
-
-        if let Some((_, cb_s, cb_grid)) = clipboard_bounds {
-            let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-            let max = [
-                min[0] + cb_s[0] * cb_grid,
-                min[1] + cb_s[1] * cb_grid,
-                min[2] + cb_s[2] * cb_grid,
-            ];
-            check_and_rebuild_traps(ctx, |trap| intersects_bounds(min, max, trap));
-        } else {
-            check_and_rebuild_traps(ctx, |_| true);
-        }
+        crate::trap::check_and_rebuild_traps(ctx, |_| true);
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
-        if let Some((o, s, grid)) = get_undo_redo_bounds(&packet.data) {
-            let max = [o[0] + s[0] * grid, o[1] + s[1] * grid, o[2] + s[2] * grid];
-            check_and_rebuild_traps(ctx, |trap| intersects_bounds(o, max, trap));
+        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
+
+        if let Some((sel, _)) = crate::block_reader::decode_undo(&packet.data) {
+            let max = [
+                sel.o.x + sel.s.x * sel.grid,
+                sel.o.y + sel.s.y * sel.grid,
+                sel.o.z + sel.s.z * sel.grid,
+            ];
+            crate::trap::check_and_rebuild_traps(ctx, |trap| {
+                crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
+            });
         } else {
-            check_and_rebuild_traps(ctx, |_| true);
+            crate::trap::check_and_rebuild_traps(ctx, |_| true);
         }
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
-        if let Some((o, s, grid)) = get_undo_redo_bounds(&packet.data) {
-            let max = [o[0] + s[0] * grid, o[1] + s[1] * grid, o[2] + s[2] * grid];
-            check_and_rebuild_traps(ctx, |trap| intersects_bounds(o, max, trap));
+        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
+
+        if let Some((sel, _)) = crate::block_reader::decode_undo(&packet.data) {
+            let max = [
+                sel.o.x + sel.s.x * sel.grid,
+                sel.o.y + sel.s.y * sel.grid,
+                sel.o.z + sel.s.z * sel.grid,
+            ];
+            crate::trap::check_and_rebuild_traps(ctx, |trap| {
+                crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
+            });
         } else {
-            check_and_rebuild_traps(ctx, |_| true);
+            crate::trap::check_and_rebuild_traps(ctx, |_| true);
         }
     }
 }
