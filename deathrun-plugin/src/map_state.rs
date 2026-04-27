@@ -1,13 +1,16 @@
 use cube_string::CubeString;
-use ogz_rs::{OgzMap, data::{MapConfig, VSlot, VSlotParam, Variable}};
+use ogz_rs::{
+    OgzMap,
+    data::{MapConfig, VSlot, VSlotParam, Variable},
+};
 use sauer_map::{Cube, Node, Selection, World};
-use std::collections::{HashMap, HashSet};
 use sauer_proto::{
     channel1, channel2,
     data::{EditVarValue, SelInfo},
 };
 use sauer_server::plugin::Context;
 use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use tracing::error;
 
@@ -26,6 +29,7 @@ pub fn to_selection(sel: &SelInfo) -> Selection {
     }
 }
 
+#[derive(Clone)]
 pub struct MapState {
     pub world: World,
     pub meta: OgzMap,
@@ -33,13 +37,31 @@ pub struct MapState {
 
 impl MapState {
     pub fn default_empty() -> Self {
-        let solid = Node::Leaf(Cube { edges: [0x80; 12], textures: [1; 6], material: Default::default() });
-        let air = Node::Leaf(Cube { edges: [0x00; 12], textures: [0; 6], material: Default::default() });
+        let solid = Node::Leaf(Cube {
+            edges: [0x80; 12],
+            textures: [1; 6],
+            material: Default::default(),
+        });
+        let air = Node::Leaf(Cube {
+            edges: [0x00; 12],
+            textures: [0; 6],
+            material: Default::default(),
+        });
         let root = Node::Branch(Box::new([
-            solid.clone(), solid.clone(), solid.clone(), solid,
-            air.clone(), air.clone(), air.clone(), air,
+            solid.clone(),
+            solid.clone(),
+            solid.clone(),
+            solid,
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air,
         ]));
-        let world = World { size: 512, root, entities: vec![] };
+        let world = World {
+            size: 512,
+            root,
+            entities: vec![],
+        };
         let meta = OgzMap {
             version: 33,
             world_size: 512,
@@ -506,7 +528,10 @@ fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
     }
     if flags & (1 << 4) != 0 {
         // Sent as value * 1000; store as raw value.
-        scroll = Some((read_f32_le(data, &mut pos)? / 1000.0, read_f32_le(data, &mut pos)? / 1000.0));
+        scroll = Some((
+            read_f32_le(data, &mut pos)? / 1000.0,
+            read_f32_le(data, &mut pos)? / 1000.0,
+        ));
     }
     if flags & (1 << 5) != 0 {
         layer = Some(read_varint(data, &mut pos)?);
@@ -522,7 +547,16 @@ fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
         ));
     }
 
-    Some(PackedVSlot { params, scale, rotation, offset, scroll, layer, alpha, color })
+    Some(PackedVSlot {
+        params,
+        scale,
+        rotation,
+        offset,
+        scroll,
+        layer,
+        alpha,
+        color,
+    })
 }
 
 fn packed_vslot_matches(vs: &VSlot, ds: &PackedVSlot) -> bool {
@@ -560,7 +594,14 @@ fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlo
     }
     let new_vs = VSlot {
         prev: base_tex as i32,
-        params: ds.params.iter().map(|(n, v)| VSlotParam { name: n.clone(), values: *v }).collect(),
+        params: ds
+            .params
+            .iter()
+            .map(|(n, v)| VSlotParam {
+                name: n.clone(),
+                values: *v,
+            })
+            .collect(),
         scale: ds.scale,
         rotation: ds.rotation,
         offset: ds.offset,
@@ -574,11 +615,18 @@ fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlo
     idx as u16
 }
 
-/// A placed trap button in the map.
 pub struct Trap {
     pub button_pos: [i32; 3],
     pub button_size: i32,
     pub button_orient: u8,
+
+    pub recorded_packets: Vec<crate::trap::RecordedPacket>,
+    pub restore_chunks: Vec<([i32; 3], i32, Vec<u8>, i32)>, // pos, size, compressed, unpack_len
+    pub original_entities: HashMap<usize, ogz_rs::data::Entity>,
+    pub affected_min: [i32; 3],
+    pub affected_max: [i32; 3],
+
+    pub is_active: bool,
 }
 
 pub struct DeathrunState {
@@ -586,6 +634,7 @@ pub struct DeathrunState {
     /// True while waiting for a player to upload a map after a map vote.
     pub waiting_for_map: bool,
     pub traps: Vec<Trap>,
+    pub trap_edit: Option<crate::trap::TrapEditState>,
 }
 
 impl Default for DeathrunState {
@@ -594,6 +643,7 @@ impl Default for DeathrunState {
             map: None,
             waiting_for_map: false,
             traps: Vec::new(),
+            trap_edit: None,
         }
     }
 }
@@ -632,4 +682,3 @@ pub(crate) fn send_map_to(server: &Server, cn: u32) -> bool {
     server.send_chan2(cn, &channel2::SendMap { data: bytes });
     true
 }
-

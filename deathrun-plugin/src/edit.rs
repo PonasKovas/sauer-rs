@@ -1,6 +1,5 @@
 use crate::map_state::{
-    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to,
-    with_map_state_mut,
+    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to, with_map_state_mut,
 };
 use crate::trap::{
     check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
@@ -20,6 +19,36 @@ use sauer_server::{
 };
 use std::sync::RwLock;
 use tracing::{info, warn};
+
+// ─── Packet Memory Tracker ────────────────────────────────────────────────────
+
+fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
+    let server = ctx.server();
+    let mut state = crate::map_state::get_server_state(server).write().unwrap();
+    if let Some(edit) = &mut state.trap_edit {
+        match &packet {
+            crate::trap::RecordedPacket::EditFace(p) => edit.add_edit_face(&p.sel, p.dir),
+            crate::trap::RecordedPacket::EditTex(p) => edit.add_sel(&p.sel),
+            crate::trap::RecordedPacket::EditMat(p) => edit.add_sel(&p.sel),
+            crate::trap::RecordedPacket::DelCube(p) => edit.add_sel(&p.sel),
+            crate::trap::RecordedPacket::EditVSlot(p) => edit.add_sel(&p.sel),
+            crate::trap::RecordedPacket::Replace(p) => {
+                if p.in_sel != 0 {
+                    edit.add_sel(&p.sel);
+                } else {
+                    let ws = edit.original_map.world.size;
+                    edit.add_bounds([0, 0, 0], [ws, ws, ws]);
+                }
+            }
+            crate::trap::RecordedPacket::Flip(p) => edit.add_sel(&p.sel),
+            crate::trap::RecordedPacket::Rotate(p) => edit.add_sel(&p.sel),
+            crate::trap::RecordedPacket::EditEnt(p) => {
+                edit.affected_entities.insert(p.ent_id as usize);
+            }
+        }
+        edit.recorded_packets.push(packet);
+    }
+}
 
 pub struct DeathrunEdit {
     player_dirs: DashMap<u32, Direction>,
@@ -49,13 +78,18 @@ impl Plugin for DeathrunEdit {
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
         let cmd = packet.text.strip_colors().to_utf8();
         let cmd = cmd.trim();
-        if cmd != "#newtrap" && cmd != "#deltrap" {
+        if cmd != "#newtrap" && cmd != "#deltrap" && cmd != "#settrap" && cmd != "#endtrap" {
             return;
         }
         ctx.cancel();
 
         let cn = ctx.cn();
         let server = ctx.server().clone();
+
+        if cmd == "#endtrap" {
+            crate::trap::cmd_endtrap(ctx);
+            return;
+        }
 
         let (pos, is_editing) = match server.players.try_get(cn) {
             Some(p) => (p.position, p.client_state == ClientState::Editing),
@@ -66,7 +100,7 @@ impl Plugin for DeathrunEdit {
             server.send_chan1(
                 cn,
                 &ServMsg {
-                    text: "Must be in edit mode to place a trap.".lossy_cubestring(),
+                    text: "Must be in edit mode to place/configure a trap.".lossy_cubestring(),
                 },
             );
             return;
@@ -111,6 +145,38 @@ impl Plugin for DeathrunEdit {
             cmd_deltrap(ctx, hit_pt);
         } else if cmd == "#newtrap" {
             cmd_newtrap(ctx, hit_pt, hit_orient);
+        } else if cmd == "#settrap" {
+            crate::trap::cmd_settrap(ctx, hit_pt);
+        }
+    }
+
+    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
+        let cn = ctx.cn();
+        let server = ctx.server().clone();
+
+        let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
+
+        // Scope the read lock strictly so it drops BEFORE calling trigger_trap.
+        let trap_to_trigger = {
+            let state = crate::map_state::get_server_state(&server).read().unwrap();
+
+            state.traps.iter().position(|trap| {
+                let b_min = trap.button_pos;
+                let b_max = [
+                    b_min[0] + trap.button_size,
+                    b_min[1] + trap.button_size,
+                    b_min[2] + trap.button_size,
+                ];
+
+                // Using 0.5 epsilon to guarantee the hit registers if we strike the surface
+                (0..3).all(|ax| {
+                    hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
+                })
+            })
+        }; // READ LOCK DROPS HERE
+
+        if let Some(trap_idx) = trap_to_trigger {
+            crate::trap::trigger_trap(&server, trap_idx, cn); // SAFE! Can acquire write lock.
         }
     }
 
@@ -230,28 +296,32 @@ impl Plugin for DeathrunEdit {
         }
     }
 
-    // ── Coop-edit map tracking + Trap immunities ────────────────────────────────────────────────
+    // ── Coop-edit map tracking + Interceptors + Trap immunities ──────────────────────
 
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::EditTex(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_tex(packet));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::EditMat(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_mat(packet));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::DelCube(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_del_cube(packet));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::Replace(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_replace(packet));
         check_and_rebuild_traps(ctx, |trap| {
             if packet.in_sel == 0 {
-                true // Matches entire map root
+                true
             } else {
                 intersects_sel(&packet.sel, trap)
             }
@@ -259,6 +329,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::EditFace(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_face(packet));
         check_and_rebuild_traps(ctx, |trap| {
             intersects_edit_face(&packet.sel, packet.dir, trap)
@@ -266,6 +337,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::EditEnt(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_ent(packet));
     }
 
@@ -274,15 +346,18 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::Flip(packet.clone()));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
+        intercept_packet(ctx, crate::trap::RecordedPacket::Rotate(packet.clone()));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
@@ -294,12 +369,10 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        // 1. Clear previous clipboard immediately
         if let Some(mut p) = server.players.try_get_mut(cn) {
             p.clipboard = None;
         }
 
-        // 2. Extract map geometry into binary clipboard format
         if let Some(state) = crate::map_state::get_server_state(&server)
             .write()
             .unwrap()
@@ -328,7 +401,6 @@ impl Plugin for DeathrunEdit {
                 total_nodes
             ];
 
-            // Cleanly extract nodes mapping the bounds into Sauerbraten's clipboard layout
             state.world.edit_sel(&sel, |node, pos| {
                 let dx = (pos[r_dim] - sel.o[r_dim]) / sel.grid;
                 let dy = (pos[c_dim] - sel.o[c_dim]) / sel.grid;
@@ -343,7 +415,6 @@ impl Plugin for DeathrunEdit {
                 }
             });
 
-            // Pack selection header
             let mut uncompressed = Vec::new();
             for val in [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z] {
                 uncompressed.extend_from_slice(&val.to_le_bytes());
@@ -354,15 +425,12 @@ impl Plugin for DeathrunEdit {
             uncompressed.extend_from_slice(&packet.sel.grid.to_le_bytes());
             uncompressed.extend_from_slice(&(packet.sel.orient as i32).to_le_bytes());
 
-            // Pack cubes
             for node in extracted_nodes {
                 crate::recreate::pack_cube(&node, &mut uncompressed);
             }
 
-            // Critical: Add empty VSlots terminator
             uncompressed.extend_from_slice(&0u32.to_le_bytes());
 
-            // Zlib compress matching C++ protocol mechanics
             use flate2::{Compression, write::ZlibEncoder};
             use std::io::Write;
             let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
@@ -378,10 +446,7 @@ impl Plugin for DeathrunEdit {
             }
         }
 
-        // 3. Cancel the context so `Base::copy` doesn't execute and wipe our newly saved clipboard
         ctx.cancel();
-
-        // 4. Manually broadcast N_COPY to everyone else, preserving standard multiplayer sync
         server.broadcast_except_chan1(
             cn,
             &sauer_proto::Client {
@@ -400,7 +465,6 @@ impl Plugin for DeathrunEdit {
         if let Some(p) = server.players.try_get(cn) {
             if let Some(cb) = &p.clipboard {
                 let cb_data = cb.data.clone();
-                // Safely update server map octree tracking memory
                 with_map_state_mut(ctx, |state| state.handle_paste(packet, &cb_data));
 
                 if let Some((cb_sel, _)) = crate::block_reader::decode_clipboard(&cb_data) {
