@@ -46,7 +46,6 @@ fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
                 edit.affected_entities.insert(p.ent_id as usize);
             }
         }
-        edit.recorded_packets.push(packet);
     }
 }
 
@@ -156,7 +155,6 @@ impl Plugin for DeathrunEdit {
 
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
 
-        // Scope the read lock strictly so it drops BEFORE calling trigger_trap.
         let trap_to_trigger = {
             let state = crate::map_state::get_server_state(&server).read().unwrap();
 
@@ -168,15 +166,14 @@ impl Plugin for DeathrunEdit {
                     b_min[2] + trap.button_size,
                 ];
 
-                // Using 0.5 epsilon to guarantee the hit registers if we strike the surface
                 (0..3).all(|ax| {
                     hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
                 })
             })
-        }; // READ LOCK DROPS HERE
+        };
 
         if let Some(trap_idx) = trap_to_trigger {
-            crate::trap::trigger_trap(&server, trap_idx, cn); // SAFE! Can acquire write lock.
+            crate::trap::trigger_trap(&server, trap_idx, cn);
         }
     }
 

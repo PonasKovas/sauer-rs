@@ -620,9 +620,12 @@ pub struct Trap {
     pub button_size: i32,
     pub button_orient: u8,
 
-    pub recorded_packets: Vec<crate::trap::RecordedPacket>,
-    pub restore_chunks: Vec<([i32; 3], i32, Vec<u8>, i32)>, // pos, size, compressed, unpack_len
+    pub trigger_chunks: Vec<([i32; 3], i32, Vec<u8>, i32)>,
+    pub trigger_entities: HashMap<usize, ogz_rs::data::Entity>,
+
+    pub restore_chunks: Vec<([i32; 3], i32, Vec<u8>, i32)>,
     pub original_entities: HashMap<usize, ogz_rs::data::Entity>,
+
     pub affected_min: [i32; 3],
     pub affected_max: [i32; 3],
 
