@@ -149,7 +149,7 @@ fn build_setup_packets(cn: i32, adj_sel: &SelInfo, fill_sel: &SelInfo) -> Button
 // Emits standard format VSlot properties specifically to correctly update the server's tracking
 // map state. Explicitly merging properties fixes map_state.rs dropping them for /getmap.
 fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
-    let mut putint = |v: &mut Vec<u8>, n: i32| {
+    let putint = |v: &mut Vec<u8>, n: i32| {
         if n < 128 && n > -127 {
             v.push(n as u8);
         } else if n < 0x8000 && n >= -0x8000 {
