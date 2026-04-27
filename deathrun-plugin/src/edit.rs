@@ -3,8 +3,7 @@ use crate::map_state::{
     with_map_state_mut,
 };
 use crate::trap::{
-    check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_bounds, intersects_edit_face,
-    intersects_sel,
+    check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
 };
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
@@ -270,7 +269,12 @@ impl Plugin for DeathrunEdit {
         with_map_state_mut(ctx, |state| state.handle_edit_ent(packet));
     }
 
+    async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
+        with_map_state_mut(ctx, |state| state.handle_edit_var(packet));
+    }
+
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
+        with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
     }
 
@@ -296,7 +300,7 @@ impl Plugin for DeathrunEdit {
         }
 
         // 2. Extract map geometry into binary clipboard format
-        if let Some(mut state) = crate::map_state::get_server_state(&server)
+        if let Some(state) = crate::map_state::get_server_state(&server)
             .write()
             .unwrap()
             .map

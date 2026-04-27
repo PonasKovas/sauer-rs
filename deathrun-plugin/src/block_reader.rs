@@ -52,7 +52,7 @@ pub fn unpack_block(bytes: &[u8], pos: &mut usize) -> Option<(SelInfo, Vec<sauer
     if *pos + 32 > bytes.len() {
         return None;
     }
-    let mut get_i32 = |offset: usize| {
+    let get_i32 = |offset: usize| {
         let start = *pos + offset * 4;
         i32::from_le_bytes(bytes[start..start + 4].try_into().unwrap())
     };

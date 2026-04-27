@@ -253,19 +253,23 @@ dependencies = [
 name = "deathrun-plugin"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bitcode",
  "bytes",
+ "clap",
  "cube-string",
  "dashmap",
  "flate2",
  "ogz-rs",
  "rand",
  "sauer-map",
+ "sauer-plugin-lua",
  "sauer-proto",
  "sauer-server",
  "serde",
  "thiserror",
  "tokio",
+ "toml",
  "tracing",
 ]
 

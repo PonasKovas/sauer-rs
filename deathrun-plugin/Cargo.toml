@@ -18,3 +18,10 @@ rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 bitcode.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+sauer-plugin-lua.workspace = true
+sauer-proto = { workspace = true, features = ["serde"] }
+anyhow.workspace = true
+toml.workspace = true
+clap = { workspace = true, features = ["derive"] }

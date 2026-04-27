@@ -1,5 +1,7 @@
-use ogz_rs::{OgzMap, data::{MapConfig, Variable}};
+use cube_string::CubeString;
+use ogz_rs::{OgzMap, data::{MapConfig, VSlot, VSlotParam, Variable}};
 use sauer_map::{Cube, Node, Selection, World};
+use std::collections::{HashMap, HashSet};
 use sauer_proto::{
     channel1, channel2,
     data::{EditVarValue, SelInfo},
@@ -352,9 +354,224 @@ impl MapState {
 
     pub fn handle_undo_redo(&mut self, data: &[u8]) {
         if let Some((sel, nodes)) = crate::block_reader::decode_undo(data) {
-            self.apply_block(&sel, nodes, false); // Undo uses absolute overwrites
+            self.apply_block(&sel, nodes, false);
         }
     }
+
+    pub fn handle_edit_v_slot(&mut self, packet: &channel1::EditVSlot) {
+        if packet.extra_data.is_empty() {
+            return;
+        }
+        let Some(ds) = parse_packed_vslot(&packet.extra_data) else {
+            return;
+        };
+
+        let sel = to_selection(&packet.sel);
+        let orient = sel.orient as usize;
+        let all_faces = packet.all_faces;
+
+        // Collect unique texture indices from the selection.
+        let mut unique_textures: HashSet<u16> = HashSet::new();
+        self.world.edit_sel(&sel, |node, _| {
+            if let Node::Leaf(cube) = node {
+                for face in 0usize..6 {
+                    if all_faces || face == orient {
+                        unique_textures.insert(cube.textures[face]);
+                    }
+                }
+            }
+        });
+
+        // Resolve (or create) a vslot for each unique base texture.
+        let vslots = &mut self.meta.vslots;
+        let tex_remap: HashMap<u16, u16> = unique_textures
+            .into_iter()
+            .map(|t| (t, resolve_vslot(vslots, t, &ds)))
+            .collect();
+
+        // Apply the remapped texture indices.
+        self.world.edit_sel(&sel, |node, _| {
+            if let Node::Leaf(cube) = node {
+                for face in 0usize..6 {
+                    if all_faces || face == orient {
+                        if let Some(&new_t) = tex_remap.get(&cube.textures[face]) {
+                            cube.textures[face] = new_t;
+                        }
+                    }
+                }
+            }
+        });
+        self.invalidate_cache();
+    }
+}
+
+// ── VSlot tracking ───────────────────────────────────────────────────────────
+
+struct PackedVSlot {
+    params: Vec<(CubeString, [f32; 4])>,
+    scale: Option<f32>,
+    rotation: Option<i32>,
+    offset: Option<(i32, i32)>,
+    scroll: Option<(f32, f32)>,
+    layer: Option<i32>,
+    alpha: Option<(f32, f32)>,
+    color: Option<(f32, f32, f32)>,
+}
+
+/// Reads a Sauerbraten varint (putint encoding) from a byte slice.
+fn read_varint(data: &[u8], pos: &mut usize) -> Option<i32> {
+    if *pos >= data.len() {
+        return None;
+    }
+    let c = data[*pos] as i8;
+    *pos += 1;
+    match c {
+        -128 => {
+            if *pos + 2 > data.len() {
+                return None;
+            }
+            let v = i16::from_le_bytes([data[*pos], data[*pos + 1]]) as i32;
+            *pos += 2;
+            Some(v)
+        }
+        -127 => {
+            if *pos + 4 > data.len() {
+                return None;
+            }
+            let v = i32::from_le_bytes(data[*pos..*pos + 4].try_into().ok()?);
+            *pos += 4;
+            Some(v)
+        }
+        _ => Some(c as i32),
+    }
+}
+
+fn read_f32_le(data: &[u8], pos: &mut usize) -> Option<f32> {
+    if *pos + 4 > data.len() {
+        return None;
+    }
+    let v = f32::from_le_bytes(data[*pos..*pos + 4].try_into().ok()?);
+    *pos += 4;
+    Some(v)
+}
+
+/// Reads a sendstring-encoded name: each char is a putint, null-terminated.
+fn read_sendstring(data: &[u8], pos: &mut usize) -> Option<CubeString> {
+    let mut bytes = Vec::new();
+    loop {
+        let c = read_varint(data, pos)? as u8;
+        if c == 0 {
+            break;
+        }
+        bytes.push(c);
+    }
+    Some(CubeString::from_bytes(bytes))
+}
+
+/// Parses a packvslot-encoded blob from an N_EDITVSLOT extra_data buffer.
+fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
+    let mut pos = 0;
+    let flags = read_varint(data, &mut pos)?;
+
+    let mut params = Vec::new();
+    let mut scale = None;
+    let mut rotation = None;
+    let mut offset = None;
+    let mut scroll = None;
+    let mut layer = None;
+    let mut alpha = None;
+    let mut color = None;
+
+    if flags & (1 << 0) != 0 {
+        let n = read_varint(data, &mut pos)? as usize;
+        for _ in 0..n {
+            let name = read_sendstring(data, &mut pos)?;
+            let vals = [
+                read_f32_le(data, &mut pos)?,
+                read_f32_le(data, &mut pos)?,
+                read_f32_le(data, &mut pos)?,
+                read_f32_le(data, &mut pos)?,
+            ];
+            params.push((name, vals));
+        }
+    }
+    if flags & (1 << 1) != 0 {
+        scale = Some(read_f32_le(data, &mut pos)?);
+    }
+    if flags & (1 << 2) != 0 {
+        rotation = Some(read_varint(data, &mut pos)? % 8);
+    }
+    if flags & (1 << 3) != 0 {
+        offset = Some((read_varint(data, &mut pos)?, read_varint(data, &mut pos)?));
+    }
+    if flags & (1 << 4) != 0 {
+        // Sent as value * 1000; store as raw value.
+        scroll = Some((read_f32_le(data, &mut pos)? / 1000.0, read_f32_le(data, &mut pos)? / 1000.0));
+    }
+    if flags & (1 << 5) != 0 {
+        layer = Some(read_varint(data, &mut pos)?);
+    }
+    if flags & (1 << 6) != 0 {
+        alpha = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?));
+    }
+    if flags & (1 << 7) != 0 {
+        color = Some((
+            read_f32_le(data, &mut pos)?,
+            read_f32_le(data, &mut pos)?,
+            read_f32_le(data, &mut pos)?,
+        ));
+    }
+
+    Some(PackedVSlot { params, scale, rotation, offset, scroll, layer, alpha, color })
+}
+
+fn packed_vslot_matches(vs: &VSlot, ds: &PackedVSlot) -> bool {
+    if vs.params.len() != ds.params.len() {
+        return false;
+    }
+    for (vp, (dn, dv)) in vs.params.iter().zip(&ds.params) {
+        if vp.name != *dn || vp.values != *dv {
+            return false;
+        }
+    }
+    vs.scale == ds.scale
+        && vs.rotation == ds.rotation
+        && vs.offset == ds.offset
+        && vs.scroll == ds.scroll
+        && vs.layer == ds.layer
+        && vs.alpha == ds.alpha
+        && vs.color == ds.color
+}
+
+/// Finds an existing vslot with `prev == base_tex` and the same properties as
+/// `ds`, or appends a new one. Returns the new texture index.
+fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlot) -> u16 {
+    // Ensure the array covers the base texture so prev stays valid.
+    if vslots.len() <= base_tex as usize {
+        vslots.resize(base_tex as usize + 1, None);
+    }
+    // Dedup: reuse an identical vslot if one already exists.
+    for (i, vs) in vslots.iter().enumerate() {
+        if let Some(vs) = vs {
+            if vs.prev == base_tex as i32 && packed_vslot_matches(vs, ds) {
+                return i as u16;
+            }
+        }
+    }
+    let new_vs = VSlot {
+        prev: base_tex as i32,
+        params: ds.params.iter().map(|(n, v)| VSlotParam { name: n.clone(), values: *v }).collect(),
+        scale: ds.scale,
+        rotation: ds.rotation,
+        offset: ds.offset,
+        scroll: ds.scroll,
+        layer: ds.layer,
+        alpha: ds.alpha,
+        color: ds.color,
+    };
+    let idx = vslots.len();
+    vslots.push(Some(new_vs));
+    idx as u16
 }
 
 /// A placed trap button in the map.
@@ -416,47 +633,3 @@ pub(crate) fn send_map_to(server: &Server, cn: u32) -> bool {
     true
 }
 
-fn unpack_cube(bytes: &[u8], pos: &mut usize) -> Option<Node> {
-    if *pos >= bytes.len() {
-        return None;
-    }
-    let b = bytes[*pos];
-    *pos += 1;
-    if b == 255 {
-        // OCTSAV_CHILDREN
-        let mut children = Vec::with_capacity(8);
-        for _ in 0..8 {
-            children.push(unpack_cube(bytes, pos)?);
-        }
-        Some(Node::Branch(Box::new(children.try_into().unwrap())))
-    } else {
-        if *pos >= bytes.len() {
-            return None;
-        }
-        let mat_hi = bytes[*pos];
-        *pos += 1;
-        let mat = (b as u16) | ((mat_hi as u16) << 8);
-
-        let mut edges = [0u8; 12];
-        if *pos + 12 > bytes.len() {
-            return None;
-        }
-        edges.copy_from_slice(&bytes[*pos..*pos + 12]);
-        *pos += 12;
-
-        let mut textures = [0u16; 6];
-        for i in 0..6 {
-            if *pos + 2 > bytes.len() {
-                return None;
-            }
-            textures[i] = u16::from_le_bytes([bytes[*pos], bytes[*pos + 1]]);
-            *pos += 2;
-        }
-
-        Some(Node::Leaf(sauer_map::Cube {
-            edges,
-            textures,
-            material: ogz_rs::data::Material::from_bits(mat),
-        }))
-    }
-}

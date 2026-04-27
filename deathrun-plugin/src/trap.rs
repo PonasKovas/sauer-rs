@@ -8,7 +8,6 @@ use sauer_proto::{
     data::{EditFaceMode, Orient, SelInfo, Vec3},
 };
 use sauer_server::{Server, plugin::Context};
-use std::sync::Arc;
 
 pub const BUTTON_SIZE: i32 = 8;
 pub const BUTTON_FRONT_TEX: u16 = 248;
