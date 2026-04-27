@@ -139,6 +139,35 @@ impl World {
         self.edit_sel(sel, |node, _| fill(node, is_solid));
     }
 
+    /// Directly sets the octree node at a power-of-2 aligned (pos, size) coordinate.
+    /// Subdivides any Leaf nodes encountered on the way down as needed.
+    pub fn set_node_at(&mut self, pos: [i32; 3], size: i32, node: Node) {
+        fn recurse(cur: &mut Node, cur_pos: [i32; 3], cur_size: i32, target_pos: [i32; 3], target_size: i32, new_node: Node) {
+            if cur_size == target_size {
+                *cur = new_node;
+                return;
+            }
+            if let Node::Leaf(cube) = cur {
+                let cube = *cube;
+                *cur = Node::Branch(Box::new(std::array::from_fn(|_| Node::Leaf(cube))));
+            }
+            if let Node::Branch(children) = cur {
+                let half = cur_size / 2;
+                let cx = usize::from(target_pos[0] >= cur_pos[0] + half);
+                let cy = usize::from(target_pos[1] >= cur_pos[1] + half);
+                let cz = usize::from(target_pos[2] >= cur_pos[2] + half);
+                let child_idx = cx | (cy << 1) | (cz << 2);
+                let child_pos = [
+                    cur_pos[0] + cx as i32 * half,
+                    cur_pos[1] + cy as i32 * half,
+                    cur_pos[2] + cz as i32 * half,
+                ];
+                recurse(&mut children[child_idx], child_pos, half, target_pos, target_size, new_node);
+            }
+        }
+        recurse(&mut self.root, [0, 0, 0], self.size, pos, size, node);
+    }
+
     /// Extrudes, Pushes, or Deforms faces or corners of the geometry based on the selection.
     pub fn edit_face(&mut self, sel: &Selection, dir: i32, mode: i32) {
         use crate::geom::{C, R, dimcoord, dimension, linked_push, optiface};

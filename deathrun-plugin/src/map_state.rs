@@ -620,11 +620,17 @@ pub struct Trap {
     pub button_size: i32,
     pub button_orient: u8,
 
-    pub trigger_chunks: Vec<([i32; 3], i32, Vec<u8>, i32)>,
+    pub trigger_clipboard: Vec<u8>,
+    pub trigger_unpack_len: i32,
     pub trigger_entities: HashMap<usize, ogz_rs::data::Entity>,
 
-    pub restore_chunks: Vec<([i32; 3], i32, Vec<u8>, i32)>,
+    pub restore_clipboard: Vec<u8>,
+    pub restore_unpack_len: i32,
     pub original_entities: HashMap<usize, ogz_rs::data::Entity>,
+
+    /// Paste origin and grid derived from generate_region_clipboard (padded_min, grid).
+    pub clip_pos: [i32; 3],
+    pub clip_grid: i32,
 
     pub affected_min: [i32; 3],
     pub affected_max: [i32; 3],

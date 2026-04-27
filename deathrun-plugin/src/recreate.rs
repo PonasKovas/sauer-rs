@@ -73,6 +73,161 @@ fn collect_chunks(
     }
 }
 
+/// Chooses the smallest power-of-2 grid so no axis exceeds 64 cells.
+fn choose_grid(spans: [i32; 3]) -> i32 {
+    let max_span = spans.iter().copied().max().unwrap_or(1).max(1);
+    let mut g = 1i32;
+    while (max_span + g - 1) / g > 64 {
+        g <<= 1;
+    }
+    g
+}
+
+/// Walks the octree to find the node that occupies (target_pos, target_size).
+/// If a Leaf is encountered before reaching target_size, that Leaf is returned
+/// (it represents uniform geometry at all sub-sizes).
+fn extract_node_at(
+    node: &sauer_map::Node,
+    node_pos: [i32; 3],
+    node_size: i32,
+    target_pos: [i32; 3],
+    target_size: i32,
+) -> sauer_map::Node {
+    if node_size == target_size {
+        return node.clone();
+    }
+    match node {
+        sauer_map::Node::Leaf(cube) => sauer_map::Node::Leaf(*cube),
+        sauer_map::Node::Branch(children) => {
+            let half = node_size / 2;
+            let cx = usize::from(target_pos[0] >= node_pos[0] + half);
+            let cy = usize::from(target_pos[1] >= node_pos[1] + half);
+            let cz = usize::from(target_pos[2] >= node_pos[2] + half);
+            let child_pos = [
+                node_pos[0] + cx as i32 * half,
+                node_pos[1] + cy as i32 * half,
+                node_pos[2] + cz as i32 * half,
+            ];
+            extract_node_at(&children[cx | (cy << 1) | (cz << 2)], child_pos, half, target_pos, target_size)
+        }
+    }
+}
+
+/// Returns the uniform Cube if every leaf in the subtree has the same value, else None.
+fn uniform_leaf(node: &sauer_map::Node) -> Option<sauer_map::Cube> {
+    match node {
+        sauer_map::Node::Leaf(cube) => Some(*cube),
+        sauer_map::Node::Branch(children) => {
+            let first = uniform_leaf(&children[0])?;
+            for child in children.iter().skip(1) {
+                if uniform_leaf(child)? != first {
+                    return None;
+                }
+            }
+            Some(first)
+        }
+    }
+}
+
+/// Walks both octrees simultaneously and returns the tight bounding box of all differing nodes.
+/// Uses geometric equality (not structural) to avoid false positives from apply_region subdivision.
+pub(crate) fn diff_bounds(
+    a: &sauer_map::Node,
+    b: &sauer_map::Node,
+    pos: [i32; 3],
+    size: i32,
+    out_min: &mut [i32; 3],
+    out_max: &mut [i32; 3],
+) {
+    if a == b {
+        return;
+    }
+    match (a, b) {
+        (sauer_map::Node::Branch(ac), sauer_map::Node::Branch(bc)) => {
+            let half = size / 2;
+            for i in 0..8 {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                diff_bounds(&ac[i], &bc[i], child_pos, half, out_min, out_max);
+            }
+        }
+        _ => {
+            // One is a Leaf, the other a Branch (or two different Leaves).
+            // Check geometric equality: a Branch that is uniformly one Cube equals a Leaf of that Cube.
+            if let (Some(la), Some(lb)) = (uniform_leaf(a), uniform_leaf(b)) {
+                if la == lb {
+                    return;
+                }
+            }
+            for i in 0..3 {
+                if pos[i] < out_min[i] {
+                    out_min[i] = pos[i];
+                }
+                if pos[i] + size > out_max[i] {
+                    out_max[i] = pos[i] + size;
+                }
+            }
+        }
+    }
+}
+
+/// Builds ONE multi-cell clipboard covering the entire min..max region, exactly like a
+/// vanilla player copy-paste. Returns (padded_min, grid, unpack_len, compressed).
+pub(crate) fn generate_region_clipboard(
+    root: &sauer_map::Node,
+    world_size: i32,
+    min: [i32; 3],
+    max: [i32; 3],
+) -> ([i32; 3], i32, i32, Vec<u8>) {
+    let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    let grid = choose_grid(spans);
+
+    let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
+    let padded_max: [i32; 3] = std::array::from_fn(|i| {
+        (((max[i] + grid - 1).div_euclid(grid)) * grid).min(world_size)
+    });
+
+    let sx = (padded_max[0] - padded_min[0]) / grid;
+    let sy = (padded_max[1] - padded_min[1]) / grid;
+    let sz = (padded_max[2] - padded_min[2]) / grid;
+
+    let mut uncompressed = Vec::new();
+    for &v in &padded_min { uncompressed.extend_from_slice(&v.to_le_bytes()); }
+    for &v in &[sx, sy, sz]  { uncompressed.extend_from_slice(&v.to_le_bytes()); }
+    uncompressed.extend_from_slice(&grid.to_le_bytes());
+    uncompressed.extend_from_slice(&0i32.to_le_bytes()); // Orient::Left
+
+    // Pack in X→Y→Z world order, matching vanilla blockcopy / loopxyz
+    for xi in 0..sx {
+        for yi in 0..sy {
+            for zi in 0..sz {
+                let cell_pos = [
+                    padded_min[0] + xi * grid,
+                    padded_min[1] + yi * grid,
+                    padded_min[2] + zi * grid,
+                ];
+                let node = extract_node_at(root, [0, 0, 0], world_size, cell_pos, grid);
+                pack_cube(&node, &mut uncompressed);
+            }
+        }
+    }
+    uncompressed.extend_from_slice(&0u32.to_le_bytes()); // vslots terminator
+
+    let unpack_len = uncompressed.len() as i32;
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(&uncompressed).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    eprintln!(
+        "[clipboard] grid={} cells={}x{}x{}={} uncompressed={} compressed={}",
+        grid, sx, sy, sz, sx * sy * sz, unpack_len, compressed.len()
+    );
+
+    (padded_min, grid, unpack_len, compressed)
+}
+
 /// Generates a valid zlib-compressed clipboard packet enclosing the given node
 pub(crate) fn generate_clipboard(node: &sauer_map::Node, size: i32) -> (i32, Vec<u8>) {
     let mut uncompressed = Vec::new();

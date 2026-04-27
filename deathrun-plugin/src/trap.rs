@@ -347,10 +347,14 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
             button_pos: t.button_pos,
             button_size: t.button_size,
             button_orient: t.button_orient,
-            trigger_chunks: t.trigger_chunks.clone(),
+            trigger_clipboard: t.trigger_clipboard.clone(),
+            trigger_unpack_len: t.trigger_unpack_len,
             trigger_entities: t.trigger_entities.clone(),
-            restore_chunks: t.restore_chunks.clone(),
+            restore_clipboard: t.restore_clipboard.clone(),
+            restore_unpack_len: t.restore_unpack_len,
             original_entities: t.original_entities.clone(),
+            clip_pos: t.clip_pos,
+            clip_grid: t.clip_grid,
             affected_min: t.affected_min,
             affected_max: t.affected_max,
             is_active: t.is_active,
@@ -538,10 +542,14 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         button_pos: adj,
         button_size: BUTTON_SIZE,
         button_orient: hit_orient,
-        trigger_chunks: Vec::new(),
+        trigger_clipboard: Vec::new(),
+        trigger_unpack_len: 0,
         trigger_entities: std::collections::HashMap::new(),
-        restore_chunks: Vec::new(),
+        restore_clipboard: Vec::new(),
+        restore_unpack_len: 0,
         original_entities: std::collections::HashMap::new(),
+        clip_pos: [0; 3],
+        clip_grid: 1,
         affected_min: [i32::MAX; 3],
         affected_max: [i32::MIN; 3],
         is_active: false,
@@ -639,56 +647,6 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     });
 }
 
-fn collect_intersecting_chunks(
-    node: &sauer_map::Node,
-    node_pos: [i32; 3],
-    node_size: i32,
-    min: [i32; 3],
-    max: [i32; 3],
-    out: &mut Vec<([i32; 3], i32, sauer_map::Node)>,
-) {
-    if node_pos[0] >= max[0]
-        || node_pos[0] + node_size <= min[0]
-        || node_pos[1] >= max[1]
-        || node_pos[1] + node_size <= min[1]
-        || node_pos[2] >= max[2]
-        || node_pos[2] + node_size <= min[2]
-    {
-        return;
-    }
-
-    let completely_inside = node_pos[0] >= min[0]
-        && node_pos[0] + node_size <= max[0]
-        && node_pos[1] >= min[1]
-        && node_pos[1] + node_size <= max[1]
-        && node_pos[2] >= min[2]
-        && node_pos[2] + node_size <= max[2];
-
-    if completely_inside {
-        out.push((node_pos, node_size, node.clone()));
-        return;
-    }
-
-    match node {
-        sauer_map::Node::Branch(children) => {
-            let child_size = node_size / 2;
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [
-                    node_pos[0] + cx * child_size,
-                    node_pos[1] + cy * child_size,
-                    node_pos[2] + cz * child_size,
-                ];
-                collect_intersecting_chunks(&children[i], child_pos, child_size, min, max, out);
-            }
-        }
-        sauer_map::Node::Leaf(_) => {
-            out.push((node_pos, node_size, node.clone()));
-        }
-    }
-}
 
 pub fn cmd_endtrap(ctx: &Context) {
     let server = ctx.server();
@@ -707,50 +665,53 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
     };
 
-    if edit_state.affected_min[0] == i32::MAX {
+    // Compute the tight bounding box of what actually changed between original and current map.
+    // This avoids inflated bounds from edit selections that touched unchanged geometry.
+    let current_map = state.map.as_ref().unwrap();
+    let world_size = current_map.world.size;
+    let mut diff_min = [i32::MAX; 3];
+    let mut diff_max = [i32::MIN; 3];
+    crate::recreate::diff_bounds(
+        &edit_state.original_map.world.root,
+        &current_map.world.root,
+        [0, 0, 0],
+        world_size,
+        &mut diff_min,
+        &mut diff_max,
+    );
+
+    if diff_min[0] == i32::MAX {
         server.broadcast_chan1(&ServMsg {
-            text: "Trap edit ended with no edits recorded.".lossy_cubestring(),
+            text: "Trap edit ended with no geometry changes detected.".lossy_cubestring(),
         });
         return;
     }
 
-    let min = edit_state.affected_min;
-    let max = edit_state.affected_max;
+    let min = diff_min;
+    let max = diff_max;
 
-    // Generate restore clipboards (from original map)
-    let mut original_chunks = Vec::new();
-    collect_intersecting_chunks(
-        &edit_state.original_map.world.root,
-        [0, 0, 0],
-        edit_state.original_map.world.size,
-        min,
-        max,
-        &mut original_chunks,
+    eprintln!(
+        "[trap] diff bounds: {:?}..{:?} (spans {}x{}x{})",
+        min, max, max[0]-min[0], max[1]-min[1], max[2]-min[2]
     );
 
-    let mut restore_chunks = Vec::new();
-    for (pos, size, node) in original_chunks {
-        let (unpack_len, compressed) = crate::recreate::generate_clipboard(&node, size);
-        restore_chunks.push((pos, size, compressed, unpack_len));
-    }
+    // Generate ONE restore clipboard (from original map, pre-edit state)
+    let (clip_pos, clip_grid, restore_unpack_len, restore_compressed) =
+        crate::recreate::generate_region_clipboard(
+            &edit_state.original_map.world.root,
+            world_size,
+            min,
+            max,
+        );
 
-    // Generate trigger clipboards (from CURRENT map)
-    let current_map = state.map.as_ref().unwrap();
-    let mut modified_chunks = Vec::new();
-    collect_intersecting_chunks(
-        &current_map.world.root,
-        [0, 0, 0],
-        current_map.world.size,
-        min,
-        max,
-        &mut modified_chunks,
-    );
-
-    let mut trigger_chunks = Vec::new();
-    for (pos, size, node) in modified_chunks {
-        let (unpack_len, compressed) = crate::recreate::generate_clipboard(&node, size);
-        trigger_chunks.push((pos, size, compressed, unpack_len));
-    }
+    // Generate ONE trigger clipboard (from CURRENT map, post-edit state)
+    let (_, _, trigger_unpack_len, trigger_compressed) =
+        crate::recreate::generate_region_clipboard(
+            &current_map.world.root,
+            world_size,
+            min,
+            max,
+        );
 
     let mut original_entities = std::collections::HashMap::new();
     let mut trigger_entities = std::collections::HashMap::new();
@@ -787,21 +748,22 @@ pub fn cmd_endtrap(ctx: &Context) {
     }
 
     let trap = &mut state.traps[edit_state.trap_idx];
-    trap.trigger_chunks = trigger_chunks;
+    trap.trigger_clipboard = trigger_compressed;
+    trap.trigger_unpack_len = trigger_unpack_len;
     trap.trigger_entities = trigger_entities;
-    trap.restore_chunks = restore_chunks;
+    trap.restore_clipboard = restore_compressed.clone();
+    trap.restore_unpack_len = restore_unpack_len;
     trap.original_entities = original_entities;
+    trap.clip_pos = clip_pos;
+    trap.clip_grid = clip_grid;
     trap.affected_min = min;
     trap.affected_max = max;
 
     let target_cn = ctx.cn() as i32;
 
-    let sel = SelInfo {
-        o: sauer_proto::data::Vec3 {
-            x: min[0],
-            y: min[1],
-            z: min[2],
-        },
+    // Delete the affected region then paste the single restore clipboard
+    let del_sel = SelInfo {
+        o: sauer_proto::data::Vec3 { x: min[0], y: min[1], z: min[2] },
         s: sauer_proto::data::Vec3 {
             x: max[0] - min[0],
             y: max[1] - min[1],
@@ -809,45 +771,29 @@ pub fn cmd_endtrap(ctx: &Context) {
         },
         grid: 1,
         orient: sauer_proto::data::Orient::Left,
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
+        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
     };
-
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::DelCube { sel: sel },
+        packet: channel1::DelCube { sel: del_sel },
     });
-
-    for (pos, size, compressed, unpack_len) in &trap.restore_chunks {
-        server.broadcast_chan1(&channel1::ClipboardServer {
-            client_num: target_cn,
-            unpack_len: *unpack_len,
-            data: compressed.clone(),
-        });
-        server.broadcast_chan1(&Client {
-            client_num: target_cn,
-            packet: channel1::PasteServer {
-                sel: SelInfo {
-                    o: sauer_proto::data::Vec3 {
-                        x: pos[0],
-                        y: pos[1],
-                        z: pos[2],
-                    },
-                    s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
-                    grid: *size,
-                    orient: sauer_proto::data::Orient::Left,
-                    cx: 0,
-                    cxs: 1,
-                    cy: 0,
-                    cys: 1,
-                    corner: 0,
-                },
+    server.broadcast_chan1(&channel1::ClipboardServer {
+        client_num: target_cn,
+        unpack_len: restore_unpack_len,
+        data: restore_compressed,
+    });
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::PasteServer {
+            sel: SelInfo {
+                o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
+                s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+                grid: clip_grid,
+                orient: sauer_proto::data::Orient::Left,
+                cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
             },
-        });
-    }
+        },
+    });
 
     for (&ent_id, ent) in &trap.original_entities {
         let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
@@ -884,16 +830,20 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     if trap.is_active {
         return;
     }
-    if trap.trigger_chunks.is_empty() && trap.trigger_entities.is_empty() {
+    if trap.trigger_clipboard.is_empty() && trap.trigger_entities.is_empty() {
         return;
     }
 
     trap.is_active = true;
 
-    let trigger_chunks = trap.trigger_chunks.clone();
+    let trigger_clipboard = trap.trigger_clipboard.clone();
+    let trigger_unpack_len = trap.trigger_unpack_len;
     let trigger_entities = trap.trigger_entities.clone();
-    let restore_chunks = trap.restore_chunks.clone();
+    let restore_clipboard = trap.restore_clipboard.clone();
+    let restore_unpack_len = trap.restore_unpack_len;
     let original_entities = trap.original_entities.clone();
+    let clip_pos = trap.clip_pos;
+    let clip_grid = trap.clip_grid;
     let min = trap.affected_min;
     let max = trap.affected_max;
 
@@ -901,13 +851,8 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
     let server_clone = std::sync::Arc::clone(server);
     tokio::spawn(async move {
-        // --- 1. APPLY TRIGGERED STATE ---
-        let sel = SelInfo {
-            o: sauer_proto::data::Vec3 {
-                x: min[0],
-                y: min[1],
-                z: min[2],
-            },
+        let del_sel = SelInfo {
+            o: sauer_proto::data::Vec3 { x: min[0], y: min[1], z: min[2] },
             s: sauer_proto::data::Vec3 {
                 x: max[0] - min[0],
                 y: max[1] - min[1],
@@ -915,98 +860,61 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             },
             grid: 1,
             orient: sauer_proto::data::Orient::Left,
-            cx: 0,
-            cxs: 0,
-            cy: 0,
-            cys: 0,
-            corner: 0,
+            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+        };
+        let paste_sel = SelInfo {
+            o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
+            s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+            grid: clip_grid,
+            orient: sauer_proto::data::Orient::Left,
+            cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
         };
 
+        // --- 1. APPLY TRIGGERED STATE ---
         server_clone.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
-            packet: channel1::DelCube { sel: sel.clone() },
+            packet: channel1::DelCube { sel: del_sel.clone() },
         });
-
-        for (pos, size, compressed, unpack_len) in &trigger_chunks {
-            server_clone.broadcast_chan1(&channel1::ClipboardServer {
-                client_num: actor_cn as i32,
-                unpack_len: *unpack_len,
-                data: compressed.clone(),
-            });
-            let paste_packet = channel1::PasteServer {
-                sel: SelInfo {
-                    o: sauer_proto::data::Vec3 {
-                        x: pos[0],
-                        y: pos[1],
-                        z: pos[2],
-                    },
-                    s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
-                    grid: *size,
-                    orient: sauer_proto::data::Orient::Left,
-                    cx: 0,
-                    cxs: 1,
-                    cy: 0,
-                    cys: 1,
-                    corner: 0,
-                },
-            };
-            server_clone.broadcast_chan1(&Client {
-                client_num: actor_cn as i32,
-                packet: paste_packet,
-            });
-        }
+        server_clone.broadcast_chan1(&channel1::ClipboardServer {
+            client_num: actor_cn as i32,
+            unpack_len: trigger_unpack_len,
+            data: trigger_clipboard.clone(),
+        });
+        server_clone.broadcast_chan1(&Client {
+            client_num: actor_cn as i32,
+            packet: channel1::PasteServer { sel: paste_sel.clone() },
+        });
 
         for (&ent_id, ent) in &trigger_entities {
             let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
                 .unwrap_or(sauer_proto::data::EntityType::Empty);
-            let ent_packet = channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            };
             server_clone.broadcast_chan1(&Client {
                 client_num: actor_cn as i32,
-                packet: ent_packet,
+                packet: channel1::EditEnt {
+                    ent_id: ent_id as i32,
+                    pos: sauer_proto::data::Vec3 {
+                        x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                    },
+                    type_: ent_type,
+                    attrs: ent.attrs.map(|x| x as i32),
+                },
             });
         }
 
-        // Update Server Map Tracking
+        // Update server map state
         {
             let mut state = get_server_state(&server_clone).write().unwrap();
             if let Some(map) = state.map.as_mut() {
-                map.handle_del_cube(&channel1::DelCube { sel: sel.clone() });
-
-                for (pos, size, compressed, _) in &trigger_chunks {
-                    if let Some((cb_sel, nodes)) = crate::block_reader::decode_clipboard(compressed)
-                    {
-                        let mut paste_sel = cb_sel.clone();
-                        paste_sel.o = sauer_proto::data::Vec3 {
-                            x: pos[0],
-                            y: pos[1],
-                            z: pos[2],
-                        };
-                        paste_sel.s = cb_sel.s;
-                        paste_sel.grid = *size;
-                        paste_sel.orient = cb_sel.orient;
-                        map.apply_block(&paste_sel, nodes, true);
-                    }
-                }
-
+                map.handle_del_cube(&channel1::DelCube { sel: del_sel.clone() });
+                apply_clipboard_to_map(map, &trigger_clipboard);
                 for (&ent_id, ent) in &trigger_entities {
-                    let ent_type =
-                        sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-                            .unwrap_or(sauer_proto::data::EntityType::Empty);
+                    let ent_type = sauer_proto::data::EntityType::try_from(
+                        u8::from(ent.ent_type) as i32,
+                    ).unwrap_or(sauer_proto::data::EntityType::Empty);
                     map.handle_edit_ent(&channel1::EditEnt {
                         ent_id: ent_id as i32,
                         pos: sauer_proto::data::Vec3 {
-                            x: ent.position[0],
-                            y: ent.position[1],
-                            z: ent.position[2],
+                            x: ent.position[0], y: ent.position[1], z: ent.position[2],
                         },
                         type_: ent_type,
                         attrs: ent.attrs.map(|x| x as i32),
@@ -1020,89 +928,48 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         // --- 2. RESTORE ORIGINAL STATE ---
         server_clone.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
-            packet: channel1::DelCube { sel: sel.clone() },
+            packet: channel1::DelCube { sel: del_sel.clone() },
         });
-
-        for (pos, size, compressed, unpack_len) in &restore_chunks {
-            server_clone.broadcast_chan1(&channel1::ClipboardServer {
-                client_num: actor_cn as i32,
-                unpack_len: *unpack_len,
-                data: compressed.clone(),
-            });
-            let paste_packet = channel1::PasteServer {
-                sel: SelInfo {
-                    o: sauer_proto::data::Vec3 {
-                        x: pos[0],
-                        y: pos[1],
-                        z: pos[2],
-                    },
-                    s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
-                    grid: *size,
-                    orient: sauer_proto::data::Orient::Left,
-                    cx: 0,
-                    cxs: 1,
-                    cy: 0,
-                    cys: 1,
-                    corner: 0,
-                },
-            };
-            server_clone.broadcast_chan1(&Client {
-                client_num: actor_cn as i32,
-                packet: paste_packet,
-            });
-        }
+        server_clone.broadcast_chan1(&channel1::ClipboardServer {
+            client_num: actor_cn as i32,
+            unpack_len: restore_unpack_len,
+            data: restore_clipboard.clone(),
+        });
+        server_clone.broadcast_chan1(&Client {
+            client_num: actor_cn as i32,
+            packet: channel1::PasteServer { sel: paste_sel },
+        });
 
         for (&ent_id, ent) in &original_entities {
             let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
                 .unwrap_or(sauer_proto::data::EntityType::Empty);
-            let ent_packet = channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            };
             server_clone.broadcast_chan1(&Client {
                 client_num: actor_cn as i32,
-                packet: ent_packet,
+                packet: channel1::EditEnt {
+                    ent_id: ent_id as i32,
+                    pos: sauer_proto::data::Vec3 {
+                        x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                    },
+                    type_: ent_type,
+                    attrs: ent.attrs.map(|x| x as i32),
+                },
             });
         }
 
-        // Update Server Map Tracking
+        // Update server map state
         {
             let mut state = get_server_state(&server_clone).write().unwrap();
             if let Some(map) = state.map.as_mut() {
-                map.handle_del_cube(&channel1::DelCube { sel: sel.clone() });
-
-                for (pos, size, compressed, _) in &restore_chunks {
-                    if let Some((cb_sel, nodes)) = crate::block_reader::decode_clipboard(compressed)
-                    {
-                        let mut paste_sel = cb_sel.clone();
-                        paste_sel.o = sauer_proto::data::Vec3 {
-                            x: pos[0],
-                            y: pos[1],
-                            z: pos[2],
-                        };
-                        paste_sel.s = cb_sel.s;
-                        paste_sel.grid = *size;
-                        paste_sel.orient = cb_sel.orient;
-                        map.apply_block(&paste_sel, nodes, true);
-                    }
-                }
-
+                map.handle_del_cube(&channel1::DelCube { sel: del_sel });
+                apply_clipboard_to_map(map, &restore_clipboard);
                 for (&ent_id, ent) in &original_entities {
-                    let ent_type =
-                        sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-                            .unwrap_or(sauer_proto::data::EntityType::Empty);
+                    let ent_type = sauer_proto::data::EntityType::try_from(
+                        u8::from(ent.ent_type) as i32,
+                    ).unwrap_or(sauer_proto::data::EntityType::Empty);
                     map.handle_edit_ent(&channel1::EditEnt {
                         ent_id: ent_id as i32,
                         pos: sauer_proto::data::Vec3 {
-                            x: ent.position[0],
-                            y: ent.position[1],
-                            z: ent.position[2],
+                            x: ent.position[0], y: ent.position[1], z: ent.position[2],
                         },
                         type_: ent_type,
                         attrs: ent.attrs.map(|x| x as i32),
@@ -1114,4 +981,32 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             }
         }
     });
+}
+
+/// Applies a region clipboard to the server's internal map state.
+/// Nodes are packed X→Y→Z; we call set_node_at for each cell.
+fn apply_clipboard_to_map(map: &mut crate::map_state::MapState, compressed: &[u8]) {
+    let Some((cb_sel, nodes)) = crate::block_reader::decode_clipboard(compressed) else {
+        return;
+    };
+    let grid = cb_sel.grid;
+    let sx = cb_sel.s.x;
+    let sy = cb_sel.s.y;
+    let sz = cb_sel.s.z;
+    let ox = cb_sel.o.x;
+    let oy = cb_sel.o.y;
+    let oz = cb_sel.o.z;
+    for xi in 0..sx {
+        for yi in 0..sy {
+            for zi in 0..sz {
+                let idx = (xi * sy * sz + yi * sz + zi) as usize;
+                if idx >= nodes.len() {
+                    continue;
+                }
+                let pos = [ox + xi * grid, oy + yi * grid, oz + zi * grid];
+                map.world.set_node_at(pos, grid, nodes[idx].clone());
+            }
+        }
+    }
+    map.invalidate_cache();
 }
