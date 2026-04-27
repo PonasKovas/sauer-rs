@@ -26,25 +26,8 @@ fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
     let server = ctx.server();
     let mut state = crate::map_state::get_server_state(server).write().unwrap();
     if let Some(edit) = &mut state.trap_edit {
-        match &packet {
-            crate::trap::RecordedPacket::EditFace(p) => edit.add_edit_face(&p.sel, p.dir),
-            crate::trap::RecordedPacket::EditTex(p) => edit.add_sel(&p.sel),
-            crate::trap::RecordedPacket::EditMat(p) => edit.add_sel(&p.sel),
-            crate::trap::RecordedPacket::DelCube(p) => edit.add_sel(&p.sel),
-            crate::trap::RecordedPacket::EditVSlot(p) => edit.add_sel(&p.sel),
-            crate::trap::RecordedPacket::Replace(p) => {
-                if p.in_sel != 0 {
-                    edit.add_sel(&p.sel);
-                } else {
-                    let ws = edit.original_map.world.size;
-                    edit.add_bounds([0, 0, 0], [ws, ws, ws]);
-                }
-            }
-            crate::trap::RecordedPacket::Flip(p) => edit.add_sel(&p.sel),
-            crate::trap::RecordedPacket::Rotate(p) => edit.add_sel(&p.sel),
-            crate::trap::RecordedPacket::EditEnt(p) => {
-                edit.affected_entities.insert(p.ent_id as usize);
-            }
+        if let crate::trap::RecordedPacket::EditEnt(p) = &packet {
+            edit.affected_entities.insert(p.ent_id as usize);
         }
     }
 }

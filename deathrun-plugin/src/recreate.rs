@@ -87,7 +87,7 @@ fn choose_grid(spans: [i32; 3]) -> i32 {
 /// Walks the octree to find the node that occupies (target_pos, target_size).
 /// If a Leaf is encountered before reaching target_size, that Leaf is returned
 /// (it represents uniform geometry at all sub-sizes).
-fn extract_node_at(
+pub(crate) fn extract_node_at(
     node: &sauer_map::Node,
     node_pos: [i32; 3],
     node_size: i32,
@@ -174,6 +174,57 @@ pub(crate) fn diff_bounds(
                     out_max[i] = pos[i] + size;
                 }
             }
+        }
+    }
+}
+
+/// Walks both octrees and collects the minimal set of cells where they differ.
+/// Each output entry is (world_pos, cell_size, b_node) — b is the "after" state.
+/// Uses the same Branch/Leaf symmetry logic as diff_bounds to avoid false positives
+/// from apply_region structural side effects.
+pub(crate) fn collect_diff_cells(
+    a: &sauer_map::Node,
+    b: &sauer_map::Node,
+    pos: [i32; 3],
+    size: i32,
+    out: &mut Vec<([i32; 3], i32, sauer_map::Node)>,
+) {
+    if a == b {
+        return;
+    }
+    let half = size / 2;
+    match (a, b) {
+        (sauer_map::Node::Branch(ac), sauer_map::Node::Branch(bc)) => {
+            for i in 0..8 {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                collect_diff_cells(&ac[i], &bc[i], child_pos, half, out);
+            }
+        }
+        (sauer_map::Node::Branch(ac), sauer_map::Node::Leaf(bl)) => {
+            let b_child = sauer_map::Node::Leaf(*bl);
+            for i in 0..8 {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                collect_diff_cells(&ac[i], &b_child, child_pos, half, out);
+            }
+        }
+        (sauer_map::Node::Leaf(al), sauer_map::Node::Branch(bc)) => {
+            let a_child = sauer_map::Node::Leaf(*al);
+            for i in 0..8 {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                collect_diff_cells(&a_child, &bc[i], child_pos, half, out);
+            }
+        }
+        (sauer_map::Node::Leaf(_), sauer_map::Node::Leaf(_)) => {
+            out.push((pos, size, b.clone()));
         }
     }
 }

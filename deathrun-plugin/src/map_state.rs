@@ -559,39 +559,15 @@ fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
     })
 }
 
-fn packed_vslot_matches(vs: &VSlot, ds: &PackedVSlot) -> bool {
-    if vs.params.len() != ds.params.len() {
-        return false;
-    }
-    for (vp, (dn, dv)) in vs.params.iter().zip(&ds.params) {
-        if vp.name != *dn || vp.values != *dv {
-            return false;
-        }
-    }
-    vs.scale == ds.scale
-        && vs.rotation == ds.rotation
-        && vs.offset == ds.offset
-        && vs.scroll == ds.scroll
-        && vs.layer == ds.layer
-        && vs.alpha == ds.alpha
-        && vs.color == ds.color
-}
-
-/// Finds an existing vslot with `prev == base_tex` and the same properties as
+/// Finds or creates a vslot matching `ds` chained from `base_tex`.
 /// `ds`, or appends a new one. Returns the new texture index.
 fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlot) -> u16 {
     // Ensure the array covers the base texture so prev stays valid.
     if vslots.len() <= base_tex as usize {
         vslots.resize(base_tex as usize + 1, None);
     }
-    // Dedup: reuse an identical vslot if one already exists.
-    for (i, vs) in vslots.iter().enumerate() {
-        if let Some(vs) = vs {
-            if vs.prev == base_tex as i32 && packed_vslot_matches(vs, ds) {
-                return i as u16;
-            }
-        }
-    }
+    // Always append — matching vanilla's behavior so texture indices stay in sync with clients.
+    // Dedup would return a lower index while vanilla always creates a new entry at table end.
     let new_vs = VSlot {
         prev: base_tex as i32,
         params: ds
@@ -620,23 +596,23 @@ pub struct Trap {
     pub button_size: i32,
     pub button_orient: u8,
 
-    /// Geometry/entities to show when trap fires.
+    /// Pre-compressed clipboard for the triggered geometry.
     pub trigger_clipboard: Vec<u8>,
     pub trigger_unpack_len: i32,
+
+    /// Per-cell changes — used for accurate server-map updates (no region collateral).
+    pub trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
+
+    /// Entity state when the trap is active.
     pub trigger_entities: HashMap<usize, ogz_rs::data::Entity>,
 
-    /// Entity IDs that were touched during trap recording.
-    /// The restore entity state is captured dynamically at trigger time from the live map.
-    pub affected_entity_ids: std::collections::HashSet<usize>,
+    /// Entity IDs touched during recording — restore state captured dynamically at trigger time.
+    pub affected_entity_ids: HashSet<usize>,
 
-    /// Paste origin, cell counts, and grid from generate_region_clipboard.
-    /// Used for both the companion DelCube and the PasteServer sel.
+    /// DelCube/paste region — tight diff bounds, grid-aligned.
     pub clip_pos: [i32; 3],
     pub clip_s: [i32; 3],
     pub clip_grid: i32,
-
-    pub affected_min: [i32; 3],
-    pub affected_max: [i32; 3],
 
     pub is_active: bool,
 }
