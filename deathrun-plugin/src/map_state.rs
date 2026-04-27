@@ -628,8 +628,10 @@ pub struct Trap {
     pub restore_unpack_len: i32,
     pub original_entities: HashMap<usize, ogz_rs::data::Entity>,
 
-    /// Paste origin and grid derived from generate_region_clipboard (padded_min, grid).
+    /// Paste origin, cell counts, and grid from generate_region_clipboard.
+    /// Use clip_pos/clip_s/clip_grid for both the companion DelCube and PasteServer sel.
     pub clip_pos: [i32; 3],
+    pub clip_s: [i32; 3],
     pub clip_grid: i32,
 
     pub affected_min: [i32; 3],

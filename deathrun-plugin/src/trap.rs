@@ -354,6 +354,7 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
             restore_unpack_len: t.restore_unpack_len,
             original_entities: t.original_entities.clone(),
             clip_pos: t.clip_pos,
+            clip_s: t.clip_s,
             clip_grid: t.clip_grid,
             affected_min: t.affected_min,
             affected_max: t.affected_max,
@@ -549,6 +550,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         restore_unpack_len: 0,
         original_entities: std::collections::HashMap::new(),
         clip_pos: [0; 3],
+        clip_s: [1; 3],
         clip_grid: 1,
         affected_min: [i32::MAX; 3],
         affected_max: [i32::MIN; 3],
@@ -666,7 +668,6 @@ pub fn cmd_endtrap(ctx: &Context) {
     };
 
     // Compute the tight bounding box of what actually changed between original and current map.
-    // This avoids inflated bounds from edit selections that touched unchanged geometry.
     let current_map = state.map.as_ref().unwrap();
     let world_size = current_map.world.size;
     let mut diff_min = [i32::MAX; 3];
@@ -687,8 +688,9 @@ pub fn cmd_endtrap(ctx: &Context) {
         return;
     }
 
-    let min = diff_min;
-    let max = diff_max;
+    // Clamp to valid world bounds before generating clipboards.
+    let min = std::array::from_fn(|i| diff_min[i].max(0));
+    let max = std::array::from_fn(|i| diff_max[i].min(world_size));
 
     eprintln!(
         "[trap] diff bounds: {:?}..{:?} (spans {}x{}x{})",
@@ -696,7 +698,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     );
 
     // Generate ONE restore clipboard (from original map, pre-edit state)
-    let (clip_pos, clip_grid, restore_unpack_len, restore_compressed) =
+    let (clip_pos, clip_s, clip_grid, restore_unpack_len, restore_compressed) =
         crate::recreate::generate_region_clipboard(
             &edit_state.original_map.world.root,
             world_size,
@@ -705,7 +707,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         );
 
     // Generate ONE trigger clipboard (from CURRENT map, post-edit state)
-    let (_, _, trigger_unpack_len, trigger_compressed) =
+    let (_, _, _, trigger_unpack_len, trigger_compressed) =
         crate::recreate::generate_region_clipboard(
             &current_map.world.root,
             world_size,
@@ -755,21 +757,19 @@ pub fn cmd_endtrap(ctx: &Context) {
     trap.restore_unpack_len = restore_unpack_len;
     trap.original_entities = original_entities;
     trap.clip_pos = clip_pos;
+    trap.clip_s = clip_s;
     trap.clip_grid = clip_grid;
     trap.affected_min = min;
     trap.affected_max = max;
 
     let target_cn = ctx.cn() as i32;
 
-    // Delete the affected region then paste the single restore clipboard
+    // DelCube uses the SAME padded region and grid as the clipboard.
+    // This is far cheaper than grid=1 (at most 8^3=512 cells vs millions).
     let del_sel = SelInfo {
-        o: sauer_proto::data::Vec3 { x: min[0], y: min[1], z: min[2] },
-        s: sauer_proto::data::Vec3 {
-            x: max[0] - min[0],
-            y: max[1] - min[1],
-            z: max[2] - min[2],
-        },
-        grid: 1,
+        o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
+        s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+        grid: clip_grid,
         orient: sauer_proto::data::Orient::Left,
         cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
     };
@@ -787,10 +787,10 @@ pub fn cmd_endtrap(ctx: &Context) {
         packet: channel1::PasteServer {
             sel: SelInfo {
                 o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-                s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+                s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
                 grid: clip_grid,
                 orient: sauer_proto::data::Orient::Left,
-                cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
+                cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
             },
         },
     });
@@ -843,31 +843,27 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     let restore_unpack_len = trap.restore_unpack_len;
     let original_entities = trap.original_entities.clone();
     let clip_pos = trap.clip_pos;
+    let clip_s = trap.clip_s;
     let clip_grid = trap.clip_grid;
-    let min = trap.affected_min;
-    let max = trap.affected_max;
 
     drop(state);
 
     let server_clone = std::sync::Arc::clone(server);
     tokio::spawn(async move {
+        // DelCube uses the same padded region and grid as the clipboard — at most 8^3=512 cells.
         let del_sel = SelInfo {
-            o: sauer_proto::data::Vec3 { x: min[0], y: min[1], z: min[2] },
-            s: sauer_proto::data::Vec3 {
-                x: max[0] - min[0],
-                y: max[1] - min[1],
-                z: max[2] - min[2],
-            },
-            grid: 1,
+            o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
+            s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+            grid: clip_grid,
             orient: sauer_proto::data::Orient::Left,
             cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
         };
         let paste_sel = SelInfo {
             o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-            s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+            s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
             grid: clip_grid,
             orient: sauer_proto::data::Orient::Left,
-            cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
+            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
         };
 
         // --- 1. APPLY TRIGGERED STATE ---

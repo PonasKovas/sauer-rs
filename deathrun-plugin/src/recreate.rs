@@ -73,11 +73,12 @@ fn collect_chunks(
     }
 }
 
-/// Chooses the smallest power-of-2 grid so no axis exceeds 64 cells.
+/// Chooses the smallest power-of-2 grid so no axis exceeds 8 cells.
+/// Keeping cells ≤ 8 per axis (≤ 512 total) makes both DelCube and paste fast.
 fn choose_grid(spans: [i32; 3]) -> i32 {
     let max_span = spans.iter().copied().max().unwrap_or(1).max(1);
     let mut g = 1i32;
-    while (max_span + g - 1) / g > 64 {
+    while (max_span + g - 1) / g > 8 {
         g <<= 1;
     }
     g
@@ -113,24 +114,12 @@ fn extract_node_at(
     }
 }
 
-/// Returns the uniform Cube if every leaf in the subtree has the same value, else None.
-fn uniform_leaf(node: &sauer_map::Node) -> Option<sauer_map::Cube> {
-    match node {
-        sauer_map::Node::Leaf(cube) => Some(*cube),
-        sauer_map::Node::Branch(children) => {
-            let first = uniform_leaf(&children[0])?;
-            for child in children.iter().skip(1) {
-                if uniform_leaf(child)? != first {
-                    return None;
-                }
-            }
-            Some(first)
-        }
-    }
-}
-
-/// Walks both octrees simultaneously and returns the tight bounding box of all differing nodes.
-/// Uses geometric equality (not structural) to avoid false positives from apply_region subdivision.
+/// Walks both octrees and returns the tight bounding box of nodes that actually differ.
+///
+/// When one side is a Leaf and the other is a Branch, we recurse treating the Leaf as 8
+/// uniform children. This means `Leaf(air)` vs `Branch([Leaf(air)×7, Leaf(solid)])` only
+/// marks the one solid child, not the entire octant — critical because apply_region
+/// subdivides Leaf(air) into Branch([Leaf(air); 8]) as a traversal side-effect.
 pub(crate) fn diff_bounds(
     a: &sauer_map::Node,
     b: &sauer_map::Node,
@@ -142,9 +131,9 @@ pub(crate) fn diff_bounds(
     if a == b {
         return;
     }
+    let half = size / 2;
     match (a, b) {
         (sauer_map::Node::Branch(ac), sauer_map::Node::Branch(bc)) => {
-            let half = size / 2;
             for i in 0..8 {
                 let cx = (i & 1) as i32;
                 let cy = ((i >> 1) & 1) as i32;
@@ -153,14 +142,30 @@ pub(crate) fn diff_bounds(
                 diff_bounds(&ac[i], &bc[i], child_pos, half, out_min, out_max);
             }
         }
-        _ => {
-            // One is a Leaf, the other a Branch (or two different Leaves).
-            // Check geometric equality: a Branch that is uniformly one Cube equals a Leaf of that Cube.
-            if let (Some(la), Some(lb)) = (uniform_leaf(a), uniform_leaf(b)) {
-                if la == lb {
-                    return;
-                }
+        (sauer_map::Node::Branch(ac), sauer_map::Node::Leaf(bl)) => {
+            // Treat b-Leaf as 8 uniform children and recurse
+            let b_child = sauer_map::Node::Leaf(*bl);
+            for i in 0..8 {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                diff_bounds(&ac[i], &b_child, child_pos, half, out_min, out_max);
             }
+        }
+        (sauer_map::Node::Leaf(al), sauer_map::Node::Branch(bc)) => {
+            // Treat a-Leaf as 8 uniform children and recurse
+            let a_child = sauer_map::Node::Leaf(*al);
+            for i in 0..8 {
+                let cx = (i & 1) as i32;
+                let cy = ((i >> 1) & 1) as i32;
+                let cz = ((i >> 2) & 1) as i32;
+                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                diff_bounds(&a_child, &bc[i], child_pos, half, out_min, out_max);
+            }
+        }
+        (sauer_map::Node::Leaf(_), sauer_map::Node::Leaf(_)) => {
+            // Two different Leaves at this position (equal case caught by a==b above)
             for i in 0..3 {
                 if pos[i] < out_min[i] {
                     out_min[i] = pos[i];
@@ -174,13 +179,14 @@ pub(crate) fn diff_bounds(
 }
 
 /// Builds ONE multi-cell clipboard covering the entire min..max region, exactly like a
-/// vanilla player copy-paste. Returns (padded_min, grid, unpack_len, compressed).
+/// vanilla player copy-paste. Returns (padded_min, s, grid, unpack_len, compressed).
+/// `s` is [sx, sy, sz] cell counts — use the same values for the companion DelCube sel.
 pub(crate) fn generate_region_clipboard(
     root: &sauer_map::Node,
     world_size: i32,
     min: [i32; 3],
     max: [i32; 3],
-) -> ([i32; 3], i32, i32, Vec<u8>) {
+) -> ([i32; 3], [i32; 3], i32, i32, Vec<u8>) {
     let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
     let grid = choose_grid(spans);
 
@@ -225,7 +231,7 @@ pub(crate) fn generate_region_clipboard(
         grid, sx, sy, sz, sx * sy * sz, unpack_len, compressed.len()
     );
 
-    (padded_min, grid, unpack_len, compressed)
+    (padded_min, [sx, sy, sz], grid, unpack_len, compressed)
 }
 
 /// Generates a valid zlib-compressed clipboard packet enclosing the given node
