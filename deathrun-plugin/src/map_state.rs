@@ -490,11 +490,39 @@ fn read_sendstring(data: &[u8], pos: &mut usize) -> Option<CubeString> {
     Some(CubeString::from_bytes(bytes))
 }
 
+/// Reads a Sauerbraten getuint (putuint encoding) from a byte slice.
+fn read_getuint(data: &[u8], pos: &mut usize) -> Option<i32> {
+    let b0 = *data.get(*pos)? as i32;
+    *pos += 1;
+    if b0 & 0x80 == 0 {
+        return Some(b0);
+    }
+    let b1 = *data.get(*pos)? as i32;
+    *pos += 1;
+    let mut n = b0 + (b1 << 7) - 0x80;
+    if n & (1 << 14) != 0 {
+        let b2 = *data.get(*pos)? as i32;
+        *pos += 1;
+        n += (b2 << 14) - (1 << 14);
+    }
+    if n & (1 << 21) != 0 {
+        let b3 = *data.get(*pos)? as i32;
+        *pos += 1;
+        n += (b3 << 21) - (1 << 21);
+    }
+    if n & (1 << 28) != 0 {
+        n |= !0i32 << 28;
+    }
+    Some(n)
+}
+
 /// Parses a packvslot-encoded blob from an N_EDITVSLOT extra_data buffer.
+///
+/// Format: repeated (type_byte, data...) entries terminated by 0xFF.
+/// Type bytes: 0=SHPARAM, 1=SCALE, 2=ROTATION, 3=OFFSET, 4=SCROLL,
+///             5=LAYER, 6=ALPHA, 7=COLOR.
 fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
     let mut pos = 0;
-    let flags = read_varint(data, &mut pos)?;
-
     let mut params = Vec::new();
     let mut scale = None;
     let mut rotation = None;
@@ -504,47 +532,45 @@ fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
     let mut alpha = None;
     let mut color = None;
 
-    if flags & (1 << 0) != 0 {
-        let n = read_varint(data, &mut pos)? as usize;
-        for _ in 0..n {
-            let name = read_sendstring(data, &mut pos)?;
-            let vals = [
-                read_f32_le(data, &mut pos)?,
-                read_f32_le(data, &mut pos)?,
-                read_f32_le(data, &mut pos)?,
-                read_f32_le(data, &mut pos)?,
-            ];
-            params.push((name, vals));
+    loop {
+        if pos >= data.len() {
+            break;
         }
-    }
-    if flags & (1 << 1) != 0 {
-        scale = Some(read_f32_le(data, &mut pos)?);
-    }
-    if flags & (1 << 2) != 0 {
-        rotation = Some(read_varint(data, &mut pos)? % 8);
-    }
-    if flags & (1 << 3) != 0 {
-        offset = Some((read_varint(data, &mut pos)?, read_varint(data, &mut pos)?));
-    }
-    if flags & (1 << 4) != 0 {
-        // Sent as value * 1000; store as raw value.
-        scroll = Some((
-            read_f32_le(data, &mut pos)? / 1000.0,
-            read_f32_le(data, &mut pos)? / 1000.0,
-        ));
-    }
-    if flags & (1 << 5) != 0 {
-        layer = Some(read_varint(data, &mut pos)?);
-    }
-    if flags & (1 << 6) != 0 {
-        alpha = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?));
-    }
-    if flags & (1 << 7) != 0 {
-        color = Some((
-            read_f32_le(data, &mut pos)?,
-            read_f32_le(data, &mut pos)?,
-            read_f32_le(data, &mut pos)?,
-        ));
+        let type_byte = data[pos];
+        pos += 1;
+        if type_byte >= 0x80 {
+            break;
+        }
+        match type_byte {
+            0 => {
+                // VSLOT_SHPARAM
+                let name = read_sendstring(data, &mut pos)?;
+                let vals = [
+                    read_f32_le(data, &mut pos)?,
+                    read_f32_le(data, &mut pos)?,
+                    read_f32_le(data, &mut pos)?,
+                    read_f32_le(data, &mut pos)?,
+                ];
+                params.push((name, vals));
+            }
+            1 => scale = Some(read_f32_le(data, &mut pos)?),
+            2 => rotation = Some(read_varint(data, &mut pos)?),
+            3 => offset = Some((read_varint(data, &mut pos)?, read_varint(data, &mut pos)?)),
+            4 => {
+                // VSLOT_SCROLL: values already stored as arg/1000 (raw float)
+                scroll = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?));
+            }
+            5 => layer = Some(read_getuint(data, &mut pos)?),
+            6 => alpha = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?)),
+            7 => {
+                color = Some((
+                    read_f32_le(data, &mut pos)?,
+                    read_f32_le(data, &mut pos)?,
+                    read_f32_le(data, &mut pos)?,
+                ))
+            }
+            _ => return None,
+        }
     }
 
     Some(PackedVSlot {
