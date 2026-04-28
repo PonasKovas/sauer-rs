@@ -1,4 +1,4 @@
-use cube_string::CubeString;
+use cube_string::{CubeString, IntoCubeStringLossy};
 use ogz_rs::{
     OgzMap,
     data::{MapConfig, VSlot, VSlotParam, Variable},
@@ -66,7 +66,7 @@ impl MapState {
             version: 33,
             world_size: 512,
             config: MapConfig::Modern { variables: vec![] },
-            game_type: None,
+            game_type: Some("fps".lossy_cubestring()),
             eif: 0,
             extra_game_data: vec![],
             mru_textures: vec![],
