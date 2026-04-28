@@ -10,7 +10,7 @@ use sauer_proto::{
 };
 use sauer_server::plugin::Context;
 use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use tracing::error;
 
@@ -392,25 +392,29 @@ impl MapState {
         let orient = sel.orient as usize;
         let all_faces = packet.all_faces;
 
-        // Collect unique texture indices from the selection.
-        let mut unique_textures: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
+        // Collect unique texture indices in first-encounter face order (face 0 of first
+        // cube first, etc.). This matches vanilla's client-side traversal order so new
+        // vslot indices are allocated identically on both sides.
+        let mut seen: HashSet<u16> = HashSet::new();
+        let mut ordered_textures: Vec<u16> = Vec::new();
         self.world.edit_sel(&sel, |node, _| {
             if let Node::Leaf(cube) = node {
                 for face in 0usize..6 {
                     if all_faces || face == orient {
-                        unique_textures.insert(cube.textures[face]);
+                        let t = cube.textures[face];
+                        if seen.insert(t) {
+                            ordered_textures.push(t);
+                        }
                     }
                 }
             }
         });
 
-        // Resolve (or create) a vslot for each unique base texture.
-        // Process in sorted order so new vslot indices are allocated deterministically,
-        // matching the order the vanilla client encounters faces (lowest texture index first).
+        // Resolve (or create) a vslot for each unique base texture in encounter order.
         let vslots = &mut self.meta.vslots;
-        let tex_remap: HashMap<u16, u16> = unique_textures
-            .into_iter()
-            .map(|t| (t, resolve_vslot(vslots, t, &ds)))
+        let tex_remap: HashMap<u16, u16> = ordered_textures
+            .iter()
+            .map(|&t| (t, resolve_vslot(vslots, t, &ds)))
             .collect();
 
         // Apply the remapped texture indices.

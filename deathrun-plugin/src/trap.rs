@@ -282,97 +282,6 @@ pub fn intersects_edit_face(sel: &SelInfo, dir: i32, trap: &Trap) -> bool {
 
 // ─── Packet Generation Helpers ────────────────────────────────────────────────
 
-type ButtonSetupPackets = (
-    Client<channel1::EditFace>,
-    Client<channel1::EditTex>,
-    Client<channel1::EditTex>,
-    Client<channel1::EditVSlot>,
-    Client<channel1::EditVSlot>,
-    Client<channel1::EditMat>,
-    Client<channel1::EditVSlot>,
-);
-
-fn build_setup_packets(cn: i32, adj_sel: &SelInfo, fill_sel: &SelInfo) -> ButtonSetupPackets {
-    let mut color_vslot = vec![7u8];
-    for &f in &BUTTON_COLOR_READY {
-        color_vslot.extend_from_slice(&f.to_le_bytes());
-    }
-    color_vslot.push(0xFF);
-
-    let mut scale_vslot = vec![1u8];
-    scale_vslot.extend_from_slice(&2.0f32.to_le_bytes());
-    scale_vslot.push(0xFF);
-
-    let mut alpha_vslot = vec![6u8];
-    alpha_vslot.extend_from_slice(&0.8f32.to_le_bytes());
-    alpha_vslot.extend_from_slice(&0.8f32.to_le_bytes());
-    alpha_vslot.push(0xFF);
-
-    (
-        Client {
-            client_num: cn,
-            packet: channel1::EditFace {
-                sel: fill_sel.clone(),
-                dir: -1,
-                mode: EditFaceMode::Fill,
-            },
-        },
-        Client {
-            client_num: cn,
-            packet: channel1::EditTex {
-                sel: adj_sel.clone(),
-                tex: BUTTON_SIDE_TEX as i32,
-                all_faces: true,
-                extra_data: vec![],
-            },
-        },
-        Client {
-            client_num: cn,
-            packet: channel1::EditTex {
-                sel: adj_sel.clone(),
-                tex: BUTTON_FRONT_TEX as i32,
-                all_faces: false,
-                extra_data: vec![],
-            },
-        },
-        Client {
-            client_num: cn,
-            packet: channel1::EditVSlot {
-                sel: adj_sel.clone(),
-                delta: 0,
-                all_faces: true,
-                extra_data: color_vslot,
-            },
-        },
-        Client {
-            client_num: cn,
-            packet: channel1::EditVSlot {
-                sel: adj_sel.clone(),
-                delta: 0,
-                all_faces: false,
-                extra_data: scale_vslot,
-            },
-        },
-        Client {
-            client_num: cn,
-            packet: channel1::EditMat {
-                sel: adj_sel.clone(),
-                mat: 1024,
-                filter: -1,
-            },
-        },
-        Client {
-            client_num: cn,
-            packet: channel1::EditVSlot {
-                sel: adj_sel.clone(),
-                delta: 0,
-                all_faces: true,
-                extra_data: alpha_vslot,
-            },
-        },
-    )
-}
-
 fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
     let mut buf = Vec::new();
     for (type_byte, data) in entries {
@@ -493,13 +402,40 @@ fn get_selections(adj: [i32; 3], button_size: i32, hit_orient: u8) -> (SelInfo, 
     (adj_sel, fill_sel)
 }
 
-fn send_atomic_rebuild(server: &Server, cn: u32, adj: [i32; 3], button_size: i32, hit_orient: u8) {
+fn send_atomic_rebuild(
+    server: &Server,
+    cn: u32,
+    adj: [i32; 3],
+    button_size: i32,
+    hit_orient: u8,
+    clip_unpack_len: i32,
+    clip_data: Vec<u8>,
+) {
     let target_cn = cn as i32;
     let (adj_sel, fill_sel) = get_selections(adj, button_size, hit_orient);
-    let setup = build_setup_packets(target_cn, &adj_sel, &fill_sel);
 
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::EditFace {
+            sel: fill_sel,
+            dir: -1,
+            mode: EditFaceMode::Fill,
+        },
+    });
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::DelCube { sel: adj_sel.clone() },
+    });
+    server.broadcast_chan1(&channel1::ClipboardServer {
+        client_num: target_cn,
+        unpack_len: clip_unpack_len,
+        data: clip_data,
+    });
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::PasteServer { sel: adj_sel.clone() },
+    });
     server.broadcast_chan1((
-        setup,
         corner_pushes(&adj_sel, 0, target_cn),
         corner_pushes(&adj_sel, 1, target_cn),
         corner_pushes(&adj_sel, 2, target_cn),
@@ -585,12 +521,26 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
 
             map.invalidate_cache();
         }
+        let (clip_unpack_len, clip_data) = if let Some(map) = state.map.as_ref() {
+            let btn_node = crate::recreate::extract_node_at(
+                &map.world.root,
+                [0, 0, 0],
+                map.world.size,
+                trap.button_pos,
+                trap.button_size,
+            );
+            crate::recreate::generate_clipboard(&btn_node, trap.button_size, &map.meta.vslots)
+        } else {
+            (0, Vec::new())
+        };
         send_atomic_rebuild(
             &server,
             cn,
             trap.button_pos,
             trap.button_size,
             trap.button_orient,
+            clip_unpack_len,
+            clip_data,
         );
     }
 }
@@ -708,6 +658,19 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         },
     );
 
+    let target_cn = cn as i32;
+    let (adj_sel, fill_sel) = get_selections(adj, BUTTON_SIZE, hit_orient);
+
+    apply_internal_vslots(map, &adj_sel);
+
+    // Snapshot before corner pushes: clipboard delivers the flat button with
+    // correct vslot indices; corner animation then pushes edges on clients.
+    let button_node = crate::recreate::extract_node_at(
+        &map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE,
+    );
+    let (clip_unpack_len, clip_data) =
+        crate::recreate::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
+
     for corner in 0..4 {
         let mut csel = sel.clone();
         csel.corner = corner;
@@ -715,12 +678,6 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             map.world.edit_face(&csel, 1, 2);
         }
     }
-
-    let target_cn = cn as i32;
-    let (adj_sel, fill_sel) = get_selections(adj, BUTTON_SIZE, hit_orient);
-    let setup = build_setup_packets(target_cn, &adj_sel, &fill_sel);
-
-    apply_internal_vslots(map, &adj_sel);
 
     state.traps.push(Trap {
         button_pos: adj,
@@ -746,10 +703,32 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
 
     sync_traps_to_map(&server, cn);
 
+    // Broadcast the button using a clipboard so clients install the exact vslot
+    // indices already in the server map, regardless of when /getmap is done.
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::EditFace {
+            sel: fill_sel,
+            dir: -1,
+            mode: EditFaceMode::Fill,
+        },
+    });
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::DelCube { sel: adj_sel.clone() },
+    });
+    server.broadcast_chan1(&channel1::ClipboardServer {
+        client_num: target_cn,
+        unpack_len: clip_unpack_len,
+        data: clip_data,
+    });
+    server.broadcast_chan1(&Client {
+        client_num: target_cn,
+        packet: channel1::PasteServer { sel: adj_sel.clone() },
+    });
+
     tokio::spawn(async move {
         use tokio::time::{Duration, sleep};
-        server.broadcast_chan1(setup);
-
         let mut events: Vec<(u64, i32)> = {
             use rand::Rng;
             let mut rng = rand::thread_rng();
@@ -769,10 +748,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             server.broadcast_chan1(&Client {
                 client_num: target_cn,
                 packet: channel1::EditFace {
-                    sel: SelInfo {
-                        corner,
-                        ..adj_sel.clone()
-                    },
+                    sel: SelInfo { corner, ..adj_sel.clone() },
                     dir: 1,
                     mode: EditFaceMode::Corner,
                 },
