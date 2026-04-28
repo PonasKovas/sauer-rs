@@ -12,7 +12,8 @@ use sauer_server::{Server, plugin::Context};
 pub const BUTTON_SIZE: i32 = 8;
 pub const BUTTON_FRONT_TEX: u16 = 248;
 pub const BUTTON_SIDE_TEX: u16 = 242;
-pub const BUTTON_COLOR: [f32; 3] = [0.2, 0.2, 0.2];
+pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
+pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
 
 // ─── Recording State ──────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ type ButtonSetupPackets = (
 
 fn build_setup_packets(cn: i32, adj_sel: &SelInfo, fill_sel: &SelInfo) -> ButtonSetupPackets {
     let mut color_vslot = vec![7u8];
-    for &f in &BUTTON_COLOR {
+    for &f in &BUTTON_COLOR_READY {
         color_vslot.extend_from_slice(&f.to_le_bytes());
     }
     color_vslot.push(0xFF);
@@ -178,7 +179,10 @@ fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 
 fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
     // Type bytes: 1=SCALE, 6=ALPHA, 7=COLOR
-    let color_bytes: Vec<u8> = BUTTON_COLOR.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let color_bytes: Vec<u8> = BUTTON_COLOR_READY
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect();
     let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32]
         .iter()
         .flat_map(|f| f.to_le_bytes())
@@ -803,6 +807,10 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     let clip_s = trap.clip_s;
     let clip_grid = trap.clip_grid;
 
+    let button_pos = trap.button_pos;
+    let button_size = trap.button_size;
+    let button_orient = trap.button_orient;
+
     drop(state);
 
     let server_clone = std::sync::Arc::clone(server);
@@ -875,7 +883,16 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         );
         apply_cells_to_map(&server_clone, &trigger_cells, &trigger_entities);
 
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        set_button_color(
+            &server_clone,
+            actor_cn,
+            button_pos,
+            button_size,
+            button_orient,
+            BUTTON_COLOR_ACTIVE,
+        );
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // --- 2. RESTORE PRE-TRIGGER STATE ---
         broadcast_region(
@@ -888,11 +905,50 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         );
         apply_cells_to_map(&server_clone, &restore_cells, &restore_entities);
 
+        set_button_color(
+            &server_clone,
+            actor_cn,
+            button_pos,
+            button_size,
+            button_orient,
+            BUTTON_COLOR_READY,
+        );
+
         if let Ok(mut state) = get_server_state(&server_clone).write() {
             if trap_idx < state.traps.len() {
                 state.traps[trap_idx].is_active = false;
             }
         }
+    });
+}
+
+fn set_button_color(
+    server: &Server,
+    actor_cn: u32,
+    pos: [i32; 3],
+    size: i32,
+    orient: u8,
+    color: [f32; 3],
+) {
+    let (adj_sel, _) = get_selections(pos, size, orient);
+    let color_bytes: Vec<u8> = color.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let data = pack_vslot_bytes(&[(7, &color_bytes)]);
+    let packet = channel1::EditVSlot {
+        sel: adj_sel,
+        delta: 0,
+        all_faces: true,
+        extra_data: data,
+    };
+
+    if let Ok(mut state) = get_server_state(server).write() {
+        if let Some(map) = state.map.as_mut() {
+            map.handle_edit_v_slot(&packet);
+        }
+    }
+
+    server.broadcast_chan1(&Client {
+        client_num: actor_cn as i32,
+        packet,
     });
 }
 
