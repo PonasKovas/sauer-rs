@@ -585,32 +585,79 @@ fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
     })
 }
 
-/// Finds or creates a vslot matching `ds` chained from `base_tex`.
-/// `ds`, or appends a new one. Returns the new texture index.
+/// Walks the prev chain from `idx` to the root base (None) slot index.
+fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
+    let mut current = idx as i32;
+    loop {
+        match vslots.get(current as usize) {
+            Some(Some(vs)) => {
+                let p = vs.prev;
+                if p < 0 || (p as usize) >= vslots.len() {
+                    return current;
+                }
+                match &vslots[p as usize] {
+                    None => return p,
+                    Some(_) => current = p,
+                }
+            }
+            _ => return current,
+        }
+    }
+}
+
+/// Finds the last vslot in the chain rooted at `root` (linear chain tail).
+/// New vslots should use this as `prev` so all vslots remain reachable after OGZ load.
+fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
+    let mut tail = root;
+    for i in 0..vslots.len() {
+        if let Some(Some(_)) = vslots.get(i) {
+            if root_base_of(vslots, i as u16) == root {
+                tail = i as i32;
+            }
+        }
+    }
+    tail
+}
+
+/// Creates a merged vslot by accumulating `base_tex`'s existing properties
+/// then overriding with `ds`. Sets `prev` to the chain tail to keep all vslots
+/// reachable during OGZ load (avoids orphaning when multiple vslots share a root).
 fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlot) -> u16 {
-    // Ensure the array covers the base texture so prev stays valid.
     if vslots.len() <= base_tex as usize {
         vslots.resize(base_tex as usize + 1, None);
     }
-    // Always append — matching vanilla's behavior so texture indices stay in sync with clients.
-    // Dedup would return a lower index while vanilla always creates a new entry at table end.
+    let root = root_base_of(vslots, base_tex);
+    let chain_tail = find_chain_tail(vslots, root);
+
+    let (acc_params, acc_scale, acc_rotation, acc_offset, acc_scroll, acc_layer, acc_alpha, acc_color) =
+        match vslots.get(base_tex as usize) {
+            Some(Some(existing)) => (
+                existing.params.clone(),
+                existing.scale,
+                existing.rotation,
+                existing.offset,
+                existing.scroll,
+                existing.layer,
+                existing.alpha,
+                existing.color,
+            ),
+            _ => (vec![], None, None, None, None, None, None, None),
+        };
+
     let new_vs = VSlot {
-        prev: base_tex as i32,
-        params: ds
-            .params
-            .iter()
-            .map(|(n, v)| VSlotParam {
-                name: n.clone(),
-                values: *v,
-            })
-            .collect(),
-        scale: ds.scale,
-        rotation: ds.rotation,
-        offset: ds.offset,
-        scroll: ds.scroll,
-        layer: ds.layer,
-        alpha: ds.alpha,
-        color: ds.color,
+        prev: chain_tail,
+        params: if !ds.params.is_empty() {
+            ds.params.iter().map(|(n, v)| VSlotParam { name: n.clone(), values: *v }).collect()
+        } else {
+            acc_params
+        },
+        scale: ds.scale.or(acc_scale),
+        rotation: ds.rotation.or(acc_rotation),
+        offset: ds.offset.or(acc_offset),
+        scroll: ds.scroll.or(acc_scroll),
+        layer: ds.layer.or(acc_layer),
+        alpha: ds.alpha.or(acc_alpha),
+        color: ds.color.or(acc_color),
     };
     let idx = vslots.len();
     vslots.push(Some(new_vs));

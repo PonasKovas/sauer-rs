@@ -166,26 +166,24 @@ fn build_setup_packets(cn: i32, adj_sel: &SelInfo, fill_sel: &SelInfo) -> Button
     )
 }
 
-fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
-    let putint = |v: &mut Vec<u8>, n: i32| {
-        if n < 128 && n > -127 {
-            v.push(n as u8);
-        } else if n < 0x8000 && n >= -0x8000 {
-            v.push(0x80);
-            v.extend_from_slice(&(n as i16).to_le_bytes());
-        } else {
-            v.push(0x81);
-            v.extend_from_slice(&n.to_le_bytes());
-        }
-    };
-
-    let mut data1 = Vec::new();
-    putint(&mut data1, (1 << 6) | (1 << 7));
-    data1.extend_from_slice(&0.8f32.to_le_bytes());
-    data1.extend_from_slice(&0.8f32.to_le_bytes());
-    for &f in &BUTTON_COLOR {
-        data1.extend_from_slice(&f.to_le_bytes());
+fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    for (type_byte, data) in entries {
+        buf.push(*type_byte);
+        buf.extend_from_slice(data);
     }
+    buf.push(0xFF);
+    buf
+}
+
+fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
+    // Type bytes: 1=SCALE, 6=ALPHA, 7=COLOR
+    let color_bytes: Vec<u8> = BUTTON_COLOR.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect();
+    let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
+
+    // All faces: alpha + color
+    let data1 = pack_vslot_bytes(&[(6, &alpha_bytes), (7, &color_bytes)]);
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
         delta: 0,
@@ -193,14 +191,8 @@ fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
         extra_data: data1,
     });
 
-    let mut data2 = Vec::new();
-    putint(&mut data2, (1 << 1) | (1 << 6) | (1 << 7));
-    data2.extend_from_slice(&2.0f32.to_le_bytes());
-    data2.extend_from_slice(&0.8f32.to_le_bytes());
-    data2.extend_from_slice(&0.8f32.to_le_bytes());
-    for &f in &BUTTON_COLOR {
-        data2.extend_from_slice(&f.to_le_bytes());
-    }
+    // Front face only: scale + alpha + color (merged on top of what all_faces just set)
+    let data2 = pack_vslot_bytes(&[(1, &scale_bytes), (6, &alpha_bytes), (7, &color_bytes)]);
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
         delta: 0,
