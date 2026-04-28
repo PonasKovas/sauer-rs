@@ -148,8 +148,8 @@ impl World {
                 return;
             }
             if let Node::Leaf(cube) = cur {
-                let cube = *cube;
-                *cur = Node::Branch(Box::new(std::array::from_fn(|_| Node::Leaf(cube))));
+                let children = crate::geom::subdivide(cube);
+                *cur = Node::Branch(Box::new(children.map(Node::Leaf)));
             }
             if let Node::Branch(children) = cur {
                 let half = cur_size / 2;

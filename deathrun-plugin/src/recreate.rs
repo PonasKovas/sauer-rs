@@ -225,7 +225,11 @@ pub(crate) fn extract_node_at(
         return node.clone();
     }
     match node {
-        sauer_map::Node::Leaf(cube) => sauer_map::Node::Leaf(*cube),
+        sauer_map::Node::Leaf(cube) => {
+            let children = sauer_map::subdivide(cube);
+            let branch = sauer_map::Node::Branch(Box::new(children.map(sauer_map::Node::Leaf)));
+            extract_node_at(&branch, node_pos, node_size, target_pos, target_size)
+        }
         sauer_map::Node::Branch(children) => {
             let half = node_size / 2;
             let cx = usize::from(target_pos[0] >= node_pos[0] + half);
@@ -270,25 +274,25 @@ pub(crate) fn diff_bounds(
             }
         }
         (sauer_map::Node::Branch(ac), sauer_map::Node::Leaf(bl)) => {
-            // Treat b-Leaf as 8 uniform children and recurse
-            let b_child = sauer_map::Node::Leaf(*bl);
+            // Treat b-Leaf as 8 subdivided children and recurse
+            let b_children = sauer_map::subdivide(bl);
             for i in 0..8 {
                 let cx = (i & 1) as i32;
                 let cy = ((i >> 1) & 1) as i32;
                 let cz = ((i >> 2) & 1) as i32;
                 let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                diff_bounds(&ac[i], &b_child, child_pos, half, out_min, out_max);
+                diff_bounds(&ac[i], &sauer_map::Node::Leaf(b_children[i]), child_pos, half, out_min, out_max);
             }
         }
         (sauer_map::Node::Leaf(al), sauer_map::Node::Branch(bc)) => {
-            // Treat a-Leaf as 8 uniform children and recurse
-            let a_child = sauer_map::Node::Leaf(*al);
+            // Treat a-Leaf as 8 subdivided children and recurse
+            let a_children = sauer_map::subdivide(al);
             for i in 0..8 {
                 let cx = (i & 1) as i32;
                 let cy = ((i >> 1) & 1) as i32;
                 let cz = ((i >> 2) & 1) as i32;
                 let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                diff_bounds(&a_child, &bc[i], child_pos, half, out_min, out_max);
+                diff_bounds(&sauer_map::Node::Leaf(a_children[i]), &bc[i], child_pos, half, out_min, out_max);
             }
         }
         (sauer_map::Node::Leaf(_), sauer_map::Node::Leaf(_)) => {
@@ -331,23 +335,23 @@ pub(crate) fn collect_diff_cells(
             }
         }
         (sauer_map::Node::Branch(ac), sauer_map::Node::Leaf(bl)) => {
-            let b_child = sauer_map::Node::Leaf(*bl);
+            let b_children = sauer_map::subdivide(bl);
             for i in 0..8 {
                 let cx = (i & 1) as i32;
                 let cy = ((i >> 1) & 1) as i32;
                 let cz = ((i >> 2) & 1) as i32;
                 let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                collect_diff_cells(&ac[i], &b_child, child_pos, half, out);
+                collect_diff_cells(&ac[i], &sauer_map::Node::Leaf(b_children[i]), child_pos, half, out);
             }
         }
         (sauer_map::Node::Leaf(al), sauer_map::Node::Branch(bc)) => {
-            let a_child = sauer_map::Node::Leaf(*al);
+            let a_children = sauer_map::subdivide(al);
             for i in 0..8 {
                 let cx = (i & 1) as i32;
                 let cy = ((i >> 1) & 1) as i32;
                 let cz = ((i >> 2) & 1) as i32;
                 let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                collect_diff_cells(&a_child, &bc[i], child_pos, half, out);
+                collect_diff_cells(&sauer_map::Node::Leaf(a_children[i]), &bc[i], child_pos, half, out);
             }
         }
         (sauer_map::Node::Leaf(_), sauer_map::Node::Leaf(_)) => {
