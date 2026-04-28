@@ -1,6 +1,7 @@
 bind_addr = "0.0.0.0:28785"
 max_peers = 1024
 plugin_dir = "plugins/"
+map_dir = "maps/"
 
 [base]
 server_desc = "sauer-rs"
