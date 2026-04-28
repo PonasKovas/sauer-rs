@@ -12,7 +12,7 @@ pub struct Material {
 impl Material {
     pub fn from_bits(bits: u16) -> Self {
         Self {
-            volume: Volume::from((bits as u8) & 0b11), // Fixed offset
+            volume: Volume::from(((bits >> 2) as u8) & 0b11),
             clip: Clip::from((bits >> 5) as u8 & 0b11),
             death: (bits & (1 << 8)) != 0,
             alpha: (bits & (1 << 10)) != 0,
@@ -20,7 +20,7 @@ impl Material {
     }
 
     pub fn to_bits(self) -> u16 {
-        (self.volume as u16) // Fixed offset
+        ((self.volume as u16) << 2)
             | ((self.clip as u16) << 5)
             | ((self.death as u16) << 8)
             | ((self.alpha as u16) << 10)
