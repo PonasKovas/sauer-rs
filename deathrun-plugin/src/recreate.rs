@@ -160,7 +160,7 @@ pub(crate) fn pack_vslots(nodes: &[sauer_map::Node], vslots: &[Option<VSlot>], o
 }
 
 /// Recursively splits the map into volumetric chunks bounded by `chunk_size_limit`
-fn collect_chunks(
+pub(crate) fn collect_chunks(
     node: &sauer_map::Node,
     node_pos: [i32; 3],
     node_size: i32,

@@ -664,6 +664,7 @@ fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlo
     idx as u16
 }
 
+#[derive(Clone)]
 pub struct Trap {
     pub button_pos: [i32; 3],
     pub button_size: i32,

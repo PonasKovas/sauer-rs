@@ -39,8 +39,7 @@ pub struct TrapEditState {
 
 pub const TRAP_STORE_VERSION: u8 = 2;
 
-#[derive(Serialize, Deserialize)]
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct StoredEntity {
     pub position: [f32; 3],
     pub attrs: [i16; 5],
@@ -212,7 +211,10 @@ pub fn reset_button_colors_by_pos(
 ) {
     for &(pos, size, orient) in buttons {
         let (adj_sel, _) = get_selections(pos, size, orient);
-        let color_bytes: Vec<u8> = BUTTON_COLOR_READY.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let color_bytes: Vec<u8> = BUTTON_COLOR_READY
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
         let data = pack_vslot_bytes(&[(7, &color_bytes)]);
         map.handle_edit_v_slot(&sauer_proto::channel1::EditVSlot {
             sel: adj_sel,
@@ -787,14 +789,24 @@ pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
 
     let trap_idx = match trap_idx {
         None => {
-            server.send_chan1(cn, &ServMsg { text: "Not looking at a trap.".lossy_cubestring() });
+            server.send_chan1(
+                cn,
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
+            );
             return;
         }
         Some(i) => i,
     };
-    
+
     state.traps[trap_idx].time = time;
-    server.send_chan1(cn, &ServMsg { text: format!("Trap time set to {}ms.", time).lossy_cubestring() });
+    server.send_chan1(
+        cn,
+        &ServMsg {
+            text: format!("Trap time set to {}ms.", time).lossy_cubestring(),
+        },
+    );
     drop(state);
     sync_traps_to_map(server, cn);
 }
@@ -813,14 +825,24 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
 
     let trap_idx = match trap_idx {
         None => {
-            server.send_chan1(cn, &ServMsg { text: "Not looking at a trap.".lossy_cubestring() });
+            server.send_chan1(
+                cn,
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
+            );
             return;
         }
         Some(i) => i,
     };
-    
+
     state.traps[trap_idx].timeout = timeout;
-    server.send_chan1(cn, &ServMsg { text: format!("Trap timeout set to {}ms.", timeout).lossy_cubestring() });
+    server.send_chan1(
+        cn,
+        &ServMsg {
+            text: format!("Trap timeout set to {}ms.", timeout).lossy_cubestring(),
+        },
+    );
     drop(state);
     sync_traps_to_map(server, cn);
 }
@@ -924,7 +946,6 @@ pub fn cmd_endtrap(ctx: &Context) {
     }
     let tight_min = std::array::from_fn(|i| tight_min[i].max(0));
     let tight_max = std::array::from_fn(|i| tight_max[i].min(world_size));
-
 
     let (
         clip_pos,
