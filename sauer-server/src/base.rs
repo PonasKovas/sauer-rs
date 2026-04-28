@@ -570,11 +570,12 @@ impl<P: Plugin> Plugin for Base<P> {
     async fn edit_mode(&self, ctx: &mut Context, packet: &channel1::EditMode) {
         let cn = ctx.cn();
         if let Some(mut p) = ctx.server().players.try_get_mut(cn) {
-            p.client_state = if packet.is_editing {
-                ClientState::Editing
+            if packet.is_editing {
+                p.edit_state = p.client_state;
+                p.client_state = ClientState::Editing;
             } else {
-                ClientState::Dead
-            };
+                p.client_state = p.edit_state;
+            }
         }
         relay_coop(ctx.server(), ctx.cn(), packet);
     }

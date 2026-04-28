@@ -15,6 +15,7 @@ pub struct PlayerData {
     pub model: PlayerModel,
     pub team: CubeString,
     pub client_state: ClientState,
+    pub edit_state: ClientState,
     /// `None` until `welcome()` is called (sentinel for "has been welcomed").
     pub state: Option<PlayerState>,
     pub position: Vec3<f32>,
@@ -35,6 +36,7 @@ impl PlayerData {
             model: PlayerModel::MrFixit,
             team: CubeString::new(),
             client_state: ClientState::Dead,
+            edit_state: ClientState::Dead,
             state: None,
             position: Vec3 {
                 x: 0.0,
