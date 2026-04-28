@@ -660,9 +660,17 @@ pub fn cmd_endtrap(ctx: &Context) {
         tight_max
     );
 
-    // Trigger clipboard from the post-edit map (tight bounds only).
-    let (clip_pos, clip_s, clip_grid, trigger_unpack_len, trigger_compressed) =
-        crate::recreate::generate_region_clipboard(
+    let (
+        clip_pos,
+        clip_s,
+        clip_grid,
+        trigger_unpack_len,
+        trigger_compressed,
+        restore_unpack_len,
+        restore_compressed,
+    ) = if !trigger_cells.is_empty() {
+        // Trigger clipboard from the post-edit map (tight bounds only).
+        let (cp, cs, cg, tul, tc) = crate::recreate::generate_region_clipboard(
             &current_map.world.root,
             world_size,
             tight_min,
@@ -670,15 +678,20 @@ pub fn cmd_endtrap(ctx: &Context) {
             &current_map.meta.vslots,
         );
 
-    // Restore clipboard from original map (same region dims for consistency).
-    let (restore_unpack_len, restore_compressed) = crate::recreate::generate_clipboard_for_region(
-        &edit_state.original_map.world.root,
-        world_size,
-        clip_pos,
-        clip_s,
-        clip_grid,
-        &edit_state.original_map.meta.vslots,
-    );
+        // Restore clipboard from original map (same region dims for consistency).
+        let (rul, rc) = crate::recreate::generate_clipboard_for_region(
+            &edit_state.original_map.world.root,
+            world_size,
+            cp,
+            cs,
+            cg,
+            &edit_state.original_map.meta.vslots,
+        );
+
+        (cp, cs, cg, tul, tc, rul, rc)
+    } else {
+        ([0; 3], [0; 3], 1, 0, Vec::new(), 0, Vec::new())
+    };
 
     // Collect trigger entities (post-edit state).
     let mut trigger_entities = std::collections::HashMap::new();
@@ -700,7 +713,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     let trap = &mut state.traps[edit_state.trap_idx];
     trap.trigger_clipboard = trigger_compressed;
     trap.trigger_unpack_len = trigger_unpack_len;
-    trap.trigger_cells = trigger_cells;
+    trap.trigger_cells = trigger_cells.clone();
     trap.trigger_entities = trigger_entities;
     trap.affected_entity_ids = edit_state.affected_entities.clone();
     trap.clip_pos = clip_pos;
@@ -730,21 +743,23 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     // Revert clients: DelCube the tight region then paste original state.
     // (pasteblock in vanilla is transparent — needs DelCube first to clear added geometry.)
-    server.broadcast_chan1(&Client {
-        client_num: target_cn,
-        packet: channel1::DelCube {
-            sel: region_sel.clone(),
-        },
-    });
-    server.broadcast_chan1(&channel1::ClipboardServer {
-        client_num: target_cn,
-        unpack_len: restore_unpack_len,
-        data: restore_compressed,
-    });
-    server.broadcast_chan1(&Client {
-        client_num: target_cn,
-        packet: channel1::PasteServer { sel: region_sel },
-    });
+    if !trigger_cells.is_empty() {
+        server.broadcast_chan1(&Client {
+            client_num: target_cn,
+            packet: channel1::DelCube {
+                sel: region_sel.clone(),
+            },
+        });
+        server.broadcast_chan1(&channel1::ClipboardServer {
+            client_num: target_cn,
+            unpack_len: restore_unpack_len,
+            data: restore_compressed,
+        });
+        server.broadcast_chan1(&Client {
+            client_num: target_cn,
+            packet: channel1::PasteServer { sel: region_sel },
+        });
+    }
 
     // Restore entities to pre-recording state.
     for &ent_id in &state.traps[edit_state.trap_idx].affected_entity_ids {
@@ -823,14 +838,18 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 Some(m) => m,
                 None => return,
             };
-            let (unpack_len, compressed) = crate::recreate::generate_clipboard_for_region(
-                &map.world.root,
-                map.world.size,
-                clip_pos,
-                clip_s,
-                clip_grid,
-                &map.meta.vslots,
-            );
+            let (unpack_len, compressed) = if !trigger_cells.is_empty() {
+                crate::recreate::generate_clipboard_for_region(
+                    &map.world.root,
+                    map.world.size,
+                    clip_pos,
+                    clip_s,
+                    clip_grid,
+                    &map.meta.vslots,
+                )
+            } else {
+                (0, Vec::new())
+            };
             let cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
                 .iter()
                 .map(|&(pos, size, _)| {
@@ -961,19 +980,21 @@ fn broadcast_region(
     data: &[u8],
     entities: &std::collections::HashMap<usize, ogz_rs::data::Entity>,
 ) {
-    server.broadcast_chan1(&Client {
-        client_num: actor_cn as i32,
-        packet: channel1::DelCube { sel: sel.clone() },
-    });
-    server.broadcast_chan1(&channel1::ClipboardServer {
-        client_num: actor_cn as i32,
-        unpack_len,
-        data: data.to_vec(),
-    });
-    server.broadcast_chan1(&Client {
-        client_num: actor_cn as i32,
-        packet: channel1::PasteServer { sel: sel.clone() },
-    });
+    if !data.is_empty() {
+        server.broadcast_chan1(&Client {
+            client_num: actor_cn as i32,
+            packet: channel1::DelCube { sel: sel.clone() },
+        });
+        server.broadcast_chan1(&channel1::ClipboardServer {
+            client_num: actor_cn as i32,
+            unpack_len,
+            data: data.to_vec(),
+        });
+        server.broadcast_chan1(&Client {
+            client_num: actor_cn as i32,
+            packet: channel1::PasteServer { sel: sel.clone() },
+        });
+    }
     for (&ent_id, ent) in entities {
         let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
             .unwrap_or(sauer_proto::data::EntityType::Empty);
