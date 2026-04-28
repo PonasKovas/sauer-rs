@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 use crate::map_state::get_server_state;
 use cube_string::IntoCubeStringLossy;
+use crate::trap::root_base_of;
 use flate2::{Compression, write::ZlibEncoder};
+use ogz_rs::data::VSlot;
 use rand::seq::SliceRandom;
 use sauer_proto::{
     Client, channel1,
@@ -30,6 +32,131 @@ pub(crate) fn pack_cube(node: &sauer_map::Node, out: &mut Vec<u8>) {
             }
         }
     }
+}
+
+fn write_putint(out: &mut Vec<u8>, n: i32) {
+    if n < 128 && n > -127 {
+        out.push(n as u8);
+    } else if n < 0x8000 && n >= -0x8000 {
+        out.push(0x80);
+        out.push(n as u8);
+        out.push((n >> 8) as u8);
+    } else {
+        out.push(0x81);
+        out.push(n as u8);
+        out.push((n >> 8) as u8);
+        out.push((n >> 16) as u8);
+        out.push((n >> 24) as u8);
+    }
+}
+
+fn write_putuint(out: &mut Vec<u8>, n: i32) {
+    if n < 0 || n >= (1 << 21) {
+        out.push(0x80 | (n as u8 & 0x7F));
+        out.push(0x80 | ((n >> 7) as u8 & 0x7F));
+        out.push(0x80 | ((n >> 14) as u8 & 0x7F));
+        out.push((n >> 21) as u8);
+    } else if n < (1 << 7) {
+        out.push(n as u8);
+    } else if n < (1 << 14) {
+        out.push(0x80 | (n as u8 & 0x7F));
+        out.push((n >> 7) as u8);
+    } else {
+        out.push(0x80 | (n as u8 & 0x7F));
+        out.push(0x80 | ((n >> 7) as u8 & 0x7F));
+        out.push((n >> 14) as u8);
+    }
+}
+
+fn write_sendstring(out: &mut Vec<u8>, s: &cube_string::CubeString) {
+    for &c in s.as_bytes() {
+        write_putint(out, c as i32);
+    }
+    write_putint(out, 0);
+}
+
+fn pack_vslot(out: &mut Vec<u8>, vs: &VSlot) {
+    if !vs.params.is_empty() {
+        for p in &vs.params {
+            out.push(0); // VSLOT_SHPARAM
+            write_sendstring(out, &p.name);
+            for i in 0..4 {
+                out.extend_from_slice(&p.values[i].to_le_bytes());
+            }
+        }
+    }
+    if let Some(scale) = vs.scale {
+        out.push(1); // VSLOT_SCALE
+        out.extend_from_slice(&scale.to_le_bytes());
+    }
+    if let Some(rotation) = vs.rotation {
+        out.push(2); // VSLOT_ROTATION
+        write_putint(out, rotation);
+    }
+    if let Some(offset) = vs.offset {
+        out.push(3); // VSLOT_OFFSET
+        write_putint(out, offset.0);
+        write_putint(out, offset.1);
+    }
+    if let Some(scroll) = vs.scroll {
+        out.push(4); // VSLOT_SCROLL
+        out.extend_from_slice(&scroll.0.to_le_bytes());
+        out.extend_from_slice(&scroll.1.to_le_bytes());
+    }
+    if let Some(layer) = vs.layer {
+        out.push(5); // VSLOT_LAYER
+        write_putuint(out, layer);
+    }
+    if let Some(alpha) = vs.alpha {
+        out.push(6); // VSLOT_ALPHA
+        out.extend_from_slice(&alpha.0.to_le_bytes());
+        out.extend_from_slice(&alpha.1.to_le_bytes());
+    }
+    if let Some(color) = vs.color {
+        out.push(7); // VSLOT_COLOR
+        out.extend_from_slice(&color.0.to_le_bytes());
+        out.extend_from_slice(&color.1.to_le_bytes());
+        out.extend_from_slice(&color.2.to_le_bytes());
+    }
+    out.push(0xFF);
+}
+
+fn collect_textures(node: &sauer_map::Node, used: &mut std::collections::HashSet<u16>) {
+    match node {
+        sauer_map::Node::Leaf(cube) => {
+            for &tex in &cube.textures {
+                used.insert(tex);
+            }
+        }
+        sauer_map::Node::Branch(children) => {
+            for child in children.as_ref() {
+                collect_textures(child, used);
+            }
+        }
+    }
+}
+
+pub(crate) fn pack_vslots(nodes: &[sauer_map::Node], vslots: &[Option<VSlot>], out: &mut Vec<u8>) {
+    let mut used = std::collections::HashSet::new();
+    for node in nodes {
+        collect_textures(node, &mut used);
+    }
+    
+    let mut used_vec: Vec<u16> = used.into_iter().collect();
+    used_vec.sort_unstable();
+    
+    for idx in used_vec {
+        if let Some(Some(vs)) = vslots.get(idx as usize) {
+            let slot_index = root_base_of(vslots, idx) as u16;
+            
+            // vslothdr { ushort index; ushort slot; }
+            out.extend_from_slice(&idx.to_le_bytes());
+            out.extend_from_slice(&slot_index.to_le_bytes());
+            
+            pack_vslot(out, vs);
+        }
+    }
+    out.extend_from_slice(&0u32.to_le_bytes());
 }
 
 /// Recursively splits the map into volumetric chunks bounded by `chunk_size_limit`
@@ -237,6 +364,7 @@ pub(crate) fn generate_clipboard_for_region(
     padded_min: [i32; 3],
     s: [i32; 3],
     grid: i32,
+    vslots: &[Option<VSlot>],
 ) -> (i32, Vec<u8>) {
     let [sx, sy, sz] = s;
     let mut uncompressed = Vec::new();
@@ -244,6 +372,8 @@ pub(crate) fn generate_clipboard_for_region(
     for &v in &[sx, sy, sz] { uncompressed.extend_from_slice(&v.to_le_bytes()); }
     uncompressed.extend_from_slice(&grid.to_le_bytes());
     uncompressed.extend_from_slice(&0i32.to_le_bytes()); // Orient::Left
+
+    let mut nodes = Vec::with_capacity((sx * sy * sz) as usize);
 
     // Pack matching vanilla loopxyz for Orient::Left: outer xi(z), middle zi(y), inner yi(x).
     for xi in 0..sx {
@@ -256,10 +386,12 @@ pub(crate) fn generate_clipboard_for_region(
                 ];
                 let node = extract_node_at(root, [0, 0, 0], world_size, cell_pos, grid);
                 pack_cube(&node, &mut uncompressed);
+                nodes.push(node);
             }
         }
     }
-    uncompressed.extend_from_slice(&0u32.to_le_bytes()); // vslots terminator
+    
+    pack_vslots(&nodes, vslots, &mut uncompressed);
 
     let unpack_len = uncompressed.len() as i32;
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
@@ -276,6 +408,7 @@ pub(crate) fn generate_region_clipboard(
     world_size: i32,
     min: [i32; 3],
     max: [i32; 3],
+    vslots: &[Option<VSlot>],
 ) -> ([i32; 3], [i32; 3], i32, i32, Vec<u8>) {
     let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
     let grid = choose_grid(spans);
@@ -289,7 +422,7 @@ pub(crate) fn generate_region_clipboard(
     let sz = (padded_max[2] - padded_min[2]) / grid;
     let s = [sx, sy, sz];
 
-    let (unpack_len, compressed) = generate_clipboard_for_region(root, world_size, padded_min, s, grid);
+    let (unpack_len, compressed) = generate_clipboard_for_region(root, world_size, padded_min, s, grid, vslots);
 
     eprintln!(
         "[clipboard] grid={} cells={}x{}x{}={} uncompressed={} compressed={}",
@@ -300,7 +433,7 @@ pub(crate) fn generate_region_clipboard(
 }
 
 /// Generates a valid zlib-compressed clipboard packet enclosing the given node
-pub(crate) fn generate_clipboard(node: &sauer_map::Node, size: i32) -> (i32, Vec<u8>) {
+pub(crate) fn generate_clipboard(node: &sauer_map::Node, size: i32, vslots: &[Option<VSlot>]) -> (i32, Vec<u8>) {
     let mut uncompressed = Vec::new();
     for val in [0i32, 0, 0] {
         uncompressed.extend_from_slice(&val.to_le_bytes());
@@ -312,7 +445,8 @@ pub(crate) fn generate_clipboard(node: &sauer_map::Node, size: i32) -> (i32, Vec
     uncompressed.extend_from_slice(&0i32.to_le_bytes());
 
     pack_cube(node, &mut uncompressed);
-    uncompressed.extend_from_slice(&0u32.to_le_bytes());
+    
+    pack_vslots(&[node.clone()], vslots, &mut uncompressed);
 
     let unpack_len = uncompressed.len() as i32;
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
@@ -353,6 +487,8 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
 
     let mut rng = rand::thread_rng();
     chunks.shuffle(&mut rng);
+    
+    let vslots = state.meta.vslots.clone();
 
     drop(state_lock);
 
@@ -397,7 +533,7 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
         sleep(Duration::from_millis(500)).await;
 
         for (pos, size, chunk_node) in chunks {
-            let (unpack_len, compressed) = generate_clipboard(&chunk_node, size);
+            let (unpack_len, compressed) = generate_clipboard(&chunk_node, size, &vslots);
 
             server.broadcast_chan1(&channel1::ClipboardServer {
                 client_num: cn as i32,

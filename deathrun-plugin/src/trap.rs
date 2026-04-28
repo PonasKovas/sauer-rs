@@ -179,7 +179,10 @@ fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
     // Type bytes: 1=SCALE, 6=ALPHA, 7=COLOR
     let color_bytes: Vec<u8> = BUTTON_COLOR.iter().flat_map(|f| f.to_le_bytes()).collect();
-    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect();
+    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32]
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect();
     let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
 
     // All faces: alpha + color
@@ -648,28 +651,44 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     eprintln!(
         "[trap] {} changed cells, tight bounds {:?}..{:?}",
-        trigger_cells.len(), tight_min, tight_max
+        trigger_cells.len(),
+        tight_min,
+        tight_max
     );
 
     // Trigger clipboard from the post-edit map (tight bounds only).
     let (clip_pos, clip_s, clip_grid, trigger_unpack_len, trigger_compressed) =
         crate::recreate::generate_region_clipboard(
-            &current_map.world.root, world_size, tight_min, tight_max,
+            &current_map.world.root,
+            world_size,
+            tight_min,
+            tight_max,
+            &current_map.meta.vslots,
         );
 
     // Restore clipboard from original map (same region dims for consistency).
-    let (restore_unpack_len, restore_compressed) =
-        crate::recreate::generate_clipboard_for_region(
-            &edit_state.original_map.world.root, world_size, clip_pos, clip_s, clip_grid,
-        );
+    let (restore_unpack_len, restore_compressed) = crate::recreate::generate_clipboard_for_region(
+        &edit_state.original_map.world.root,
+        world_size,
+        clip_pos,
+        clip_s,
+        clip_grid,
+        &edit_state.original_map.meta.vslots,
+    );
 
     // Collect trigger entities (post-edit state).
     let mut trigger_entities = std::collections::HashMap::new();
     for &ent_id in &edit_state.affected_entities {
-        let ent = current_map.world.entities.get(ent_id).cloned()
+        let ent = current_map
+            .world
+            .entities
+            .get(ent_id)
+            .cloned()
             .unwrap_or(ogz_rs::data::Entity {
-                position: [0.0; 3], attrs: [0; 5],
-                ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![],
+                position: [0.0; 3],
+                attrs: [0; 5],
+                ent_type: ogz_rs::data::EntityType::Empty,
+                extra_data: vec![],
             });
         trigger_entities.insert(ent_id, ent);
     }
@@ -686,18 +705,32 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     let target_cn = ctx.cn() as i32;
     let region_sel = SelInfo {
-        o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-        s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+        o: sauer_proto::data::Vec3 {
+            x: clip_pos[0],
+            y: clip_pos[1],
+            z: clip_pos[2],
+        },
+        s: sauer_proto::data::Vec3 {
+            x: clip_s[0],
+            y: clip_s[1],
+            z: clip_s[2],
+        },
         grid: clip_grid,
         orient: sauer_proto::data::Orient::Left,
-        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+        cx: 0,
+        cxs: 0,
+        cy: 0,
+        cys: 0,
+        corner: 0,
     };
 
     // Revert clients: DelCube the tight region then paste original state.
     // (pasteblock in vanilla is transparent — needs DelCube first to clear added geometry.)
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::DelCube { sel: region_sel.clone() },
+        packet: channel1::DelCube {
+            sel: region_sel.clone(),
+        },
     });
     server.broadcast_chan1(&channel1::ClipboardServer {
         client_num: target_cn,
@@ -719,7 +752,9 @@ pub fn cmd_endtrap(ctx: &Context) {
                 packet: channel1::EditEnt {
                     ent_id: ent_id as i32,
                     pos: sauer_proto::data::Vec3 {
-                        x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                        x: ent.position[0],
+                        y: ent.position[1],
+                        z: ent.position[2],
                     },
                     type_: ent_type,
                     attrs: ent.attrs.map(|x| x as i32),
@@ -781,13 +816,22 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 None => return,
             };
             let (unpack_len, compressed) = crate::recreate::generate_clipboard_for_region(
-                &map.world.root, map.world.size, clip_pos, clip_s, clip_grid,
+                &map.world.root,
+                map.world.size,
+                clip_pos,
+                clip_s,
+                clip_grid,
+                &map.meta.vslots,
             );
             let cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
                 .iter()
                 .map(|&(pos, size, _)| {
                     let node = crate::recreate::extract_node_at(
-                        &map.world.root, [0, 0, 0], map.world.size, pos, size,
+                        &map.world.root,
+                        [0, 0, 0],
+                        map.world.size,
+                        pos,
+                        size,
                     );
                     (pos, size, node)
                 })
@@ -801,17 +845,33 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         };
 
         let region_sel = SelInfo {
-            o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-            s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+            o: sauer_proto::data::Vec3 {
+                x: clip_pos[0],
+                y: clip_pos[1],
+                z: clip_pos[2],
+            },
+            s: sauer_proto::data::Vec3 {
+                x: clip_s[0],
+                y: clip_s[1],
+                z: clip_s[2],
+            },
             grid: clip_grid,
             orient: sauer_proto::data::Orient::Left,
-            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
         };
 
         // --- 1. APPLY TRIGGER ---
         broadcast_region(
-            &server_clone, actor_cn,
-            &region_sel, trigger_unpack_len, &trigger_clipboard, &trigger_entities,
+            &server_clone,
+            actor_cn,
+            &region_sel,
+            trigger_unpack_len,
+            &trigger_clipboard,
+            &trigger_entities,
         );
         apply_cells_to_map(&server_clone, &trigger_cells, &trigger_entities);
 
@@ -819,8 +879,12 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
         // --- 2. RESTORE PRE-TRIGGER STATE ---
         broadcast_region(
-            &server_clone, actor_cn,
-            &region_sel, restore_unpack_len, &restore_compressed, &restore_entities,
+            &server_clone,
+            actor_cn,
+            &region_sel,
+            restore_unpack_len,
+            &restore_compressed,
+            &restore_entities,
         );
         apply_cells_to_map(&server_clone, &restore_cells, &restore_entities);
 
@@ -862,7 +926,9 @@ fn broadcast_region(
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
                 pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                    x: ent.position[0],
+                    y: ent.position[1],
+                    z: ent.position[2],
                 },
                 type_: ent_type,
                 attrs: ent.attrs.map(|x| x as i32),
@@ -888,7 +954,9 @@ fn apply_cells_to_map(
             map.handle_edit_ent(&channel1::EditEnt {
                 ent_id: ent_id as i32,
                 pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0], y: ent.position[1], z: ent.position[2],
+                    x: ent.position[0],
+                    y: ent.position[1],
+                    z: ent.position[2],
                 },
                 type_: ent_type,
                 attrs: ent.attrs.map(|x| x as i32),
@@ -898,3 +966,22 @@ fn apply_cells_to_map(
     }
 }
 
+/// Walks the prev chain from `idx` to the root base (None) slot index.
+pub(crate) fn root_base_of(vslots: &[Option<ogz_rs::data::VSlot>], idx: u16) -> i32 {
+    let mut current = idx as i32;
+    loop {
+        match vslots.get(current as usize) {
+            Some(Some(vs)) => {
+                let p = vs.prev;
+                if p < 0 || (p as usize) >= vslots.len() {
+                    return current;
+                }
+                match &vslots[p as usize] {
+                    None => return p,
+                    Some(_) => current = p,
+                }
+            }
+            _ => return current,
+        }
+    }
+}

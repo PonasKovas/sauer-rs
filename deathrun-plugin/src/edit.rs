@@ -405,11 +405,11 @@ impl Plugin for DeathrunEdit {
             uncompressed.extend_from_slice(&packet.sel.grid.to_le_bytes());
             uncompressed.extend_from_slice(&(packet.sel.orient as i32).to_le_bytes());
 
-            for node in extracted_nodes {
-                crate::recreate::pack_cube(&node, &mut uncompressed);
+            for node in extracted_nodes.iter() {
+                crate::recreate::pack_cube(node, &mut uncompressed);
             }
 
-            uncompressed.extend_from_slice(&0u32.to_le_bytes());
+            crate::recreate::pack_vslots(&extracted_nodes, &state.meta.vslots, &mut uncompressed);
 
             use flate2::{Compression, write::ZlibEncoder};
             use std::io::Write;
