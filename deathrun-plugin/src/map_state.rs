@@ -676,11 +676,11 @@ pub struct Trap {
     /// Per-cell changes — used for accurate server-map updates (no region collateral).
     pub trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
 
-    /// Entity state when the trap is active.
-    pub trigger_entities: HashMap<usize, ogz_rs::data::Entity>,
+    /// Modified existing entities when the trap is active.
+    pub trigger_entities_mod: Vec<(usize, ogz_rs::data::Entity)>,
 
-    /// Entity IDs touched during recording — restore state captured dynamically at trigger time.
-    pub affected_entity_ids: HashSet<usize>,
+    /// Newly added entities when the trap is active.
+    pub trigger_entities_add: Vec<ogz_rs::data::Entity>,
 
     /// DelCube/paste region — tight diff bounds, grid-aligned.
     pub clip_pos: [i32; 3],
