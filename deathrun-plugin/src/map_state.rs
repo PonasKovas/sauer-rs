@@ -690,6 +690,14 @@ pub struct Trap {
     pub time: u32,
     pub timeout: u32,
 
+    /// Base-state geometry — what to restore when resetting from an active trap.
+    /// Populated by `cmd_endtrap`; mirrors the original map's cells/entities for
+    /// the trap region so a save-while-active can be correctly recovered on load.
+    pub reset_clipboard: Vec<u8>,
+    pub reset_unpack_len: i32,
+    pub reset_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
+    pub reset_entities_mod: Vec<(usize, ogz_rs::data::Entity)>,
+
     pub is_active: bool,
 }
 

@@ -232,27 +232,54 @@ impl Plugin for DeathrunEdit {
         }
 
         match MapState::from_bytes(data) {
-            Ok(state) => {
+            Ok(mut state) => {
                 let world_size = state.world.size;
-                state.update_server_items(server);
 
                 let mut loaded_traps = Vec::new();
                 match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(&state.world, crate::trap::TRAP_STORE_VERSION) {
                     Ok(Some(stored_traps)) => {
+                        for st in &stored_traps {
+                            st.apply_reset_to_world(&mut state.world);
+                        }
                         loaded_traps = stored_traps.into_iter().filter_map(|st| st.into_trap()).collect();
                         info!("Loaded {} traps from map entity store", loaded_traps.len());
                     }
                     Ok(None) => {}
-                    Err(e) => tracing::warn!("Failed to load trap store: {}", e),
+                    Err(crate::entity_store::StoreError::VersionMismatch { expected, found }) => {
+                        let msg = format!(
+                            "Trap store format mismatch (map has v{found}, server expects v{expected}). \
+                             Traps not loaded — please re-record traps and resave the map."
+                        );
+                        warn!("{msg}");
+                        server.broadcast_chan1(&ServMsg { text: msg.lossy_cubestring() });
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to load trap store: {e}. Traps not loaded.");
+                        warn!("{msg}");
+                        server.broadcast_chan1(&ServMsg { text: msg.lossy_cubestring() });
+                    }
                 }
 
+                state.update_server_items(server);
                 {
                     let mut s = get_server_state(server).write().unwrap();
                     s.map = Some(state);
                     s.traps = loaded_traps;
                     s.waiting_for_map = false;
+                    // Reset button vslot colors in the map before it's sent to clients.
+                    let traps_snapshot: Vec<_> = s.traps.iter().map(|t| (t.button_pos, t.button_size, t.button_orient)).collect();
+                    if let Some(map) = s.map.as_mut() {
+                        crate::trap::reset_button_colors_by_pos(map, &traps_snapshot);
+                    }
                 }
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
+
+                // Push the corrected map to every connected client, including the uploader
+                // so they see the reset trap geometry instead of the triggered state they sent.
+                for client_cn in server.client_cns() {
+                    send_map_to(server, client_cn);
+                }
+
                 server.set_spectator(cn, false);
                 server.send_chan1(
                     cn,

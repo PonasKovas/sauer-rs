@@ -37,9 +37,10 @@ pub struct TrapEditState {
     pub affected_entities: std::collections::HashSet<usize>,
 }
 
-pub const TRAP_STORE_VERSION: u8 = 1;
+pub const TRAP_STORE_VERSION: u8 = 2;
 
 #[derive(Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct StoredEntity {
     pub position: [f32; 3],
     pub attrs: [i16; 5],
@@ -82,31 +83,36 @@ pub struct StoredTrap {
     pub clip_pos: [i32; 3],
     pub clip_s: [i32; 3],
     pub clip_grid: i32,
-    #[serde(default = "default_trap_time")]
     pub time: u32,
-    #[serde(default)]
     pub timeout: u32,
-}
-
-fn default_trap_time() -> u32 {
-    2000
+    /// Base-state geometry — always applied on load to guarantee the map starts
+    /// in a clean (pre-trigger) state regardless of whether a trap was active
+    /// when the map was saved.
+    pub reset_clipboard: Vec<u8>,
+    pub reset_unpack_len: i32,
+    pub reset_cells: Vec<([i32; 3], i32, Vec<u8>)>,
+    pub reset_entities_mod: Vec<(usize, StoredEntity)>,
 }
 
 impl StoredTrap {
     pub fn from_trap(t: &Trap) -> Self {
-        let mut trigger_cells = Vec::new();
-        for &(pos, size, ref node) in &t.trigger_cells {
-            let mut packed = Vec::new();
-            crate::recreate::pack_cube(node, &mut packed);
-            trigger_cells.push((pos, size, packed));
-        }
+        let pack_cells = |cells: &Vec<([i32; 3], i32, sauer_map::Node)>| {
+            cells
+                .iter()
+                .map(|(pos, size, node)| {
+                    let mut packed = Vec::new();
+                    crate::recreate::pack_cube(node, &mut packed);
+                    (*pos, *size, packed)
+                })
+                .collect::<Vec<_>>()
+        };
         Self {
             button_pos: t.button_pos,
             button_size: t.button_size,
             button_orient: t.button_orient,
             trigger_clipboard: t.trigger_clipboard.clone(),
             trigger_unpack_len: t.trigger_unpack_len,
-            trigger_cells,
+            trigger_cells: pack_cells(&t.trigger_cells),
             trigger_entities_mod: t
                 .trigger_entities_mod
                 .iter()
@@ -122,23 +128,35 @@ impl StoredTrap {
             clip_grid: t.clip_grid,
             time: t.time,
             timeout: t.timeout,
+            reset_clipboard: t.reset_clipboard.clone(),
+            reset_unpack_len: t.reset_unpack_len,
+            reset_cells: pack_cells(&t.reset_cells),
+            reset_entities_mod: t
+                .reset_entities_mod
+                .iter()
+                .map(|(id, e)| (*id, StoredEntity::from(e)))
+                .collect(),
         }
     }
 
     pub fn into_trap(self) -> Option<Trap> {
-        let mut trigger_cells = Vec::new();
-        for (pos, size, packed) in self.trigger_cells {
-            let mut ptr = 0;
-            let node = crate::block_reader::unpack_cube(&packed, &mut ptr)?;
-            trigger_cells.push((pos, size, node));
-        }
+        let unpack_cells =
+            |packed_cells: Vec<([i32; 3], i32, Vec<u8>)>| -> Option<Vec<([i32; 3], i32, sauer_map::Node)>> {
+                let mut out = Vec::new();
+                for (pos, size, packed) in packed_cells {
+                    let mut ptr = 0;
+                    let node = crate::block_reader::unpack_cube(&packed, &mut ptr)?;
+                    out.push((pos, size, node));
+                }
+                Some(out)
+            };
         Some(Trap {
             button_pos: self.button_pos,
             button_size: self.button_size,
             button_orient: self.button_orient,
             trigger_clipboard: self.trigger_clipboard,
             trigger_unpack_len: self.trigger_unpack_len,
-            trigger_cells,
+            trigger_cells: unpack_cells(self.trigger_cells)?,
             trigger_entities_mod: self
                 .trigger_entities_mod
                 .into_iter()
@@ -154,8 +172,54 @@ impl StoredTrap {
             clip_grid: self.clip_grid,
             time: self.time,
             timeout: self.timeout,
+            reset_clipboard: self.reset_clipboard,
+            reset_unpack_len: self.reset_unpack_len,
+            reset_cells: unpack_cells(self.reset_cells).unwrap_or_default(),
+            reset_entities_mod: self
+                .reset_entities_mod
+                .into_iter()
+                .map(|(id, e)| (id, e.into_entity()))
+                .collect(),
             is_active: false,
         })
+    }
+
+    /// Apply the stored reset state directly to `world`, restoring the base
+    /// (pre-trigger) geometry and entity values.  Safe to call even when the
+    /// trap was not active — the reset state equals the base state, so the
+    /// operation is idempotent.
+    pub fn apply_reset_to_world(&self, world: &mut sauer_map::World) {
+        for (pos, size, packed) in &self.reset_cells {
+            let mut ptr = 0;
+            if let Some(node) = crate::block_reader::unpack_cube(packed, &mut ptr) {
+                world.set_node_at(*pos, *size, node);
+            }
+        }
+        for (id, stored_ent) in &self.reset_entities_mod {
+            if *id < world.entities.len() {
+                world.entities[*id] = stored_ent.clone().into_entity();
+            }
+        }
+    }
+}
+
+/// Reset every trap button to the ready color directly in `map`'s vslot table.
+/// Takes `(button_pos, button_size, button_orient)` tuples to avoid a split-borrow
+/// when the caller holds `traps` and `map` in the same struct.
+pub fn reset_button_colors_by_pos(
+    map: &mut crate::map_state::MapState,
+    buttons: &[([i32; 3], i32, u8)],
+) {
+    for &(pos, size, orient) in buttons {
+        let (adj_sel, _) = get_selections(pos, size, orient);
+        let color_bytes: Vec<u8> = BUTTON_COLOR_READY.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let data = pack_vslot_bytes(&[(7, &color_bytes)]);
+        map.handle_edit_v_slot(&sauer_proto::channel1::EditVSlot {
+            sel: adj_sel,
+            delta: 0,
+            all_faces: true,
+            extra_data: data,
+        });
     }
 }
 
@@ -461,6 +525,10 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
             clip_grid: t.clip_grid,
             time: t.time,
             timeout: t.timeout,
+            reset_clipboard: t.reset_clipboard.clone(),
+            reset_unpack_len: t.reset_unpack_len,
+            reset_cells: t.reset_cells.clone(),
+            reset_entities_mod: t.reset_entities_mod.clone(),
             is_active: t.is_active,
         })
         .collect();
@@ -658,6 +726,10 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         clip_grid: 1,
         time: 2000,
         timeout: 0,
+        reset_clipboard: Vec::new(),
+        reset_unpack_len: 0,
+        reset_cells: Vec::new(),
+        reset_entities_mod: Vec::new(),
         is_active: false,
     });
     drop(state);
@@ -915,6 +987,34 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
     }
 
+    // Compute reset (base-state) data so a save-while-active can be recovered.
+    let reset_cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
+        .iter()
+        .map(|&(pos, size, _)| {
+            let node = crate::recreate::extract_node_at(
+                &edit_state.original_map.world.root,
+                [0, 0, 0],
+                world_size,
+                pos,
+                size,
+            );
+            (pos, size, node)
+        })
+        .collect();
+    let reset_entities_mod: Vec<(usize, ogz_rs::data::Entity)> = trigger_entities_mod
+        .iter()
+        .map(|(id, _)| {
+            let ent = edit_state
+                .original_map
+                .world
+                .entities
+                .get(*id)
+                .cloned()
+                .unwrap_or_else(|| empty_ent.clone());
+            (*id, ent)
+        })
+        .collect();
+
     let trap = &mut state.traps[edit_state.trap_idx];
     trap.trigger_clipboard = trigger_compressed;
     trap.trigger_unpack_len = trigger_unpack_len;
@@ -924,6 +1024,10 @@ pub fn cmd_endtrap(ctx: &Context) {
     trap.clip_pos = clip_pos;
     trap.clip_s = clip_s;
     trap.clip_grid = clip_grid;
+    trap.reset_clipboard = restore_compressed.clone();
+    trap.reset_unpack_len = restore_unpack_len;
+    trap.reset_cells = reset_cells;
+    trap.reset_entities_mod = reset_entities_mod;
 
     let target_cn = ctx.cn() as i32;
     let region_sel = SelInfo {
