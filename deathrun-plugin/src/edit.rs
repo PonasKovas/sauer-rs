@@ -226,9 +226,21 @@ impl Plugin for DeathrunEdit {
             Ok(state) => {
                 let world_size = state.world.size;
                 state.update_server_items(server);
+
+                let mut loaded_traps = Vec::new();
+                match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(&state.world, crate::trap::TRAP_STORE_VERSION) {
+                    Ok(Some(stored_traps)) => {
+                        loaded_traps = stored_traps.into_iter().filter_map(|st| st.into_trap()).collect();
+                        info!("Loaded {} traps from map entity store", loaded_traps.len());
+                    }
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("Failed to load trap store: {}", e),
+                }
+
                 {
                     let mut s = get_server_state(server).write().unwrap();
                     s.map = Some(state);
+                    s.traps = loaded_traps;
                     s.waiting_for_map = false;
                 }
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");

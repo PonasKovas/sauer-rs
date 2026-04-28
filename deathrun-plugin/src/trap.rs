@@ -8,6 +8,7 @@ use sauer_proto::{
     data::{EditFaceMode, Orient, SelInfo, Vec3},
 };
 use sauer_server::{Server, plugin::Context};
+use serde::{Deserialize, Serialize};
 
 pub const BUTTON_SIZE: i32 = 8;
 pub const BUTTON_FRONT_TEX: u16 = 248;
@@ -34,6 +35,133 @@ pub struct TrapEditState {
     pub trap_idx: usize,
     pub original_map: Box<crate::map_state::MapState>,
     pub affected_entities: std::collections::HashSet<usize>,
+}
+
+pub const TRAP_STORE_VERSION: u8 = 1;
+
+#[derive(Serialize, Deserialize)]
+pub struct StoredEntity {
+    pub position: [f32; 3],
+    pub attrs: [i16; 5],
+    pub ent_type: u8,
+    pub extra_data: Vec<u8>,
+}
+
+impl From<&ogz_rs::data::Entity> for StoredEntity {
+    fn from(ent: &ogz_rs::data::Entity) -> Self {
+        Self {
+            position: ent.position,
+            attrs: ent.attrs,
+            ent_type: u8::from(ent.ent_type),
+            extra_data: ent.extra_data.clone(),
+        }
+    }
+}
+
+impl StoredEntity {
+    fn into_entity(self) -> ogz_rs::data::Entity {
+        ogz_rs::data::Entity {
+            position: self.position,
+            attrs: self.attrs,
+            ent_type: ogz_rs::data::EntityType::from(self.ent_type),
+            extra_data: self.extra_data,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StoredTrap {
+    pub button_pos: [i32; 3],
+    pub button_size: i32,
+    pub button_orient: u8,
+    pub trigger_clipboard: Vec<u8>,
+    pub trigger_unpack_len: i32,
+    pub trigger_cells: Vec<([i32; 3], i32, Vec<u8>)>,
+    pub trigger_entities_mod: Vec<(usize, StoredEntity)>,
+    pub trigger_entities_add: Vec<StoredEntity>,
+    pub clip_pos: [i32; 3],
+    pub clip_s: [i32; 3],
+    pub clip_grid: i32,
+}
+
+impl StoredTrap {
+    pub fn from_trap(t: &Trap) -> Self {
+        let mut trigger_cells = Vec::new();
+        for &(pos, size, ref node) in &t.trigger_cells {
+            let mut packed = Vec::new();
+            crate::recreate::pack_cube(node, &mut packed);
+            trigger_cells.push((pos, size, packed));
+        }
+        Self {
+            button_pos: t.button_pos,
+            button_size: t.button_size,
+            button_orient: t.button_orient,
+            trigger_clipboard: t.trigger_clipboard.clone(),
+            trigger_unpack_len: t.trigger_unpack_len,
+            trigger_cells,
+            trigger_entities_mod: t
+                .trigger_entities_mod
+                .iter()
+                .map(|(id, e)| (*id, StoredEntity::from(e)))
+                .collect(),
+            trigger_entities_add: t
+                .trigger_entities_add
+                .iter()
+                .map(|e| StoredEntity::from(e))
+                .collect(),
+            clip_pos: t.clip_pos,
+            clip_s: t.clip_s,
+            clip_grid: t.clip_grid,
+        }
+    }
+
+    pub fn into_trap(self) -> Option<Trap> {
+        let mut trigger_cells = Vec::new();
+        for (pos, size, packed) in self.trigger_cells {
+            let mut ptr = 0;
+            let node = crate::block_reader::unpack_cube(&packed, &mut ptr)?;
+            trigger_cells.push((pos, size, node));
+        }
+        Some(Trap {
+            button_pos: self.button_pos,
+            button_size: self.button_size,
+            button_orient: self.button_orient,
+            trigger_clipboard: self.trigger_clipboard,
+            trigger_unpack_len: self.trigger_unpack_len,
+            trigger_cells,
+            trigger_entities_mod: self
+                .trigger_entities_mod
+                .into_iter()
+                .map(|(id, e)| (id, e.into_entity()))
+                .collect(),
+            trigger_entities_add: self
+                .trigger_entities_add
+                .into_iter()
+                .map(|e| e.into_entity())
+                .collect(),
+            clip_pos: self.clip_pos,
+            clip_s: self.clip_s,
+            clip_grid: self.clip_grid,
+            is_active: false,
+        })
+    }
+}
+
+pub fn sync_traps_to_map(server: &Server, cn: u32) {
+    let mut state = get_server_state(server).write().unwrap();
+    let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
+
+    if let Some(map) = state.map.as_mut() {
+        if let Err(e) = crate::entity_store::write(
+            &mut map.world,
+            server,
+            cn,
+            &stored_traps,
+            TRAP_STORE_VERSION,
+        ) {
+            tracing::error!("Failed to save trap store: {}", e);
+        }
+    }
 }
 
 // ─── Intersection checks ──────────────────────────────────────────────────────
@@ -418,6 +546,8 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     map.world.fill(&sel, false);
     drop(state);
 
+    sync_traps_to_map(server, cn);
+
     let (adj_sel, _) = get_selections(trap.button_pos, trap.button_size, trap.button_orient);
     server.broadcast_chan1(&Client {
         client_num: cn as i32,
@@ -515,6 +645,8 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         is_active: false,
     });
     drop(state);
+
+    sync_traps_to_map(&server, cn);
 
     tokio::spawn(async move {
         use tokio::time::{Duration, sleep};
@@ -768,7 +900,12 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     // Restore entities to pre-recording state.
     for &ent_id in &edit_state.affected_entities {
-        let ent = edit_state.original_map.world.entities.get(ent_id).unwrap_or(&empty_ent);
+        let ent = edit_state
+            .original_map
+            .world
+            .entities
+            .get(ent_id)
+            .unwrap_or(&empty_ent);
         let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
             .unwrap_or(sauer_proto::data::EntityType::Empty);
         server.broadcast_chan1(&Client {
@@ -796,6 +933,9 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
         map.update_server_items(server);
     }
+    drop(state);
+
+    sync_traps_to_map(server, ctx.cn());
 
     server.broadcast_chan1(&ServMsg {
         text: "Trap recorded and area reverted successfully.".lossy_cubestring(),
@@ -812,7 +952,10 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     if trap.is_active {
         return;
     }
-    if trap.trigger_clipboard.is_empty() && trap.trigger_entities_mod.is_empty() && trap.trigger_entities_add.is_empty() {
+    if trap.trigger_clipboard.is_empty()
+        && trap.trigger_entities_mod.is_empty()
+        && trap.trigger_entities_add.is_empty()
+    {
         return;
     }
 
@@ -1020,8 +1163,23 @@ fn apply_and_broadcast(
     }
 
     for ent in entities_add {
-        let ent_id = map.world.entities.len();
-        map.world.entities.push(ent.clone());
+        let mut found_empty = None;
+        for (i, e) in map.world.entities.iter().enumerate() {
+            if e.ent_type == ogz_rs::data::EntityType::Empty {
+                found_empty = Some(i);
+                break;
+            }
+        }
+
+        let ent_id = if let Some(i) = found_empty {
+            map.world.entities[i] = ent.clone();
+            i
+        } else {
+            let i = map.world.entities.len();
+            map.world.entities.push(ent.clone());
+            i
+        };
+
         assigned_ids.push(ent_id);
         broadcast_ents.push((ent_id, ent.clone()));
     }
