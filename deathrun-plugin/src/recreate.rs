@@ -428,10 +428,6 @@ pub(crate) fn generate_region_clipboard(
 
     let (unpack_len, compressed) = generate_clipboard_for_region(root, world_size, padded_min, s, grid, vslots);
 
-    eprintln!(
-        "[clipboard] grid={} cells={}x{}x{}={} uncompressed={} compressed={}",
-        grid, sx, sy, sz, sx * sy * sz, unpack_len, compressed.len()
-    );
 
     (padded_min, s, grid, unpack_len, compressed)
 }

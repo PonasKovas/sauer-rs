@@ -925,12 +925,6 @@ pub fn cmd_endtrap(ctx: &Context) {
     let tight_min = std::array::from_fn(|i| tight_min[i].max(0));
     let tight_max = std::array::from_fn(|i| tight_max[i].min(world_size));
 
-    eprintln!(
-        "[trap] {} changed cells, tight bounds {:?}..{:?}",
-        trigger_cells.len(),
-        tight_min,
-        tight_max
-    );
 
     let (
         clip_pos,

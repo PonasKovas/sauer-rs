@@ -76,20 +76,16 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        let (pos, is_editing) = match server.players.try_get(cn) {
-            Some(p) => (p.position, p.client_state == ClientState::Editing),
+        let pos = match server.players.try_get(cn) {
+            Some(p) => {
+                if p.client_state == ClientState::Spectator {
+                    server.send_chan1(cn, &ServMsg { text: "Cannot use trap commands while spectating.".lossy_cubestring() });
+                    return;
+                }
+                p.position
+            }
             None => return,
         };
-
-        if !is_editing {
-            server.send_chan1(
-                cn,
-                &ServMsg {
-                    text: "Must be in edit mode to place/configure a trap.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
 
         let dir = match self.player_dirs.get(&cn) {
             Some(d) => *d,
