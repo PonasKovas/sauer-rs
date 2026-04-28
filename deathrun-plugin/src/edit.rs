@@ -58,9 +58,12 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
-        let cmd = packet.text.strip_colors().to_utf8();
-        let cmd = cmd.trim();
-        if cmd != "#newtrap" && cmd != "#deltrap" && cmd != "#settrap" && cmd != "#endtrap" {
+        let text = packet.text.strip_colors().to_utf8();
+        let text = text.trim();
+        let mut parts = text.split_whitespace();
+        let cmd = parts.next().unwrap_or("");
+        
+        if cmd != "#newtrap" && cmd != "#deltrap" && cmd != "#settrap" && cmd != "#endtrap" && cmd != "#traptime" && cmd != "#traptimeout" {
             return;
         }
         ctx.cancel();
@@ -129,6 +132,12 @@ impl Plugin for DeathrunEdit {
             cmd_newtrap(ctx, hit_pt, hit_orient);
         } else if cmd == "#settrap" {
             crate::trap::cmd_settrap(ctx, hit_pt);
+        } else if cmd == "#traptime" {
+            let time = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(2000);
+            crate::trap::cmd_traptime(ctx, hit_pt, time);
+        } else if cmd == "#traptimeout" {
+            let timeout = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            crate::trap::cmd_traptimeout(ctx, hit_pt, timeout);
         }
     }
 

@@ -82,6 +82,14 @@ pub struct StoredTrap {
     pub clip_pos: [i32; 3],
     pub clip_s: [i32; 3],
     pub clip_grid: i32,
+    #[serde(default = "default_trap_time")]
+    pub time: u32,
+    #[serde(default)]
+    pub timeout: u32,
+}
+
+fn default_trap_time() -> u32 {
+    2000
 }
 
 impl StoredTrap {
@@ -112,6 +120,8 @@ impl StoredTrap {
             clip_pos: t.clip_pos,
             clip_s: t.clip_s,
             clip_grid: t.clip_grid,
+            time: t.time,
+            timeout: t.timeout,
         }
     }
 
@@ -142,6 +152,8 @@ impl StoredTrap {
             clip_pos: self.clip_pos,
             clip_s: self.clip_s,
             clip_grid: self.clip_grid,
+            time: self.time,
+            timeout: self.timeout,
             is_active: false,
         })
     }
@@ -447,6 +459,8 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
             clip_pos: t.clip_pos,
             clip_s: t.clip_s,
             clip_grid: t.clip_grid,
+            time: t.time,
+            timeout: t.timeout,
             is_active: t.is_active,
         })
         .collect();
@@ -642,6 +656,8 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         clip_pos: [0; 3],
         clip_s: [1; 3],
         clip_grid: 1,
+        time: 2000,
+        timeout: 0,
         is_active: false,
     });
     drop(state);
@@ -684,6 +700,58 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
 }
 
 // ─── Recording & Replaying Logic ─────────────────────────────────────────────
+
+pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
+    let cn = ctx.cn();
+    let server = ctx.server();
+    let mut state = get_server_state(server).write().unwrap();
+
+    let trap_idx = state.traps.iter().position(|t| {
+        (0..3).all(|ax| {
+            hit_pt[ax] >= t.button_pos[ax] as f32
+                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+        })
+    });
+
+    let trap_idx = match trap_idx {
+        None => {
+            server.send_chan1(cn, &ServMsg { text: "Not looking at a trap.".lossy_cubestring() });
+            return;
+        }
+        Some(i) => i,
+    };
+    
+    state.traps[trap_idx].time = time;
+    server.send_chan1(cn, &ServMsg { text: format!("Trap time set to {}ms.", time).lossy_cubestring() });
+    drop(state);
+    sync_traps_to_map(server, cn);
+}
+
+pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
+    let cn = ctx.cn();
+    let server = ctx.server();
+    let mut state = get_server_state(server).write().unwrap();
+
+    let trap_idx = state.traps.iter().position(|t| {
+        (0..3).all(|ax| {
+            hit_pt[ax] >= t.button_pos[ax] as f32
+                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+        })
+    });
+
+    let trap_idx = match trap_idx {
+        None => {
+            server.send_chan1(cn, &ServMsg { text: "Not looking at a trap.".lossy_cubestring() });
+            return;
+        }
+        Some(i) => i,
+    };
+    
+    state.traps[trap_idx].timeout = timeout;
+    server.send_chan1(cn, &ServMsg { text: format!("Trap timeout set to {}ms.", timeout).lossy_cubestring() });
+    drop(state);
+    sync_traps_to_map(server, cn);
+}
 
 pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     let cn = ctx.cn();
@@ -973,6 +1041,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     let button_pos = trap.button_pos;
     let button_size = trap.button_size;
     let button_orient = trap.button_orient;
+    let trap_time = trap.time;
 
     drop(state);
 
@@ -1061,7 +1130,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             BUTTON_COLOR_ACTIVE,
         );
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(trap_time as u64)).await;
 
         // --- 2. RESTORE PRE-TRIGGER STATE ---
         let empty_ent = ogz_rs::data::Entity {

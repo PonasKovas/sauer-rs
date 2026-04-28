@@ -687,6 +687,9 @@ pub struct Trap {
     pub clip_s: [i32; 3],
     pub clip_grid: i32,
 
+    pub time: u32,
+    pub timeout: u32,
+
     pub is_active: bool,
 }
 
