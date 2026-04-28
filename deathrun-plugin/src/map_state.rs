@@ -10,7 +10,7 @@ use sauer_proto::{
 };
 use sauer_server::plugin::Context;
 use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::RwLock;
 use tracing::error;
 
@@ -393,7 +393,7 @@ impl MapState {
         let all_faces = packet.all_faces;
 
         // Collect unique texture indices from the selection.
-        let mut unique_textures: HashSet<u16> = HashSet::new();
+        let mut unique_textures: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
         self.world.edit_sel(&sel, |node, _| {
             if let Node::Leaf(cube) = node {
                 for face in 0usize..6 {
@@ -405,6 +405,8 @@ impl MapState {
         });
 
         // Resolve (or create) a vslot for each unique base texture.
+        // Process in sorted order so new vslot indices are allocated deterministically,
+        // matching the order the vanilla client encounters faces (lowest texture index first).
         let vslots = &mut self.meta.vslots;
         let tex_remap: HashMap<u16, u16> = unique_textures
             .into_iter()

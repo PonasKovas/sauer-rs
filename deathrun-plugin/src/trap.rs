@@ -384,6 +384,8 @@ fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 }
 
 fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
+    // Apply in the exact same order as build_setup_packets broadcasts to clients,
+    // so the server's vslot indices stay in sync with what clients create locally.
     // Type bytes: 1=SCALE, 6=ALPHA, 7=COLOR
     let color_bytes: Vec<u8> = BUTTON_COLOR_READY
         .iter()
@@ -395,22 +397,28 @@ fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
         .collect();
     let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
 
-    // All faces: alpha + color
-    let data1 = pack_vslot_bytes(&[(6, &alpha_bytes), (7, &color_bytes)]);
+    // Step 1: color, all faces
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
         delta: 0,
         all_faces: true,
-        extra_data: data1,
+        extra_data: pack_vslot_bytes(&[(7, &color_bytes)]),
     });
 
-    // Front face only: scale + alpha + color (merged on top of what all_faces just set)
-    let data2 = pack_vslot_bytes(&[(1, &scale_bytes), (6, &alpha_bytes), (7, &color_bytes)]);
+    // Step 2: scale, front face only
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
         delta: 0,
         all_faces: false,
-        extra_data: data2,
+        extra_data: pack_vslot_bytes(&[(1, &scale_bytes)]),
+    });
+
+    // Step 3: alpha, all faces
+    map.handle_edit_v_slot(&channel1::EditVSlot {
+        sel: sel.clone(),
+        delta: 0,
+        all_faces: true,
+        extra_data: pack_vslot_bytes(&[(6, &alpha_bytes)]),
     });
 }
 
