@@ -391,43 +391,144 @@ impl MapState {
         let sel = to_selection(&packet.sel);
         let orient = sel.orient as usize;
         let all_faces = packet.all_faces;
+        let delta = packet.delta != 0;
 
-        // Collect unique texture indices in first-encounter face order (face 0 of first
-        // cube first, etc.). This matches vanilla's client-side traversal order so new
-        // vslot indices are allocated identically on both sides.
-        let mut seen: HashSet<u16> = HashSet::new();
-        let mut ordered_textures: Vec<u16> = Vec::new();
-        self.world.edit_sel(&sel, |node, _| {
-            if let Node::Leaf(cube) = node {
-                for face in 0usize..6 {
-                    if all_faces || face == orient {
-                        let t = cube.textures[face];
+        fn crushededge(e: u8, dc: usize) -> bool {
+            if dc != 0 { e == 0 } else { e == 0x88 }
+        }
+
+        fn touchingface(cube: &sauer_map::Cube, orient: usize) -> bool {
+            let d = orient >> 1;
+            let dc = orient & 1;
+            let mut touching = true;
+            for x in 0..2 {
+                for y in 0..2 {
+                    let edge_idx = (d << 2) + (y << 1) + x;
+                    let edge = cube.edges[edge_idx];
+                    let val = if dc == 1 { edge >> 4 } else { edge & 0x0F };
+                    if val != (if dc == 1 { 8 } else { 0 }) {
+                        touching = false;
+                    }
+                }
+            }
+            touching
+        }
+
+        fn visible_orient(cube: &sauer_map::Cube, orient: usize) -> usize {
+            const FACEEDGESIDX: [[usize; 4]; 6] = [
+                [ 4,  5,  8, 10 ],
+                [ 6,  7,  9, 11 ],
+                [ 8,  9,  0, 2 ],
+                [ 10, 11, 1, 3 ],
+                [ 0,  1,  4, 6 ],
+                [ 2,  3,  5, 7 ],
+            ];
+
+            for i in 0..2 {
+                let a = FACEEDGESIDX[orient][i * 2 + 0];
+                let b = FACEEDGESIDX[orient][i * 2 + 1];
+                for j in 0..2 {
+                    if crushededge(cube.edges[a], j) && crushededge(cube.edges[b], j) && touchingface(cube, orient) {
+                        return ((a >> 2) << 1) + j;
+                    }
+                }
+            }
+            orient
+        }
+
+        fn collect_vslots(node: &Node, orient: usize, all_faces: bool, seen: &mut HashSet<u16>, ordered: &mut Vec<u16>) {
+            match node {
+                Node::Branch(children) => {
+                    for child in children.as_ref() {
+                        collect_vslots(child, orient, all_faces, seen, ordered);
+                    }
+                }
+                Node::Leaf(cube) => {
+                    if all_faces {
+                        for face in 0usize..6 {
+                            let t = cube.textures[face];
+                            if seen.insert(t) {
+                                ordered.push(t);
+                            }
+                        }
+                    } else {
+                        let i = visible_orient(cube, orient);
+                        let t = cube.textures[i];
                         if seen.insert(t) {
-                            ordered_textures.push(t);
+                            ordered.push(t);
                         }
                     }
                 }
             }
-        });
+        }
 
-        // Resolve (or create) a vslot for each unique base texture in encounter order.
+        fn apply_vslots(node: &mut Node, orient: usize, all_faces: bool, remap: &HashMap<u16, u16>) {
+            match node {
+                Node::Branch(children) => {
+                    for child in children.iter_mut() {
+                        apply_vslots(child, orient, all_faces, remap);
+                    }
+                }
+                Node::Leaf(cube) => {
+                    if all_faces {
+                        for face in 0usize..6 {
+                            if let Some(&new_t) = remap.get(&cube.textures[face]) {
+                                cube.textures[face] = new_t;
+                            }
+                        }
+                    } else {
+                        let i = visible_orient(cube, orient);
+                        if let Some(&new_t) = remap.get(&cube.textures[i]) {
+                            cube.textures[i] = new_t;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut seen: HashSet<u16> = HashSet::new();
+        let mut ordered_textures: Vec<u16> = Vec::new();
+
+        let orient_dim = (sel.orient >> 1) as usize;
+        let dc = (sel.orient & 1) as usize;
+        let r_dim = [1, 2, 0][orient_dim];
+        let c_dim = [2, 0, 1][orient_dim];
+        let d_dim = [0, 1, 2][orient_dim];
+
+        let s_r = sel.s[r_dim];
+        let s_c = sel.s[c_dim];
+        let s_d = sel.s[d_dim];
+
+        for z in 0..s_d {
+            for y in 0..s_c {
+                for x in 0..s_r {
+                    let mut pos = [0; 3];
+                    pos[r_dim] = x * sel.grid;
+                    pos[c_dim] = y * sel.grid;
+                    pos[d_dim] = dc as i32 * (s_d - 1) * sel.grid;
+                    pos[0] += sel.o[0];
+                    pos[1] += sel.o[1];
+                    pos[2] += sel.o[2];
+                    if dc == 1 {
+                        pos[d_dim] -= z * sel.grid;
+                    } else {
+                        pos[d_dim] += z * sel.grid;
+                    }
+
+                    let node = crate::recreate::extract_node_at(&self.world.root, [0,0,0], self.world.size, pos, sel.grid);
+                    collect_vslots(&node, orient, all_faces, &mut seen, &mut ordered_textures);
+                }
+            }
+        }
+
         let vslots = &mut self.meta.vslots;
         let tex_remap: HashMap<u16, u16> = ordered_textures
             .iter()
-            .map(|&t| (t, resolve_vslot(vslots, t, &ds)))
+            .map(|&t| (t, resolve_vslot(vslots, t, &ds, delta)))
             .collect();
 
-        // Apply the remapped texture indices.
         self.world.edit_sel(&sel, |node, _| {
-            if let Node::Leaf(cube) = node {
-                for face in 0usize..6 {
-                    if all_faces || face == orient {
-                        if let Some(&new_t) = tex_remap.get(&cube.textures[face]) {
-                            cube.textures[face] = new_t;
-                        }
-                    }
-                }
-            }
+            apply_vslots(node, orient, all_faces, &tex_remap);
         });
         self.invalidate_cache();
     }
@@ -628,43 +729,107 @@ fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
 /// Creates a merged vslot by accumulating `base_tex`'s existing properties
 /// then overriding with `ds`. Sets `prev` to the chain tail to keep all vslots
 /// reachable during OGZ load (avoids orphaning when multiple vslots share a root).
-fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlot) -> u16 {
+fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlot, delta: bool) -> u16 {
     if vslots.len() <= base_tex as usize {
         vslots.resize(base_tex as usize + 1, None);
     }
     let root = root_base_of(vslots, base_tex);
     let chain_tail = find_chain_tail(vslots, root);
 
-    let (acc_params, acc_scale, acc_rotation, acc_offset, acc_scroll, acc_layer, acc_alpha, acc_color) =
-        match vslots.get(base_tex as usize) {
-            Some(Some(existing)) => (
-                existing.params.clone(),
-                existing.scale,
-                existing.rotation,
-                existing.offset,
-                existing.scroll,
-                existing.layer,
-                existing.alpha,
-                existing.color,
-            ),
-            _ => (vec![], None, None, None, None, None, None, None),
-        };
+    let existing = vslots.get(base_tex as usize).cloned().flatten().unwrap_or_default();
 
-    let new_vs = VSlot {
-        prev: chain_tail,
-        params: if !ds.params.is_empty() {
-            ds.params.iter().map(|(n, v)| VSlotParam { name: n.clone(), values: *v }).collect()
+    let mut new_vs = existing.clone();
+    new_vs.prev = chain_tail;
+
+    if !ds.params.is_empty() {
+        if delta {
+            for (n, v) in &ds.params {
+                if let Some(p) = new_vs.params.iter_mut().find(|p| p.name == *n) {
+                    p.values = *v;
+                } else {
+                    new_vs.params.push(VSlotParam { name: n.clone(), values: *v });
+                }
+            }
         } else {
-            acc_params
-        },
-        scale: ds.scale.or(acc_scale),
-        rotation: ds.rotation.or(acc_rotation),
-        offset: ds.offset.or(acc_offset),
-        scroll: ds.scroll.or(acc_scroll),
-        layer: ds.layer.or(acc_layer),
-        alpha: ds.alpha.or(acc_alpha),
-        color: ds.color.or(acc_color),
-    };
+            new_vs.params = ds.params.iter().map(|(n, v)| VSlotParam { name: n.clone(), values: *v }).collect();
+        }
+    }
+
+    if let Some(ds_scale) = ds.scale {
+        if delta {
+            let cur = new_vs.scale.unwrap_or(1.0);
+            new_vs.scale = Some((cur * ds_scale).clamp(1.0 / 8.0, 8.0));
+        } else {
+            new_vs.scale = Some(ds_scale);
+        }
+    }
+
+    if let Some(ds_rot) = ds.rotation {
+        if delta {
+            let cur = new_vs.rotation.unwrap_or(0);
+            new_vs.rotation = Some((cur + ds_rot).clamp(0, 7));
+        } else {
+            new_vs.rotation = Some(ds_rot);
+        }
+    }
+
+    if let Some(ds_offset) = ds.offset {
+        if delta {
+            let cur = new_vs.offset.unwrap_or((0, 0));
+            new_vs.offset = Some((cur.0 + ds_offset.0, cur.1 + ds_offset.1));
+        } else {
+            new_vs.offset = Some(ds_offset);
+        }
+    }
+
+    if let Some(ds_scroll) = ds.scroll {
+        if delta {
+            let cur = new_vs.scroll.unwrap_or((0.0, 0.0));
+            new_vs.scroll = Some((cur.0 + ds_scroll.0, cur.1 + ds_scroll.1));
+        } else {
+            new_vs.scroll = Some(ds_scroll);
+        }
+    }
+
+    if let Some(ds_layer) = ds.layer {
+        new_vs.layer = Some(ds_layer);
+    }
+
+    if let Some(ds_alpha) = ds.alpha {
+        new_vs.alpha = Some(ds_alpha);
+    }
+
+    if let Some(ds_color) = ds.color {
+        if delta {
+            let cur = new_vs.color.unwrap_or((1.0, 1.0, 1.0));
+            new_vs.color = Some((cur.0 * ds_color.0, cur.1 * ds_color.1, cur.2 * ds_color.2));
+        } else {
+            new_vs.color = Some(ds_color);
+        }
+    }
+
+    for (i, vs_opt) in vslots.iter().enumerate() {
+        if let Some(vs) = vs_opt {
+            if root_base_of(vslots, i as u16) == root {
+                if vs.params == new_vs.params &&
+                   vs.scale == new_vs.scale &&
+                   vs.rotation == new_vs.rotation &&
+                   vs.offset == new_vs.offset &&
+                   vs.scroll == new_vs.scroll &&
+                   vs.layer == new_vs.layer &&
+                   vs.alpha == new_vs.alpha &&
+                   vs.color == new_vs.color {
+                    return i as u16;
+                }
+            }
+        }
+    }
+
+    // AVOID CLASHING WITH CLIENT BASE TEXTURES!
+    if vslots.len() < 0x4000 {
+        vslots.resize(0x4000, None);
+    }
+
     let idx = vslots.len();
     vslots.push(Some(new_vs));
     idx as u16
