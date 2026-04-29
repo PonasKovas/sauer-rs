@@ -586,6 +586,7 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
         corner: 0,
     };
     map.world.fill(&sel, false);
+    map.world.set_material(&sel, Default::default());
     drop(state);
 
     sync_traps_to_map(server, cn);
