@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 glam.workspace = true
 ogz-rs.workspace = true
+cube-string.workspace = true
+flate2.workspace = true
+serde = { workspace = true, features = ["derive"] }
+bitcode.workspace = true
+thiserror.workspace = true

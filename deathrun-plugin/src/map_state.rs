@@ -1,16 +1,15 @@
-use cube_string::{CubeString, IntoCubeStringLossy};
+use cube_string::IntoCubeStringLossy;
 use ogz_rs::{
     OgzMap,
-    data::{MapConfig, VSlot, VSlotParam, Variable},
+    data::{MapConfig, Variable},
 };
-use sauer_map::{Cube, Node, Selection, World};
+use sauer_map::{Selection, World};
 use sauer_proto::{
     channel1, channel2,
     data::{EditVarValue, SelInfo},
 };
 use sauer_server::plugin::Context;
 use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
-use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 use tracing::error;
 
@@ -29,6 +28,16 @@ pub fn to_selection(sel: &SelInfo) -> Selection {
     }
 }
 
+pub fn to_sel_info(sel: &Selection) -> SelInfo {
+    SelInfo {
+        o: sauer_proto::data::Vec3 { x: sel.o[0], y: sel.o[1], z: sel.o[2] },
+        s: sauer_proto::data::Vec3 { x: sel.s[0], y: sel.s[1], z: sel.s[2] },
+        grid: sel.grid,
+        orient: sauer_proto::data::Orient::try_from(sel.orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
+        cx: sel.cx, cxs: sel.cxs, cy: sel.cy, cys: sel.cys, corner: sel.corner,
+    }
+}
+
 #[derive(Clone)]
 pub struct MapState {
     pub world: World,
@@ -44,31 +53,7 @@ impl MapState {
     /// bottom 4 root octants solid (texture 1), top 4 empty air.
     /// `world_size` is the actual size (e.g. 1024), not the log2 scale.
     pub fn new_empty(world_size: i32) -> Self {
-        let solid = Node::Leaf(Cube {
-            edges: [0x80; 12],
-            textures: [1; 6],
-            material: Default::default(),
-        });
-        let air = Node::Leaf(Cube {
-            edges: [0x00; 12],
-            textures: [0; 6],
-            material: Default::default(),
-        });
-        let root = Node::Branch(Box::new([
-            solid.clone(),
-            solid.clone(),
-            solid.clone(),
-            solid,
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air,
-        ]));
-        let world = World {
-            size: world_size,
-            root,
-            entities: vec![],
-        };
+        let world = World::new_empty(world_size);
         let meta = OgzMap {
             version: 33,
             world_size,
@@ -88,34 +73,9 @@ impl MapState {
         Self { world, meta }
     }
 
-    /// Enlarge the map: wrap the current world as the bottom-left octant of a
-    /// doubled world, filling the remaining 3 bottom octants with solid and
-    /// the 4 top octants with empty air (mirrors Sauerbraten's `enlargemap`).
     pub fn enlarge(&mut self) {
-        let new_size = self.world.size * 2;
-        let solid = Node::Leaf(Cube {
-            edges: [0x80; 12],
-            textures: [1; 6],
-            material: Default::default(),
-        });
-        let air = Node::Leaf(Cube {
-            edges: [0x00; 12],
-            textures: [0; 6],
-            material: Default::default(),
-        });
-        let old_root = std::mem::replace(&mut self.world.root, air.clone());
-        self.world.root = Node::Branch(Box::new([
-            old_root,
-            solid.clone(),
-            solid.clone(),
-            solid,
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air,
-        ]));
-        self.world.size = new_size;
-        self.meta.world_size = new_size;
+        self.world.enlarge();
+        self.meta.world_size = self.world.size;
         self.meta.octree = self.world.to_ogz_octree();
     }
 
@@ -210,97 +170,25 @@ impl MapState {
     pub fn handle_edit_mat(&mut self, packet: &channel1::EditMat) {
         let packet_mat = packet.mat as i32;
         let packet_filter = packet.filter as i32;
-
-        let mut filtermat = 0u16;
-        let mut filtermask = 0u16;
-        let mut filtergeom = 0i32;
+        let mut filtermat = 0u16; let mut filtermask = 0u16; let mut filtergeom = 0i32;
 
         if packet_filter >= 0 {
-            filtermat = (packet_filter & 0xFFFF) as u16;
-            filtergeom = packet_filter & !0xFFFF;
-            filtermask = if (filtermat & 0x1F) != 0 {
-                0x1F
-            } else if (filtermat & 0xE0) != 0 {
-                0xE0
-            } else {
-                filtermat
-            };
+            filtermat = (packet_filter & 0xFFFF) as u16; filtergeom = packet_filter & !0xFFFF;
+            filtermask = if (filtermat & 0x1F) != 0 { 0x1F } else if (filtermat & 0xE0) != 0 { 0xE0 } else { filtermat };
         }
 
         let (matid, matmask) = if packet_mat < 0 {
-            let matmask = if (filtermat & 0x1C) == 0x0C {
-                filtermask & !0xE0u16
-            } else if (filtermat & 0x1C) == 0x08 {
-                filtermask & !0x0100u16
-            } else {
-                filtermask
-            };
+            let matmask = if (filtermat & 0x1C) == 0x0C { filtermask & !0xE0u16 } else if (filtermat & 0x1C) == 0x08 { filtermask & !0x0100u16 } else { filtermask };
             (0u16, matmask)
         } else {
             let mut matid = (packet_mat & 0xFFFF) as u16;
-            let matmask = if (matid & 0x1F) != 0 {
-                0
-            } else if (matid & 0xE0) != 0 {
-                !0xE0u16
-            } else {
-                !matid
-            };
-            if (matid & 0x1C) == 0x0C {
-                matid |= 0x40;
-            }
-            if (matid & 0x1C) == 0x08 {
-                matid |= 0x0100;
-            }
+            let matmask = if (matid & 0x1F) != 0 { 0 } else if (matid & 0xE0) != 0 { !0xE0u16 } else { !matid };
+            if (matid & 0x1C) == 0x0C { matid |= 0x40; } if (matid & 0x1C) == 0x08 { matid |= 0x0100; }
             (matid, matmask)
         };
 
-        self.world.edit_sel(&to_selection(&packet.sel), |node, _| {
-            Self::apply_mat(node, matid, matmask, filtermat, filtermask, filtergeom);
-        });
+        self.world.apply_material(&to_selection(&packet.sel), matid, matmask, filtermat, filtermask, filtergeom);
         self.invalidate_cache();
-    }
-
-    fn apply_mat(
-        node: &mut Node,
-        matid: u16,
-        matmask: u16,
-        filtermat: u16,
-        filtermask: u16,
-        filtergeom: i32,
-    ) {
-        const EDITMATF_EMPTY: i32 = 0x10000;
-        const EDITMATF_NOTEMPTY: i32 = 0x20000;
-        const EDITMATF_SOLID: i32 = 0x30000;
-        const EDITMATF_NOTSOLID: i32 = 0x40000;
-        const MAT_AIR: u16 = 0;
-
-        match node {
-            Node::Leaf(cube) => {
-                let current = cube.material.to_bits();
-                if (current & filtermask) == filtermat {
-                    let skip = match filtergeom {
-                        EDITMATF_EMPTY => !cube.is_empty(),
-                        EDITMATF_NOTEMPTY => cube.is_empty(),
-                        EDITMATF_SOLID => !cube.is_entirely_solid(),
-                        EDITMATF_NOTSOLID => cube.is_entirely_solid(),
-                        _ => false,
-                    };
-                    if !skip {
-                        let new_bits = if matid != MAT_AIR {
-                            (current & matmask) | matid
-                        } else {
-                            MAT_AIR
-                        };
-                        cube.material = ogz_rs::data::Material::from_bits(new_bits);
-                    }
-                }
-            }
-            Node::Branch(children) => {
-                for child in children.iter_mut() {
-                    Self::apply_mat(child, matid, matmask, filtermat, filtermask, filtergeom);
-                }
-            }
-        }
     }
 
     pub fn handle_del_cube(&mut self, packet: &channel1::DelCube) {
@@ -309,33 +197,9 @@ impl MapState {
     }
 
     pub fn handle_replace(&mut self, packet: &channel1::Replace) {
-        let old_tex = packet.old_tex as u16;
-        let new_tex = packet.new_tex as u16;
-        if packet.in_sel != 0 {
-            self.world.edit_sel(&to_selection(&packet.sel), |node, _| {
-                Self::replace_tex(node, old_tex, new_tex);
-            });
-        } else {
-            Self::replace_tex(&mut self.world.root, old_tex, new_tex);
-        }
+        let sel = if packet.in_sel != 0 { Some(to_selection(&packet.sel)) } else { None };
+        self.world.replace_texture(sel.as_ref(), packet.old_tex as u16, packet.new_tex as u16);
         self.invalidate_cache();
-    }
-
-    fn replace_tex(node: &mut Node, old_tex: u16, new_tex: u16) {
-        match node {
-            Node::Leaf(cube) => {
-                for t in &mut cube.textures {
-                    if *t == old_tex {
-                        *t = new_tex;
-                    }
-                }
-            }
-            Node::Branch(children) => {
-                for child in children.iter_mut() {
-                    Self::replace_tex(child, old_tex, new_tex);
-                }
-            }
-        }
     }
 
     pub fn handle_edit_face(&mut self, packet: &channel1::EditFace) {
@@ -404,473 +268,25 @@ impl MapState {
     }
 
     pub fn handle_paste(&mut self, packet: &channel1::PasteClient, clipboard_data: &[u8]) {
-        if let Some((cb_sel, nodes)) = crate::block_reader::decode_clipboard(clipboard_data) {
+        if let Some((cb_sel, nodes)) = sauer_map::clipboard::decode_clipboard(clipboard_data) {
             let mut paste_sel = packet.sel.clone();
-            paste_sel.s = cb_sel.s; // Paste dynamically replaces bounds...
-            paste_sel.orient = cb_sel.orient; // ...and mapping orientation.
-            self.apply_block(&paste_sel, nodes, true); // Paste is natively transparent
+            paste_sel.s = sauer_proto::data::Vec3 { x: cb_sel.s[0], y: cb_sel.s[1], z: cb_sel.s[2] };
+            paste_sel.orient = sauer_proto::data::Orient::try_from(cb_sel.orient as i32).unwrap_or(sauer_proto::data::Orient::Left);
+            self.apply_block(&paste_sel, nodes, true);
         }
     }
 
     pub fn handle_undo_redo(&mut self, data: &[u8]) {
-        if let Some((sel, nodes)) = crate::block_reader::decode_undo(data) {
-            self.apply_block(&sel, nodes, false);
+        if let Some((sel, nodes)) = sauer_map::clipboard::decode_undo(data) {
+            self.apply_block(&to_sel_info(&sel), nodes, false);
         }
     }
 
     pub fn handle_edit_v_slot(&mut self, packet: &channel1::EditVSlot) {
-        if packet.extra_data.is_empty() {
-            return;
-        }
-        let Some(ds) = parse_packed_vslot(&packet.extra_data) else {
-            return;
-        };
-
-        let sel = to_selection(&packet.sel);
-        let orient = sel.orient as usize;
-        let all_faces = packet.all_faces;
-        let delta = packet.delta != 0;
-
-        fn crushededge(e: u8, dc: usize) -> bool {
-            if dc != 0 { e == 0 } else { e == 0x88 }
-        }
-
-        fn touchingface(cube: &sauer_map::Cube, orient: usize) -> bool {
-            let d = orient >> 1;
-            let dc = orient & 1;
-            let mut touching = true;
-            for x in 0..2 {
-                for y in 0..2 {
-                    let edge_idx = (d << 2) + (y << 1) + x;
-                    let edge = cube.edges[edge_idx];
-                    let val = if dc == 1 { edge >> 4 } else { edge & 0x0F };
-                    if val != (if dc == 1 { 8 } else { 0 }) {
-                        touching = false;
-                    }
-                }
-            }
-            touching
-        }
-
-        fn visible_orient(cube: &sauer_map::Cube, orient: usize) -> usize {
-            const FACEEDGESIDX: [[usize; 4]; 6] = [
-                [ 4,  5,  8, 10 ],
-                [ 6,  7,  9, 11 ],
-                [ 8,  9,  0, 2 ],
-                [ 10, 11, 1, 3 ],
-                [ 0,  1,  4, 6 ],
-                [ 2,  3,  5, 7 ],
-            ];
-
-            for i in 0..2 {
-                let a = FACEEDGESIDX[orient][i * 2 + 0];
-                let b = FACEEDGESIDX[orient][i * 2 + 1];
-                for j in 0..2 {
-                    if crushededge(cube.edges[a], j) && crushededge(cube.edges[b], j) && touchingface(cube, orient) {
-                        return ((a >> 2) << 1) + j;
-                    }
-                }
-            }
-            orient
-        }
-
-        fn collect_vslots(node: &Node, orient: usize, all_faces: bool, seen: &mut HashSet<u16>, ordered: &mut Vec<u16>) {
-            match node {
-                Node::Branch(children) => {
-                    for child in children.as_ref() {
-                        collect_vslots(child, orient, all_faces, seen, ordered);
-                    }
-                }
-                Node::Leaf(cube) => {
-                    if all_faces {
-                        for face in 0usize..6 {
-                            let t = cube.textures[face];
-                            if seen.insert(t) {
-                                ordered.push(t);
-                            }
-                        }
-                    } else {
-                        let i = visible_orient(cube, orient);
-                        let t = cube.textures[i];
-                        if seen.insert(t) {
-                            ordered.push(t);
-                        }
-                    }
-                }
-            }
-        }
-
-        fn apply_vslots(node: &mut Node, orient: usize, all_faces: bool, remap: &HashMap<u16, u16>) {
-            match node {
-                Node::Branch(children) => {
-                    for child in children.iter_mut() {
-                        apply_vslots(child, orient, all_faces, remap);
-                    }
-                }
-                Node::Leaf(cube) => {
-                    if all_faces {
-                        for face in 0usize..6 {
-                            if let Some(&new_t) = remap.get(&cube.textures[face]) {
-                                cube.textures[face] = new_t;
-                            }
-                        }
-                    } else {
-                        let i = visible_orient(cube, orient);
-                        if let Some(&new_t) = remap.get(&cube.textures[i]) {
-                            cube.textures[i] = new_t;
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut seen: HashSet<u16> = HashSet::new();
-        let mut ordered_textures: Vec<u16> = Vec::new();
-
-        let orient_dim = (sel.orient >> 1) as usize;
-        let dc = (sel.orient & 1) as usize;
-        let r_dim = [1, 2, 0][orient_dim];
-        let c_dim = [2, 0, 1][orient_dim];
-        let d_dim = [0, 1, 2][orient_dim];
-
-        let s_r = sel.s[r_dim];
-        let s_c = sel.s[c_dim];
-        let s_d = sel.s[d_dim];
-
-        for z in 0..s_d {
-            for y in 0..s_c {
-                for x in 0..s_r {
-                    let mut pos = [0; 3];
-                    pos[r_dim] = x * sel.grid;
-                    pos[c_dim] = y * sel.grid;
-                    pos[d_dim] = dc as i32 * (s_d - 1) * sel.grid;
-                    pos[0] += sel.o[0];
-                    pos[1] += sel.o[1];
-                    pos[2] += sel.o[2];
-                    if dc == 1 {
-                        pos[d_dim] -= z * sel.grid;
-                    } else {
-                        pos[d_dim] += z * sel.grid;
-                    }
-
-                    let node = crate::recreate::extract_node_at(&self.world.root, [0,0,0], self.world.size, pos, sel.grid);
-                    collect_vslots(&node, orient, all_faces, &mut seen, &mut ordered_textures);
-                }
-            }
-        }
-
-        let vslots = &mut self.meta.vslots;
-        let tex_remap: HashMap<u16, u16> = ordered_textures
-            .iter()
-            .map(|&t| (t, resolve_vslot(vslots, t, &ds, delta)))
-            .collect();
-
-        self.world.edit_sel(&sel, |node, _| {
-            apply_vslots(node, orient, all_faces, &tex_remap);
-        });
+        if packet.extra_data.is_empty() { return; }
+        self.world.apply_vslots(&to_selection(&packet.sel), packet.all_faces, packet.delta != 0, &packet.extra_data, &mut self.meta.vslots);
         self.invalidate_cache();
     }
-}
-
-// ── VSlot tracking ───────────────────────────────────────────────────────────
-
-struct PackedVSlot {
-    params: Vec<(CubeString, [f32; 4])>,
-    scale: Option<f32>,
-    rotation: Option<i32>,
-    offset: Option<(i32, i32)>,
-    scroll: Option<(f32, f32)>,
-    layer: Option<i32>,
-    alpha: Option<(f32, f32)>,
-    color: Option<(f32, f32, f32)>,
-}
-
-/// Reads a Sauerbraten varint (putint encoding) from a byte slice.
-fn read_varint(data: &[u8], pos: &mut usize) -> Option<i32> {
-    if *pos >= data.len() {
-        return None;
-    }
-    let c = data[*pos] as i8;
-    *pos += 1;
-    match c {
-        -128 => {
-            if *pos + 2 > data.len() {
-                return None;
-            }
-            let v = i16::from_le_bytes([data[*pos], data[*pos + 1]]) as i32;
-            *pos += 2;
-            Some(v)
-        }
-        -127 => {
-            if *pos + 4 > data.len() {
-                return None;
-            }
-            let v = i32::from_le_bytes(data[*pos..*pos + 4].try_into().ok()?);
-            *pos += 4;
-            Some(v)
-        }
-        _ => Some(c as i32),
-    }
-}
-
-fn read_f32_le(data: &[u8], pos: &mut usize) -> Option<f32> {
-    if *pos + 4 > data.len() {
-        return None;
-    }
-    let v = f32::from_le_bytes(data[*pos..*pos + 4].try_into().ok()?);
-    *pos += 4;
-    Some(v)
-}
-
-/// Reads a sendstring-encoded name: each char is a putint, null-terminated.
-fn read_sendstring(data: &[u8], pos: &mut usize) -> Option<CubeString> {
-    let mut bytes = Vec::new();
-    loop {
-        let c = read_varint(data, pos)? as u8;
-        if c == 0 {
-            break;
-        }
-        bytes.push(c);
-    }
-    Some(CubeString::from_bytes(bytes))
-}
-
-/// Reads a Sauerbraten getuint (putuint encoding) from a byte slice.
-fn read_getuint(data: &[u8], pos: &mut usize) -> Option<i32> {
-    let b0 = *data.get(*pos)? as i32;
-    *pos += 1;
-    if b0 & 0x80 == 0 {
-        return Some(b0);
-    }
-    let b1 = *data.get(*pos)? as i32;
-    *pos += 1;
-    let mut n = b0 + (b1 << 7) - 0x80;
-    if n & (1 << 14) != 0 {
-        let b2 = *data.get(*pos)? as i32;
-        *pos += 1;
-        n += (b2 << 14) - (1 << 14);
-    }
-    if n & (1 << 21) != 0 {
-        let b3 = *data.get(*pos)? as i32;
-        *pos += 1;
-        n += (b3 << 21) - (1 << 21);
-    }
-    if n & (1 << 28) != 0 {
-        n |= !0i32 << 28;
-    }
-    Some(n)
-}
-
-/// Parses a packvslot-encoded blob from an N_EDITVSLOT extra_data buffer.
-///
-/// Format: repeated (type_byte, data...) entries terminated by 0xFF.
-/// Type bytes: 0=SHPARAM, 1=SCALE, 2=ROTATION, 3=OFFSET, 4=SCROLL,
-///             5=LAYER, 6=ALPHA, 7=COLOR.
-fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
-    let mut pos = 0;
-    let mut params = Vec::new();
-    let mut scale = None;
-    let mut rotation = None;
-    let mut offset = None;
-    let mut scroll = None;
-    let mut layer = None;
-    let mut alpha = None;
-    let mut color = None;
-
-    loop {
-        if pos >= data.len() {
-            break;
-        }
-        let type_byte = data[pos];
-        pos += 1;
-        if type_byte >= 0x80 {
-            break;
-        }
-        match type_byte {
-            0 => {
-                // VSLOT_SHPARAM
-                let name = read_sendstring(data, &mut pos)?;
-                let vals = [
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                ];
-                params.push((name, vals));
-            }
-            1 => scale = Some(read_f32_le(data, &mut pos)?),
-            2 => rotation = Some(read_varint(data, &mut pos)?),
-            3 => offset = Some((read_varint(data, &mut pos)?, read_varint(data, &mut pos)?)),
-            4 => {
-                // VSLOT_SCROLL: values already stored as arg/1000 (raw float)
-                scroll = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?));
-            }
-            5 => layer = Some(read_getuint(data, &mut pos)?),
-            6 => alpha = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?)),
-            7 => {
-                color = Some((
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                ))
-            }
-            _ => return None,
-        }
-    }
-
-    Some(PackedVSlot {
-        params,
-        scale,
-        rotation,
-        offset,
-        scroll,
-        layer,
-        alpha,
-        color,
-    })
-}
-
-/// Walks the prev chain from `idx` to the root base (None) slot index.
-fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
-    let mut current = idx as i32;
-    loop {
-        match vslots.get(current as usize) {
-            Some(Some(vs)) => {
-                let p = vs.prev;
-                if p < 0 || (p as usize) >= vslots.len() {
-                    return current;
-                }
-                match &vslots[p as usize] {
-                    None => return p,
-                    Some(_) => current = p,
-                }
-            }
-            _ => return current,
-        }
-    }
-}
-
-/// Finds the last vslot in the chain rooted at `root` (linear chain tail).
-/// New vslots should use this as `prev` so all vslots remain reachable after OGZ load.
-fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
-    let mut tail = root;
-    for i in 0..vslots.len() {
-        if let Some(Some(_)) = vslots.get(i) {
-            if root_base_of(vslots, i as u16) == root {
-                tail = i as i32;
-            }
-        }
-    }
-    tail
-}
-
-/// Creates a merged vslot by accumulating `base_tex`'s existing properties
-/// then overriding with `ds`. Sets `prev` to the chain tail to keep all vslots
-/// reachable during OGZ load (avoids orphaning when multiple vslots share a root).
-fn resolve_vslot(vslots: &mut Vec<Option<VSlot>>, base_tex: u16, ds: &PackedVSlot, delta: bool) -> u16 {
-    if vslots.len() <= base_tex as usize {
-        vslots.resize(base_tex as usize + 1, None);
-    }
-    let root = root_base_of(vslots, base_tex);
-    let chain_tail = find_chain_tail(vslots, root);
-
-    let existing = vslots.get(base_tex as usize).cloned().flatten().unwrap_or_default();
-
-    let mut new_vs = existing.clone();
-    new_vs.prev = chain_tail;
-
-    if !ds.params.is_empty() {
-        if delta {
-            for (n, v) in &ds.params {
-                if let Some(p) = new_vs.params.iter_mut().find(|p| p.name == *n) {
-                    p.values = *v;
-                } else {
-                    new_vs.params.push(VSlotParam { name: n.clone(), values: *v });
-                }
-            }
-        } else {
-            new_vs.params = ds.params.iter().map(|(n, v)| VSlotParam { name: n.clone(), values: *v }).collect();
-        }
-    }
-
-    if let Some(ds_scale) = ds.scale {
-        if delta {
-            let cur = new_vs.scale.unwrap_or(1.0);
-            new_vs.scale = Some((cur * ds_scale).clamp(1.0 / 8.0, 8.0));
-        } else {
-            new_vs.scale = Some(ds_scale);
-        }
-    }
-
-    if let Some(ds_rot) = ds.rotation {
-        if delta {
-            let cur = new_vs.rotation.unwrap_or(0);
-            new_vs.rotation = Some((cur + ds_rot).clamp(0, 7));
-        } else {
-            new_vs.rotation = Some(ds_rot);
-        }
-    }
-
-    if let Some(ds_offset) = ds.offset {
-        if delta {
-            let cur = new_vs.offset.unwrap_or((0, 0));
-            new_vs.offset = Some((cur.0 + ds_offset.0, cur.1 + ds_offset.1));
-        } else {
-            new_vs.offset = Some(ds_offset);
-        }
-    }
-
-    if let Some(ds_scroll) = ds.scroll {
-        if delta {
-            let cur = new_vs.scroll.unwrap_or((0.0, 0.0));
-            new_vs.scroll = Some((cur.0 + ds_scroll.0, cur.1 + ds_scroll.1));
-        } else {
-            new_vs.scroll = Some(ds_scroll);
-        }
-    }
-
-    if let Some(ds_layer) = ds.layer {
-        new_vs.layer = Some(ds_layer);
-    }
-
-    if let Some(ds_alpha) = ds.alpha {
-        new_vs.alpha = Some(ds_alpha);
-    }
-
-    if let Some(ds_color) = ds.color {
-        if delta {
-            let cur = new_vs.color.unwrap_or((1.0, 1.0, 1.0));
-            new_vs.color = Some((cur.0 * ds_color.0, cur.1 * ds_color.1, cur.2 * ds_color.2));
-        } else {
-            new_vs.color = Some(ds_color);
-        }
-    }
-
-    for (i, vs_opt) in vslots.iter().enumerate() {
-        if let Some(vs) = vs_opt {
-            if root_base_of(vslots, i as u16) == root {
-                if vs.params == new_vs.params &&
-                   vs.scale == new_vs.scale &&
-                   vs.rotation == new_vs.rotation &&
-                   vs.offset == new_vs.offset &&
-                   vs.scroll == new_vs.scroll &&
-                   vs.layer == new_vs.layer &&
-                   vs.alpha == new_vs.alpha &&
-                   vs.color == new_vs.color {
-                    return i as u16;
-                }
-            }
-        }
-    }
-
-    // AVOID CLASHING WITH CLIENT BASE TEXTURES!
-    if vslots.len() < 0x4000 {
-        vslots.resize(0x4000, None);
-    }
-
-    let idx = vslots.len();
-    vslots.push(Some(new_vs));
-    idx as u16
 }
 
 #[derive(Clone)]

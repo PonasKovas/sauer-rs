@@ -38,6 +38,7 @@ pub struct TrapEditState {
 }
 
 pub const TRAP_STORE_VERSION: u8 = 2;
+pub const TRAP_DOMAIN: u8 = 1;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StoredEntity {
@@ -100,7 +101,7 @@ impl StoredTrap {
                 .iter()
                 .map(|(pos, size, node)| {
                     let mut packed = Vec::new();
-                    crate::recreate::pack_cube(node, &mut packed);
+                    sauer_map::clipboard::pack_cube(node, &mut packed);
                     (*pos, *size, packed)
                 })
                 .collect::<Vec<_>>()
@@ -144,7 +145,7 @@ impl StoredTrap {
                 let mut out = Vec::new();
                 for (pos, size, packed) in packed_cells {
                     let mut ptr = 0;
-                    let node = crate::block_reader::unpack_cube(&packed, &mut ptr)?;
+                    let node = sauer_map::clipboard::unpack_cube(&packed, &mut ptr)?;
                     out.push((pos, size, node));
                 }
                 Some(out)
@@ -190,7 +191,7 @@ impl StoredTrap {
     pub fn apply_reset_to_world(&self, world: &mut sauer_map::World) {
         for (pos, size, packed) in &self.reset_cells {
             let mut ptr = 0;
-            if let Some(node) = crate::block_reader::unpack_cube(packed, &mut ptr) {
+            if let Some(node) = sauer_map::clipboard::unpack_cube(packed, &mut ptr) {
                 world.set_node_at(*pos, *size, node);
             }
         }
@@ -230,14 +231,23 @@ pub fn sync_traps_to_map(server: &Server, cn: u32) {
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
 
     if let Some(map) = state.map.as_mut() {
-        if let Err(e) = crate::entity_store::write(
-            &mut map.world,
-            server,
-            cn,
-            &stored_traps,
-            TRAP_STORE_VERSION,
-        ) {
-            tracing::error!("Failed to save trap store: {}", e);
+        match sauer_map::store::write(&mut map.world, &stored_traps, TRAP_STORE_VERSION, TRAP_DOMAIN) {
+            Ok(changed) => {
+                for (id, ent) in changed {
+                    let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
+                        .unwrap_or(sauer_proto::data::EntityType::Empty);
+                    server.broadcast_chan1(&Client {
+                        client_num: cn as i32,
+                        packet: channel1::EditEnt {
+                            ent_id: id as i32,
+                            pos: sauer_proto::data::Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                            type_: ent_type,
+                            attrs: ent.attrs.map(|x| x as i32),
+                        },
+                    });
+                }
+            }
+            Err(e) => tracing::error!("Failed to save trap store: {}", e),
         }
     }
 }
@@ -522,14 +532,14 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
             map.invalidate_cache();
         }
         let (clip_unpack_len, clip_data) = if let Some(map) = state.map.as_ref() {
-            let btn_node = crate::recreate::extract_node_at(
+            let btn_node = sauer_map::octree::extract_node_at(
                 &map.world.root,
                 [0, 0, 0],
                 map.world.size,
                 trap.button_pos,
                 trap.button_size,
             );
-            crate::recreate::generate_clipboard(&btn_node, trap.button_size, &map.meta.vslots)
+            sauer_map::clipboard::generate_clipboard(&btn_node, trap.button_size, &map.meta.vslots)
         } else {
             (0, Vec::new())
         };
@@ -666,11 +676,11 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
 
     // Snapshot before corner pushes: clipboard delivers the flat button with
     // correct vslot indices; corner animation then pushes edges on clients.
-    let button_node = crate::recreate::extract_node_at(
+    let button_node = sauer_map::octree::extract_node_at(
         &map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE,
     );
     let (clip_unpack_len, clip_data) =
-        crate::recreate::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
+        sauer_map::clipboard::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
 
     for corner in 0..4 {
         let mut csel = sel.clone();
@@ -905,7 +915,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     let current_map = state.map.as_ref().unwrap();
     let world_size = current_map.world.size;
     let mut trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)> = Vec::new();
-    crate::recreate::collect_diff_cells(
+    sauer_map::octree::collect_diff_cells(
         &edit_state.original_map.world.root,
         &current_map.world.root,
         [0, 0, 0],
@@ -942,7 +952,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         restore_compressed,
     ) = if !trigger_cells.is_empty() {
         // Trigger clipboard from the post-edit map (tight bounds only).
-        let (cp, cs, cg, tul, tc) = crate::recreate::generate_region_clipboard(
+        let (cp, cs, cg, tul, tc) = sauer_map::clipboard::generate_region_clipboard(
             &current_map.world.root,
             world_size,
             tight_min,
@@ -951,7 +961,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         );
 
         // Restore clipboard from original map (same region dims for consistency).
-        let (rul, rc) = crate::recreate::generate_clipboard_for_region(
+        let (rul, rc) = sauer_map::clipboard::generate_clipboard_for_region(
             &edit_state.original_map.world.root,
             world_size,
             cp,
@@ -991,7 +1001,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     let reset_cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
         .iter()
         .map(|&(pos, size, _)| {
-            let node = crate::recreate::extract_node_at(
+            let node = sauer_map::octree::extract_node_at(
                 &edit_state.original_map.world.root,
                 [0, 0, 0],
                 world_size,
@@ -1160,7 +1170,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 None => return,
             };
             let (unpack_len, compressed) = if !trigger_cells.is_empty() {
-                crate::recreate::generate_clipboard_for_region(
+                sauer_map::clipboard::generate_clipboard_for_region(
                     &map.world.root,
                     map.world.size,
                     clip_pos,
@@ -1174,7 +1184,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             let cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
                 .iter()
                 .map(|&(pos, size, _)| {
-                    let node = crate::recreate::extract_node_at(
+                    let node = sauer_map::octree::extract_node_at(
                         &map.world.root,
                         [0, 0, 0],
                         map.world.size,
@@ -1398,22 +1408,4 @@ fn apply_and_broadcast(
     assigned_ids
 }
 
-/// Walks the prev chain from `idx` to the root base (None) slot index.
-pub(crate) fn root_base_of(vslots: &[Option<ogz_rs::data::VSlot>], idx: u16) -> i32 {
-    let mut current = idx as i32;
-    loop {
-        match vslots.get(current as usize) {
-            Some(Some(vs)) => {
-                let p = vs.prev;
-                if p < 0 || (p as usize) >= vslots.len() {
-                    return current;
-                }
-                match &vslots[p as usize] {
-                    None => return p,
-                    Some(_) => current = p,
-                }
-            }
-            _ => return current,
-        }
-    }
-}
+

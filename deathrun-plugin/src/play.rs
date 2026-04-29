@@ -40,7 +40,7 @@ impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = MapState::from_bytes(data).map_err(|e| e.to_string())?;
         let mut traps = Vec::new();
-        match crate::entity_store::read::<Vec<StoredTrap>>(&state.world, TRAP_STORE_VERSION) {
+        match sauer_map::store::read::<Vec<StoredTrap>>(&state.world, TRAP_STORE_VERSION, crate::trap::TRAP_DOMAIN) {
             Ok(Some(stored)) => {
                 for st in &stored {
                     st.apply_reset_to_world(&mut state.world);
@@ -165,7 +165,7 @@ fn send_map_to_client(server: Arc<Server>, cn: u32, maps: &Arc<RwLock<PlayMaps>>
         chunks.shuffle(&mut rand::thread_rng());
 
         for (pos, size, node) in chunks {
-            let (unpack_len, data) = crate::recreate::generate_clipboard(&node, size, &vslots);
+            let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, &vslots);
 
             server.send_chan1(cn, &channel1::ClipboardServer {
                 client_num: cn as i32,

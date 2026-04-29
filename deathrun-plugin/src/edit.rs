@@ -62,8 +62,14 @@ impl Plugin for DeathrunEdit {
         let text = text.trim();
         let mut parts = text.split_whitespace();
         let cmd = parts.next().unwrap_or("");
-        
-        if cmd != "#newtrap" && cmd != "#deltrap" && cmd != "#settrap" && cmd != "#endtrap" && cmd != "#traptime" && cmd != "#traptimeout" {
+
+        if cmd != "#newtrap"
+            && cmd != "#deltrap"
+            && cmd != "#settrap"
+            && cmd != "#endtrap"
+            && cmd != "#traptime"
+            && cmd != "#traptimeout"
+        {
             return;
         }
         ctx.cancel();
@@ -79,7 +85,12 @@ impl Plugin for DeathrunEdit {
         let pos = match server.players.try_get(cn) {
             Some(p) => {
                 if p.client_state == ClientState::Spectator {
-                    server.send_chan1(cn, &ServMsg { text: "Cannot use trap commands while spectating.".lossy_cubestring() });
+                    server.send_chan1(
+                        cn,
+                        &ServMsg {
+                            text: "Cannot use trap commands while spectating.".lossy_cubestring(),
+                        },
+                    );
                     return;
                 }
                 p.position
@@ -129,10 +140,16 @@ impl Plugin for DeathrunEdit {
         } else if cmd == "#settrap" {
             crate::trap::cmd_settrap(ctx, hit_pt);
         } else if cmd == "#traptime" {
-            let time = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(2000);
+            let time = parts
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(2000);
             crate::trap::cmd_traptime(ctx, hit_pt, time);
         } else if cmd == "#traptimeout" {
-            let timeout = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            let timeout = parts
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
             crate::trap::cmd_traptimeout(ctx, hit_pt, timeout);
         }
     }
@@ -232,27 +249,38 @@ impl Plugin for DeathrunEdit {
                 let world_size = state.world.size;
 
                 let mut loaded_traps = Vec::new();
-                match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(&state.world, crate::trap::TRAP_STORE_VERSION) {
+                match sauer_map::store::read::<Vec<crate::trap::StoredTrap>>(
+                    &state.world,
+                    crate::trap::TRAP_STORE_VERSION,
+                    crate::trap::TRAP_DOMAIN,
+                ) {
                     Ok(Some(stored_traps)) => {
                         for st in &stored_traps {
                             st.apply_reset_to_world(&mut state.world);
                         }
-                        loaded_traps = stored_traps.into_iter().filter_map(|st| st.into_trap()).collect();
+                        loaded_traps = stored_traps
+                            .into_iter()
+                            .filter_map(|st| st.into_trap())
+                            .collect();
                         info!("Loaded {} traps from map entity store", loaded_traps.len());
                     }
                     Ok(None) => {}
-                    Err(crate::entity_store::StoreError::VersionMismatch { expected, found }) => {
+                    Err(sauer_map::store::StoreError::VersionMismatch { expected, found }) => {
                         let msg = format!(
                             "Trap store format mismatch (map has v{found}, server expects v{expected}). \
                              Traps not loaded — please re-record traps and resave the map."
                         );
                         warn!("{msg}");
-                        server.broadcast_chan1(&ServMsg { text: msg.lossy_cubestring() });
+                        server.broadcast_chan1(&ServMsg {
+                            text: msg.lossy_cubestring(),
+                        });
                     }
                     Err(e) => {
                         let msg = format!("Failed to load trap store: {e}. Traps not loaded.");
                         warn!("{msg}");
-                        server.broadcast_chan1(&ServMsg { text: msg.lossy_cubestring() });
+                        server.broadcast_chan1(&ServMsg {
+                            text: msg.lossy_cubestring(),
+                        });
                     }
                 }
 
@@ -263,7 +291,11 @@ impl Plugin for DeathrunEdit {
                     s.traps = loaded_traps;
                     s.waiting_for_map = false;
                     // Reset button vslot colors in the map before it's sent to clients.
-                    let traps_snapshot: Vec<_> = s.traps.iter().map(|t| (t.button_pos, t.button_size, t.button_orient)).collect();
+                    let traps_snapshot: Vec<_> = s
+                        .traps
+                        .iter()
+                        .map(|t| (t.button_pos, t.button_size, t.button_orient))
+                        .collect();
                     if let Some(map) = s.map.as_mut() {
                         crate::trap::reset_button_colors_by_pos(map, &traps_snapshot);
                     }
@@ -450,10 +482,14 @@ impl Plugin for DeathrunEdit {
             uncompressed.extend_from_slice(&(packet.sel.orient as i32).to_le_bytes());
 
             for node in extracted_nodes.iter() {
-                crate::recreate::pack_cube(node, &mut uncompressed);
+                sauer_map::clipboard::pack_cube(node, &mut uncompressed);
             }
 
-            crate::recreate::pack_vslots(&extracted_nodes, &state.meta.vslots, &mut uncompressed);
+            sauer_map::clipboard::pack_vslots(
+                &extracted_nodes,
+                &state.meta.vslots,
+                &mut uncompressed,
+            );
 
             use flate2::{Compression, write::ZlibEncoder};
             use std::io::Write;
@@ -491,12 +527,12 @@ impl Plugin for DeathrunEdit {
                 let cb_data = cb.data.clone();
                 with_map_state_mut(ctx, |state| state.handle_paste(packet, &cb_data));
 
-                if let Some((cb_sel, _)) = crate::block_reader::decode_clipboard(&cb_data) {
+                if let Some((cb_sel, _)) = sauer_map::clipboard::decode_clipboard(&cb_data) {
                     let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
                     let max = [
-                        min[0] + cb_sel.s.x * packet.sel.grid,
-                        min[1] + cb_sel.s.y * packet.sel.grid,
-                        min[2] + cb_sel.s.z * packet.sel.grid,
+                        min[0] + cb_sel.s[0] * packet.sel.grid,
+                        min[1] + cb_sel.s[1] * packet.sel.grid,
+                        min[2] + cb_sel.s[2] * packet.sel.grid,
                     ];
                     crate::trap::check_and_rebuild_traps(ctx, |trap| {
                         crate::trap::intersects_bounds(min, max, trap)
@@ -511,14 +547,14 @@ impl Plugin for DeathrunEdit {
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
         with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
 
-        if let Some((sel, _)) = crate::block_reader::decode_undo(&packet.data) {
+        if let Some((sel, _)) = sauer_map::clipboard::decode_undo(&packet.data) {
             let max = [
-                sel.o.x + sel.s.x * sel.grid,
-                sel.o.y + sel.s.y * sel.grid,
-                sel.o.z + sel.s.z * sel.grid,
+                sel.o[0] + sel.s[0] * sel.grid,
+                sel.o[1] + sel.s[1] * sel.grid,
+                sel.o[2] + sel.s[2] * sel.grid,
             ];
             crate::trap::check_and_rebuild_traps(ctx, |trap| {
-                crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
+                crate::trap::intersects_bounds(sel.o, max, trap)
             });
         } else {
             crate::trap::check_and_rebuild_traps(ctx, |_| true);
@@ -545,14 +581,14 @@ impl Plugin for DeathrunEdit {
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
         with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
 
-        if let Some((sel, _)) = crate::block_reader::decode_undo(&packet.data) {
+        if let Some((sel, _)) = sauer_map::clipboard::decode_undo(&packet.data) {
             let max = [
-                sel.o.x + sel.s.x * sel.grid,
-                sel.o.y + sel.s.y * sel.grid,
-                sel.o.z + sel.s.z * sel.grid,
+                sel.o[0] + sel.s[0] * sel.grid,
+                sel.o[1] + sel.s[1] * sel.grid,
+                sel.o[2] + sel.s[2] * sel.grid,
             ];
             crate::trap::check_and_rebuild_traps(ctx, |trap| {
-                crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
+                crate::trap::intersects_bounds(sel.o, max, trap)
             });
         } else {
             crate::trap::check_and_rebuild_traps(ctx, |_| true);
