@@ -290,22 +290,44 @@ pub fn write<T: Serialize>(
         broadcast_ent_clear(server, cn, id);
     }
 
-    // Append any additional slots required.
-    let append_start = world.entities.len();
-    for i in n_old..n_new {
-        world.entities.push(build_entity(chunks[i], version));
-        broadcast_ent(server, cn, append_start + (i - n_old), chunks[i], version);
+    // Append any additional slots required, reusing Empty slots first.
+    let mut reused_empty = 0usize;
+    let mut truly_appended = 0usize;
+
+    if n_new > n_old {
+        let mut empty_slots = world
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| matches!(e.ent_type, EntityType::Empty))
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>()
+            .into_iter();
+
+        for i in n_old..n_new {
+            if let Some(slot) = empty_slots.next() {
+                world.entities[slot] = build_entity(chunks[i], version);
+                broadcast_ent(server, cn, slot, chunks[i], version);
+                reused_empty += 1;
+            } else {
+                let id = world.entities.len();
+                world.entities.push(build_entity(chunks[i], version));
+                broadcast_ent(server, cn, id, chunks[i], version);
+                truly_appended += 1;
+            }
+        }
     }
 
     info!(
         "[entity_store] wrote {} entit{} (v{version}, {} compressed bytes); \
-         reused={} cleared={} appended={}",
+         reused={} cleared={} reclaimed={} appended={}",
         n_new,
         if n_new == 1 { "y" } else { "ies" },
         compressed.len(),
         n_old.min(n_new),
         n_old.saturating_sub(n_new),
-        n_new.saturating_sub(n_old),
+        reused_empty,
+        truly_appended,
     );
 
     Ok(())
