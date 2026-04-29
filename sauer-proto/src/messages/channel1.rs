@@ -188,6 +188,12 @@ pub struct Client<T> {
     pub packet: T,
 }
 
+impl<T: crate::PacketDescriptor> crate::PacketDescriptor for Client<T> {
+    fn packet_names(&self) -> Vec<&'static str> {
+        self.packet.packet_names()
+    }
+}
+
 #[cfg(feature = "lua")]
 const _: () = {
     use mlua::{FromLua, Table, Value};
@@ -245,6 +251,11 @@ make_struct!(
 pub struct EditVar {
     pub name: CubeString,
     pub val: EditVarValue,
+}
+impl crate::PacketDescriptor for EditVar {
+    fn packet_names(&self) -> Vec<&'static str> {
+        vec![crate::internal::msg_id_to_name(N_EDITVAR)]
+    }
 }
 impl SauerWrite for EditVar {
     fn sauer_write(&self, out: &mut Vec<u8>) {
@@ -737,6 +748,11 @@ make_struct!(
 pub struct InitFlagsServer {
     pub scores: [i32; 2],
     pub flags: Vec<FlagState>,
+}
+impl crate::PacketDescriptor for InitFlagsServer {
+    fn packet_names(&self) -> Vec<&'static str> {
+        vec![crate::internal::msg_id_to_name(N_INITFLAGS)]
+    }
 }
 impl SauerWrite for InitFlagsServer {
     fn sauer_write(&self, out: &mut Vec<u8>) {
@@ -1277,6 +1293,11 @@ make_struct!(
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BasesClient {
     pub bases: Vec<BaseSpawn>,
+}
+impl crate::PacketDescriptor for BasesClient {
+    fn packet_names(&self) -> Vec<&'static str> {
+        vec![crate::internal::msg_id_to_name(N_BASES)]
+    }
 }
 impl SauerWrite for BasesClient {
     fn sauer_write(&self, out: &mut Vec<u8>) {

@@ -335,7 +335,7 @@ fn corner_pushes(
     sel: &SelInfo,
     corner: i32,
     cn: i32,
-) -> impl PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>> {
+) -> impl PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>> + sauer_proto::PacketDescriptor + std::fmt::Debug {
     let pkt = Client {
         client_num: cn,
         packet: channel1::EditFace {

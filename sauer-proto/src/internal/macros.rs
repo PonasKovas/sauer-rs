@@ -149,6 +149,14 @@ macro_rules! make_struct {
             }
         };
 
+        $( // only generated when $TAG is present — gives the struct its own packet name
+            impl crate::PacketDescriptor for $name {
+                fn packet_names(&self) -> Vec<&'static str> {
+                    vec![crate::internal::msg_id_to_name($TAG)]
+                }
+            }
+        )?
+
         };
     };
     (@serialize $var:expr, $out:expr) => {
@@ -425,6 +433,12 @@ macro_rules! make_packet_enum {
         impl crate::PacketSequence<$ROUTE> for $name {
             fn push_to(&self, writer: &mut crate::Writer<$ROUTE>) {
                 writer.push(self);
+            }
+        }
+
+        impl crate::PacketDescriptor for $name {
+            fn packet_names(&self) -> Vec<&'static str> {
+                vec![self.msg_type()]
             }
         }
 

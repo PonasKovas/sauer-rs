@@ -10,7 +10,6 @@ use sauer_proto::{
     route::{C2S, Chan0, Chan1},
 };
 use std::{collections::VecDeque, sync::Arc};
-use tracing::trace;
 
 pub(crate) async fn handle_client<P: Plugin>(
     server: &Arc<Server>,
@@ -24,20 +23,21 @@ pub(crate) async fn handle_client<P: Plugin>(
     loop {
         let pkt = rx.recv().await?;
 
-        if pkt.channel() == 1 {
-            trace!("received: {pkt:?}");
-        }
-
         ctx.cancelled = false;
 
         match pkt {
-            Packet::Chan0(pkt) => match pkt {
+            Packet::Chan0(pkt) => {
+                crate::packet_log::trace_in(cn, pkt.msg_type(), &pkt);
+                match pkt {
                 Chan0Client::Position(p) => plugin.pos(&mut ctx, &p).await,
                 Chan0Client::Teleport(p) => plugin.teleport(&mut ctx, &p).await,
                 Chan0Client::JumpPad(p) => plugin.jumppad(&mut ctx, &p).await,
+                }
             },
 
-            Packet::Chan1(pkt) => match pkt {
+            Packet::Chan1(pkt) => {
+                crate::packet_log::trace_in(cn, pkt.msg_type(), &pkt);
+                match pkt {
                 Chan1Client::Connect(p) => plugin.connect(&mut ctx, &p).await,
                 Chan1Client::AuthAnswer(p) => plugin.auth_answer(&mut ctx, &p).await,
                 Chan1Client::Ping(p) => plugin.ping(&mut ctx, &p).await,
@@ -109,6 +109,7 @@ pub(crate) async fn handle_client<P: Plugin>(
                 Chan1Client::TakeTokenClient(p) => plugin.take_token(&mut ctx, &p).await,
                 Chan1Client::DepositTokensClient(p) => plugin.deposit_tokens(&mut ctx, &p).await,
                 Chan1Client::Taunt(p) => plugin.taunt(&mut ctx, &p).await,
+                }
             },
 
             Packet::Chan2(data) => plugin.map(&mut ctx, &data).await,
@@ -131,15 +132,6 @@ enum Packet {
     Chan2(Bytes),
 }
 
-impl Packet {
-    fn channel(&self) -> u8 {
-        match self {
-            Packet::Chan0(_) => 0,
-            Packet::Chan1(_) => 1,
-            Packet::Chan2(_) => 2,
-        }
-    }
-}
 
 impl SauerReceiver {
     fn new(peer: PeerReceiver) -> Self {

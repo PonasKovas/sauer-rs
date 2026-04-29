@@ -98,6 +98,70 @@ pub trait PacketSequence<R> {
     fn push_to(&self, writer: &mut Writer<R>);
 }
 
+/// Returns the human-readable names of all packets in a sequence (e.g. `"N_TEXT"`).
+///
+/// Implemented for all types that also implement [`PacketSequence`]. Used by
+/// the server's packet-level trace logging to identify packets before they are
+/// serialised into raw bytes.
+pub trait PacketDescriptor {
+    fn packet_names(&self) -> Vec<&'static str>;
+}
+
+impl<T: PacketDescriptor + ?Sized> PacketDescriptor for &T {
+    fn packet_names(&self) -> Vec<&'static str> {
+        (*self).packet_names()
+    }
+}
+
+impl<T: PacketDescriptor> PacketDescriptor for [T] {
+    fn packet_names(&self) -> Vec<&'static str> {
+        self.iter().flat_map(|t| t.packet_names()).collect()
+    }
+}
+
+impl<T: PacketDescriptor, const N: usize> PacketDescriptor for [T; N] {
+    fn packet_names(&self) -> Vec<&'static str> {
+        self.iter().flat_map(|t| t.packet_names()).collect()
+    }
+}
+
+impl<T: PacketDescriptor> PacketDescriptor for Vec<T> {
+    fn packet_names(&self) -> Vec<&'static str> {
+        self.iter().flat_map(|t| t.packet_names()).collect()
+    }
+}
+
+macro_rules! impl_tuple_descriptor {
+    ( $($name:ident)+ ) => {
+        impl<$($name: PacketDescriptor),+> PacketDescriptor for ($($name,)+) {
+            fn packet_names(&self) -> Vec<&'static str> {
+                #[allow(non_snake_case)]
+                let ($($name,)+) = self;
+                let mut v = Vec::new();
+                $(v.extend($name.packet_names());)+
+                v
+            }
+        }
+    };
+}
+
+impl_tuple_descriptor!(A);
+impl_tuple_descriptor!(A B);
+impl_tuple_descriptor!(A B C);
+impl_tuple_descriptor!(A B C D);
+impl_tuple_descriptor!(A B C D E);
+impl_tuple_descriptor!(A B C D E F);
+impl_tuple_descriptor!(A B C D E F G);
+impl_tuple_descriptor!(A B C D E F G H);
+impl_tuple_descriptor!(A B C D E F G H I);
+impl_tuple_descriptor!(A B C D E F G H I J);
+impl_tuple_descriptor!(A B C D E F G H I J K);
+impl_tuple_descriptor!(A B C D E F G H I J K L);
+impl_tuple_descriptor!(A B C D E F G H I J K L M);
+impl_tuple_descriptor!(A B C D E F G H I J K L M N);
+impl_tuple_descriptor!(A B C D E F G H I J K L M N O);
+impl_tuple_descriptor!(A B C D E F G H I J K L M N O P);
+
 // Blanket implementation for references allows us to preserve the old &T API seamlessly
 impl<R, T: PacketSequence<R> + ?Sized> PacketSequence<R> for &T {
     fn push_to(&self, writer: &mut Writer<R>) {

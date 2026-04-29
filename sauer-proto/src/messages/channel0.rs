@@ -253,6 +253,12 @@ impl SauerRead for Position {
     }
 }
 
+impl crate::PacketDescriptor for Position {
+    fn packet_names(&self) -> Vec<&'static str> {
+        vec![crate::internal::msg_id_to_name(N_POS)]
+    }
+}
+
 #[cfg(feature = "lua")]
 const _: () = {
     use mlua::{UserData, UserDataFields};

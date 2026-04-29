@@ -3,16 +3,18 @@ use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
 use peer::Peer;
 use sauer_proto::{
-    PacketSequence,
+    PacketDescriptor, PacketSequence,
     data::{GameMode, MasterMode},
     route::{Chan0, Chan1, Chan2, S2C},
 };
+use std::fmt::Debug;
 use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
 
 mod base;
 mod builder;
 mod handle_client;
 pub mod items;
+mod packet_log;
 mod peer;
 pub mod players;
 pub mod plugin;
@@ -70,13 +72,15 @@ impl Server {
 
     // ── Targeted sends ────────────────────────────────────────────────────────
 
-    pub fn send_chan0(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan0>>) {
+    pub fn send_chan0(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug) {
+        packet_log::trace_out(cn, &pkt);
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan0(pkt);
         }
     }
 
-    pub fn send_chan1(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan1>>) {
+    pub fn send_chan1(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug) {
+        packet_log::trace_out(cn, &pkt);
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan1(pkt);
         }
@@ -90,19 +94,22 @@ impl Server {
 
     // ── Broadcast ─────────────────────────────────────────────────────────────
 
-    pub fn broadcast_chan0(&self, pkt: impl PacketSequence<S2C<Chan0>>) {
+    pub fn broadcast_chan0(&self, pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug) {
+        packet_log::trace_out_broadcast(&pkt);
         for entry in self.clients.iter() {
             entry.value().try_send_chan0(&pkt);
         }
     }
 
-    pub fn broadcast_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>>) {
+    pub fn broadcast_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug) {
+        packet_log::trace_out_broadcast(&pkt);
         for entry in self.clients.iter() {
             entry.value().try_send_chan1(&pkt);
         }
     }
 
-    pub fn broadcast_except_chan0(&self, except: u32, pkt: impl PacketSequence<S2C<Chan0>>) {
+    pub fn broadcast_except_chan0(&self, except: u32, pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug) {
+        packet_log::trace_out_broadcast_except(except, &pkt);
         for entry in self.clients.iter() {
             if *entry.key() != except {
                 entry.value().try_send_chan0(&pkt);
@@ -110,7 +117,8 @@ impl Server {
         }
     }
 
-    pub fn broadcast_except_chan1(&self, except: u32, pkt: impl PacketSequence<S2C<Chan1>>) {
+    pub fn broadcast_except_chan1(&self, except: u32, pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug) {
+        packet_log::trace_out_broadcast_except(except, &pkt);
         for entry in self.clients.iter() {
             if *entry.key() != except {
                 entry.value().try_send_chan1(&pkt);

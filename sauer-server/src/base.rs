@@ -39,7 +39,7 @@ impl<P: Plugin> Base<P> {
 fn relay_coop<T>(server: &Server, cn: u32, pkt: &T)
 where
     Client<T>: sauer_proto::PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>>,
-    T: Clone,
+    T: Clone + sauer_proto::PacketDescriptor + std::fmt::Debug,
 {
     if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
         return;

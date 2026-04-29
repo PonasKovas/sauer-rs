@@ -63,7 +63,7 @@ pub use messages::{
 };
 pub use reader::Reader;
 pub use session::Session;
-pub use writer::{PacketSequence, SendMode, Writer};
+pub use writer::{PacketDescriptor, PacketSequence, SendMode, Writer};
 
 pub use cube_string;
 
