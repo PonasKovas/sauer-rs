@@ -525,6 +525,12 @@ impl Plugin for DeathrunEdit {
         }
     }
 
+    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
+        if packet.mode != GameMode::CoopEdit {
+            ctx.cancel();
+        }
+    }
+
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
         with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
 
