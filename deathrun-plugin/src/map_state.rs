@@ -37,6 +37,13 @@ pub struct MapState {
 
 impl MapState {
     pub fn default_empty() -> Self {
+        Self::new_empty(512)
+    }
+
+    /// Create a fresh empty map matching Sauerbraten's `emptymap(scale)`:
+    /// bottom 4 root octants solid (texture 1), top 4 empty air.
+    /// `world_size` is the actual size (e.g. 1024), not the log2 scale.
+    pub fn new_empty(world_size: i32) -> Self {
         let solid = Node::Leaf(Cube {
             edges: [0x80; 12],
             textures: [1; 6],
@@ -58,13 +65,13 @@ impl MapState {
             air,
         ]));
         let world = World {
-            size: 512,
+            size: world_size,
             root,
             entities: vec![],
         };
         let meta = OgzMap {
             version: 33,
-            world_size: 512,
+            world_size,
             config: MapConfig::Modern { variables: vec![] },
             game_type: Some("fps".lossy_cubestring()),
             eif: 0,
@@ -79,6 +86,37 @@ impl MapState {
             blendmap_data: None,
         };
         Self { world, meta }
+    }
+
+    /// Enlarge the map: wrap the current world as the bottom-left octant of a
+    /// doubled world, filling the remaining 3 bottom octants with solid and
+    /// the 4 top octants with empty air (mirrors Sauerbraten's `enlargemap`).
+    pub fn enlarge(&mut self) {
+        let new_size = self.world.size * 2;
+        let solid = Node::Leaf(Cube {
+            edges: [0x80; 12],
+            textures: [1; 6],
+            material: Default::default(),
+        });
+        let air = Node::Leaf(Cube {
+            edges: [0x00; 12],
+            textures: [0; 6],
+            material: Default::default(),
+        });
+        let old_root = std::mem::replace(&mut self.world.root, air.clone());
+        self.world.root = Node::Branch(Box::new([
+            old_root,
+            solid.clone(),
+            solid.clone(),
+            solid,
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air,
+        ]));
+        self.world.size = new_size;
+        self.meta.world_size = new_size;
+        self.meta.octree = self.world.to_ogz_octree();
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, ogz_rs::OgzError> {

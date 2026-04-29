@@ -525,6 +525,17 @@ impl Plugin for DeathrunEdit {
         }
     }
 
+    async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
+        let server = ctx.server();
+        let mut state = get_server_state(server).write().unwrap();
+        if packet.size >= 0 {
+            let world_size = 1_i32 << packet.size.clamp(10, 16);
+            state.map = Some(MapState::new_empty(world_size));
+        } else if let Some(map) = state.map.as_mut() {
+            map.enlarge();
+        }
+    }
+
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
         if packet.mode != GameMode::CoopEdit {
             ctx.cancel();
