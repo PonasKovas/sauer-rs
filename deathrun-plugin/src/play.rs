@@ -40,7 +40,11 @@ impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = MapState::from_bytes(data).map_err(|e| e.to_string())?;
         let mut traps = Vec::new();
-        match sauer_map::store::read::<Vec<StoredTrap>>(&state.world, TRAP_STORE_VERSION, crate::trap::TRAP_DOMAIN) {
+        match crate::entity_store::read::<Vec<StoredTrap>>(
+            &state.world,
+            TRAP_STORE_VERSION,
+            crate::trap::TRAP_DOMAIN,
+        ) {
             Ok(Some(stored)) => {
                 for st in &stored {
                     st.apply_reset_to_world(&mut state.world);
@@ -125,36 +129,53 @@ fn send_map_to_client(server: Arc<Server>, cn: u32, maps: &Arc<RwLock<PlayMaps>>
 
     tokio::spawn(async move {
         // 1. Set correct world size on the client.
-        server.send_chan1(cn, &Client {
-            client_num: cn as i32,
-            packet: channel1::NewMap { size: world_size },
-        });
+        server.send_chan1(
+            cn,
+            &Client {
+                client_num: cn as i32,
+                packet: channel1::NewMap { size: world_size },
+            },
+        );
 
         // 2. Delete the entire world.
-        server.send_chan1(cn, &Client {
-            client_num: cn as i32,
-            packet: channel1::DelCube {
-                sel: SelInfo {
-                    o: Vec3 { x: 0, y: 0, z: 0 },
-                    s: Vec3 { x: 2, y: 2, z: 2 },
-                    grid: world_size / 2,
-                    orient: Orient::Left,
-                    cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+        server.send_chan1(
+            cn,
+            &Client {
+                client_num: cn as i32,
+                packet: channel1::DelCube {
+                    sel: SelInfo {
+                        o: Vec3 { x: 0, y: 0, z: 0 },
+                        s: Vec3 { x: 2, y: 2, z: 2 },
+                        grid: world_size / 2,
+                        orient: Orient::Left,
+                        cx: 0,
+                        cxs: 2,
+                        cy: 0,
+                        cys: 2,
+                        corner: 0,
+                    },
                 },
             },
-        });
+        );
 
         // 3. Clear entities.
         for i in 0..entities.len() {
-            server.send_chan1(cn, &Client {
-                client_num: cn as i32,
-                packet: channel1::EditEnt {
-                    ent_id: i as i32,
-                    pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-                    type_: EntityType::Empty,
-                    attrs: [0; 5],
+            server.send_chan1(
+                cn,
+                &Client {
+                    client_num: cn as i32,
+                    packet: channel1::EditEnt {
+                        ent_id: i as i32,
+                        pos: Vec3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                        type_: EntityType::Empty,
+                        attrs: [0; 5],
+                    },
                 },
-            });
+            );
         }
 
         sleep(Duration::from_millis(500)).await;
@@ -167,23 +188,37 @@ fn send_map_to_client(server: Arc<Server>, cn: u32, maps: &Arc<RwLock<PlayMaps>>
         for (pos, size, node) in chunks {
             let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, &vslots);
 
-            server.send_chan1(cn, &channel1::ClipboardServer {
-                client_num: cn as i32,
-                unpack_len,
-                data,
-            });
-            server.send_chan1(cn, &Client {
-                client_num: cn as i32,
-                packet: channel1::PasteServer {
-                    sel: SelInfo {
-                        o: Vec3 { x: pos[0], y: pos[1], z: pos[2] },
-                        s: Vec3 { x: 1, y: 1, z: 1 },
-                        grid: size,
-                        orient: Orient::Left,
-                        cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
+            server.send_chan1(
+                cn,
+                &channel1::ClipboardServer {
+                    client_num: cn as i32,
+                    unpack_len,
+                    data,
+                },
+            );
+            server.send_chan1(
+                cn,
+                &Client {
+                    client_num: cn as i32,
+                    packet: channel1::PasteServer {
+                        sel: SelInfo {
+                            o: Vec3 {
+                                x: pos[0],
+                                y: pos[1],
+                                z: pos[2],
+                            },
+                            s: Vec3 { x: 1, y: 1, z: 1 },
+                            grid: size,
+                            orient: Orient::Left,
+                            cx: 0,
+                            cxs: 1,
+                            cy: 0,
+                            cys: 1,
+                            corner: 0,
+                        },
                     },
                 },
-            });
+            );
 
             sleep(Duration::from_millis(5)).await;
         }
@@ -195,15 +230,22 @@ fn send_map_to_client(server: Arc<Server>, cn: u32, maps: &Arc<RwLock<PlayMaps>>
             let Ok(ent_type) = EntityType::try_from(u8::from(ent.ent_type) as i32) else {
                 continue;
             };
-            server.send_chan1(cn, &Client {
-                client_num: cn as i32,
-                packet: channel1::EditEnt {
-                    ent_id: i as i32,
-                    pos: Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
-                    type_: ent_type,
-                    attrs: ent.attrs.map(|x| x as i32),
+            server.send_chan1(
+                cn,
+                &Client {
+                    client_num: cn as i32,
+                    packet: channel1::EditEnt {
+                        ent_id: i as i32,
+                        pos: Vec3 {
+                            x: ent.position[0],
+                            y: ent.position[1],
+                            z: ent.position[2],
+                        },
+                        type_: ent_type,
+                        attrs: ent.attrs.map(|x| x as i32),
+                    },
                 },
-            });
+            );
         }
     });
 
@@ -281,7 +323,11 @@ impl Plugin for DeathrunPlay {
         };
 
         if was_evil {
-            let remaining: Vec<u32> = server.client_cns().into_iter().filter(|&c| c != cn).collect();
+            let remaining: Vec<u32> = server
+                .client_cns()
+                .into_iter()
+                .filter(|&c| c != cn)
+                .collect();
             if let Some(&new_evil) = remaining.choose(&mut rand::thread_rng()) {
                 maps.write().unwrap().evil_cn = Some(new_evil);
                 assign_teams(server, new_evil);

@@ -249,7 +249,7 @@ impl Plugin for DeathrunEdit {
                 let world_size = state.world.size;
 
                 let mut loaded_traps = Vec::new();
-                match sauer_map::store::read::<Vec<crate::trap::StoredTrap>>(
+                match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(
                     &state.world,
                     crate::trap::TRAP_STORE_VERSION,
                     crate::trap::TRAP_DOMAIN,
@@ -265,7 +265,7 @@ impl Plugin for DeathrunEdit {
                         info!("Loaded {} traps from map entity store", loaded_traps.len());
                     }
                     Ok(None) => {}
-                    Err(sauer_map::store::StoreError::VersionMismatch { expected, found }) => {
+                    Err(crate::entity_store::StoreError::VersionMismatch { expected, found }) => {
                         let msg = format!(
                             "Trap store format mismatch (map has v{found}, server expects v{expected}). \
                              Traps not loaded — please re-record traps and resave the map."

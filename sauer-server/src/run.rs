@@ -29,8 +29,8 @@ pub(crate) async fn run<P: Plugin>(
     // Base is always the innermost plugin — user plugins run first and can cancel it.
     // Arc::new_cyclic lets Base hold a Weak back-reference to the full arc so it
     // can fire semantic hooks through the complete plugin chain.
-    let plugin = Arc::new_cyclic(|weak: &Weak<(Base<P>, P)>| {
-        (Base::new(weak.clone()), plugin)
+    let plugin = Arc::new_cyclic(|weak: &Weak<(P, Base<P>)>| {
+        (plugin, Base::new(weak.clone()))
     });
     let mut server = Server::new();
     plugin.init(&mut server).await;

@@ -231,16 +231,26 @@ pub fn sync_traps_to_map(server: &Server, cn: u32) {
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
 
     if let Some(map) = state.map.as_mut() {
-        match sauer_map::store::write(&mut map.world, &stored_traps, TRAP_STORE_VERSION, TRAP_DOMAIN) {
+        match crate::entity_store::write(
+            &mut map.world,
+            &stored_traps,
+            TRAP_STORE_VERSION,
+            TRAP_DOMAIN,
+        ) {
             Ok(changed) => {
                 for (id, ent) in changed {
-                    let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-                        .unwrap_or(sauer_proto::data::EntityType::Empty);
+                    let ent_type =
+                        sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
+                            .unwrap_or(sauer_proto::data::EntityType::Empty);
                     server.broadcast_chan1(&Client {
                         client_num: cn as i32,
                         packet: channel1::EditEnt {
                             ent_id: id as i32,
-                            pos: sauer_proto::data::Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                            pos: sauer_proto::data::Vec3 {
+                                x: ent.position[0],
+                                y: ent.position[1],
+                                z: ent.position[2],
+                            },
                             type_: ent_type,
                             attrs: ent.attrs.map(|x| x as i32),
                         },
@@ -345,7 +355,9 @@ fn corner_pushes(
     sel: &SelInfo,
     corner: i32,
     cn: i32,
-) -> impl PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>> + sauer_proto::PacketDescriptor + std::fmt::Debug {
+) -> impl PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>>
++ sauer_proto::PacketDescriptor
++ std::fmt::Debug {
     let pkt = Client {
         client_num: cn,
         packet: channel1::EditFace {
@@ -434,7 +446,9 @@ fn send_atomic_rebuild(
     });
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::DelCube { sel: adj_sel.clone() },
+        packet: channel1::DelCube {
+            sel: adj_sel.clone(),
+        },
     });
     server.broadcast_chan1(&channel1::ClipboardServer {
         client_num: target_cn,
@@ -443,7 +457,9 @@ fn send_atomic_rebuild(
     });
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::PasteServer { sel: adj_sel.clone() },
+        packet: channel1::PasteServer {
+            sel: adj_sel.clone(),
+        },
     });
     server.broadcast_chan1((
         corner_pushes(&adj_sel, 0, target_cn),
@@ -676,9 +692,8 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
 
     // Snapshot before corner pushes: clipboard delivers the flat button with
     // correct vslot indices; corner animation then pushes edges on clients.
-    let button_node = sauer_map::octree::extract_node_at(
-        &map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE,
-    );
+    let button_node =
+        sauer_map::octree::extract_node_at(&map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
     let (clip_unpack_len, clip_data) =
         sauer_map::clipboard::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
 
@@ -726,7 +741,9 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::DelCube { sel: adj_sel.clone() },
+        packet: channel1::DelCube {
+            sel: adj_sel.clone(),
+        },
     });
     server.broadcast_chan1(&channel1::ClipboardServer {
         client_num: target_cn,
@@ -735,7 +752,9 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::PasteServer { sel: adj_sel.clone() },
+        packet: channel1::PasteServer {
+            sel: adj_sel.clone(),
+        },
     });
 
     tokio::spawn(async move {
@@ -759,7 +778,10 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             server.broadcast_chan1(&Client {
                 client_num: target_cn,
                 packet: channel1::EditFace {
-                    sel: SelInfo { corner, ..adj_sel.clone() },
+                    sel: SelInfo {
+                        corner,
+                        ..adj_sel.clone()
+                    },
                     dir: 1,
                     mode: EditFaceMode::Corner,
                 },
@@ -1407,5 +1429,3 @@ fn apply_and_broadcast(
 
     assigned_ids
 }
-
-

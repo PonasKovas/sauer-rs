@@ -120,6 +120,26 @@ make_enum!(
     Platform = 28, Elevator = 29, Flag = 30,
 });
 
+impl TryFrom<EntityType> for ItemType {
+    type Error = ();
+    fn try_from(ent_type: EntityType) -> Result<Self, Self::Error> {
+        match ent_type {
+            EntityType::IShells => Ok(ItemType::Shells),
+            EntityType::IBullets => Ok(ItemType::Bullets),
+            EntityType::IRockets => Ok(ItemType::Rockets),
+            EntityType::IRounds => Ok(ItemType::Rounds),
+            EntityType::IGrenades => Ok(ItemType::Grenades),
+            EntityType::ICartridges => Ok(ItemType::Cartridges),
+            EntityType::IHealth => Ok(ItemType::Health),
+            EntityType::IBoost => Ok(ItemType::Boost),
+            EntityType::IGreenArmour => Ok(ItemType::GreenArmour),
+            EntityType::IYellowArmour => Ok(ItemType::YellowArmour),
+            EntityType::IQuad => Ok(ItemType::Quad),
+            _ => Err(()),
+        }
+    }
+}
+
 make_enum!(
 /// Edit face operation mode.
 [i32] EditFaceMode {

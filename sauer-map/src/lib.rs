@@ -7,7 +7,6 @@ mod world;
 
 pub mod raycast;
 pub mod clipboard;
-pub mod store;
 pub mod vslot;
 
 pub use geom::subdivide;

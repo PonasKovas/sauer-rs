@@ -24,7 +24,7 @@ mod welcome;
 
 pub use builder::ServerBuilder;
 pub use items::{
-    Items, ServerItem, apply_pickup, canpickup, delay_spawn, entity_to_item_type, spawntime,
+    Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
 };
 pub use players::{ClipboardData, PlayerData, Players};
 pub use plugin::{Context, Plugin};

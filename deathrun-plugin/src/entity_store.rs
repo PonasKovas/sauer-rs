@@ -116,7 +116,7 @@ fn build_entity(attrs: [u16; 5], version: u8, domain_id: u8) -> Entity {
 }
 
 pub fn read<T: DeserializeOwned>(
-    world: &crate::World,
+    world: &sauer_map::World,
     version: u8,
     domain_id: u8,
 ) -> Result<Option<T>, StoreError> {
@@ -145,7 +145,7 @@ pub fn read<T: DeserializeOwned>(
 }
 
 pub fn write<T: Serialize>(
-    world: &mut crate::World,
+    world: &mut sauer_map::World,
     data: &T,
     version: u8,
     domain_id: u8,

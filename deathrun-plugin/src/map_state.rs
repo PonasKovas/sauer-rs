@@ -9,7 +9,7 @@ use sauer_proto::{
     data::{EditVarValue, SelInfo},
 };
 use sauer_server::plugin::Context;
-use sauer_server::{Server, ServerItem, delay_spawn, entity_to_item_type, spawntime};
+use sauer_server::{Server, ServerItem, delay_spawn, spawntime};
 use std::sync::RwLock;
 use tracing::error;
 
@@ -30,11 +30,24 @@ pub fn to_selection(sel: &SelInfo) -> Selection {
 
 pub fn to_sel_info(sel: &Selection) -> SelInfo {
     SelInfo {
-        o: sauer_proto::data::Vec3 { x: sel.o[0], y: sel.o[1], z: sel.o[2] },
-        s: sauer_proto::data::Vec3 { x: sel.s[0], y: sel.s[1], z: sel.s[2] },
+        o: sauer_proto::data::Vec3 {
+            x: sel.o[0],
+            y: sel.o[1],
+            z: sel.o[2],
+        },
+        s: sauer_proto::data::Vec3 {
+            x: sel.s[0],
+            y: sel.s[1],
+            z: sel.s[2],
+        },
         grid: sel.grid,
-        orient: sauer_proto::data::Orient::try_from(sel.orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
-        cx: sel.cx, cxs: sel.cxs, cy: sel.cy, cys: sel.cys, corner: sel.corner,
+        orient: sauer_proto::data::Orient::try_from(sel.orient as i32)
+            .unwrap_or(sauer_proto::data::Orient::Left),
+        cx: sel.cx,
+        cxs: sel.cxs,
+        cy: sel.cy,
+        cys: sel.cys,
+        corner: sel.corner,
     }
 }
 
@@ -107,7 +120,7 @@ impl MapState {
                 let Ok(proto_type) = sauer_proto::data::EntityType::try_from(n as i32) else {
                     continue;
                 };
-                if let Some(item_type) = entity_to_item_type(proto_type) {
+                if let Ok(item_type) = sauer_proto::data::ItemType::try_from(proto_type) {
                     if items.list.len() <= i {
                         items.list.resize_with(i + 1, || ServerItem {
                             item_type,
@@ -170,24 +183,57 @@ impl MapState {
     pub fn handle_edit_mat(&mut self, packet: &channel1::EditMat) {
         let packet_mat = packet.mat as i32;
         let packet_filter = packet.filter as i32;
-        let mut filtermat = 0u16; let mut filtermask = 0u16; let mut filtergeom = 0i32;
+        let mut filtermat = 0u16;
+        let mut filtermask = 0u16;
+        let mut filtergeom = 0i32;
 
         if packet_filter >= 0 {
-            filtermat = (packet_filter & 0xFFFF) as u16; filtergeom = packet_filter & !0xFFFF;
-            filtermask = if (filtermat & 0x1F) != 0 { 0x1F } else if (filtermat & 0xE0) != 0 { 0xE0 } else { filtermat };
+            filtermat = (packet_filter & 0xFFFF) as u16;
+            filtergeom = packet_filter & !0xFFFF;
+            filtermask = if (filtermat & 0x1F) != 0 {
+                0x1F
+            } else if (filtermat & 0xE0) != 0 {
+                0xE0
+            } else {
+                filtermat
+            };
         }
 
         let (matid, matmask) = if packet_mat < 0 {
-            let matmask = if (filtermat & 0x1C) == 0x0C { filtermask & !0xE0u16 } else if (filtermat & 0x1C) == 0x08 { filtermask & !0x0100u16 } else { filtermask };
+            let matmask = if (filtermat & 0x1C) == 0x0C {
+                filtermask & !0xE0u16
+            } else if (filtermat & 0x1C) == 0x08 {
+                filtermask & !0x0100u16
+            } else {
+                filtermask
+            };
             (0u16, matmask)
         } else {
             let mut matid = (packet_mat & 0xFFFF) as u16;
-            let matmask = if (matid & 0x1F) != 0 { 0 } else if (matid & 0xE0) != 0 { !0xE0u16 } else { !matid };
-            if (matid & 0x1C) == 0x0C { matid |= 0x40; } if (matid & 0x1C) == 0x08 { matid |= 0x0100; }
+            let matmask = if (matid & 0x1F) != 0 {
+                0
+            } else if (matid & 0xE0) != 0 {
+                !0xE0u16
+            } else {
+                !matid
+            };
+            if (matid & 0x1C) == 0x0C {
+                matid |= 0x40;
+            }
+            if (matid & 0x1C) == 0x08 {
+                matid |= 0x0100;
+            }
             (matid, matmask)
         };
 
-        self.world.apply_material(&to_selection(&packet.sel), matid, matmask, filtermat, filtermask, filtergeom);
+        self.world.apply_material(
+            &to_selection(&packet.sel),
+            matid,
+            matmask,
+            filtermat,
+            filtermask,
+            filtergeom,
+        );
         self.invalidate_cache();
     }
 
@@ -197,8 +243,13 @@ impl MapState {
     }
 
     pub fn handle_replace(&mut self, packet: &channel1::Replace) {
-        let sel = if packet.in_sel != 0 { Some(to_selection(&packet.sel)) } else { None };
-        self.world.replace_texture(sel.as_ref(), packet.old_tex as u16, packet.new_tex as u16);
+        let sel = if packet.in_sel != 0 {
+            Some(to_selection(&packet.sel))
+        } else {
+            None
+        };
+        self.world
+            .replace_texture(sel.as_ref(), packet.old_tex as u16, packet.new_tex as u16);
         self.invalidate_cache();
     }
 
@@ -270,8 +321,13 @@ impl MapState {
     pub fn handle_paste(&mut self, packet: &channel1::PasteClient, clipboard_data: &[u8]) {
         if let Some((cb_sel, nodes)) = sauer_map::clipboard::decode_clipboard(clipboard_data) {
             let mut paste_sel = packet.sel.clone();
-            paste_sel.s = sauer_proto::data::Vec3 { x: cb_sel.s[0], y: cb_sel.s[1], z: cb_sel.s[2] };
-            paste_sel.orient = sauer_proto::data::Orient::try_from(cb_sel.orient as i32).unwrap_or(sauer_proto::data::Orient::Left);
+            paste_sel.s = sauer_proto::data::Vec3 {
+                x: cb_sel.s[0],
+                y: cb_sel.s[1],
+                z: cb_sel.s[2],
+            };
+            paste_sel.orient = sauer_proto::data::Orient::try_from(cb_sel.orient as i32)
+                .unwrap_or(sauer_proto::data::Orient::Left);
             self.apply_block(&paste_sel, nodes, true);
         }
     }
@@ -283,8 +339,16 @@ impl MapState {
     }
 
     pub fn handle_edit_v_slot(&mut self, packet: &channel1::EditVSlot) {
-        if packet.extra_data.is_empty() { return; }
-        self.world.apply_vslots(&to_selection(&packet.sel), packet.all_faces, packet.delta != 0, &packet.extra_data, &mut self.meta.vslots);
+        if packet.extra_data.is_empty() {
+            return;
+        }
+        self.world.apply_vslots(
+            &to_selection(&packet.sel),
+            packet.all_faces,
+            packet.delta != 0,
+            &packet.extra_data,
+            &mut self.meta.vslots,
+        );
         self.invalidate_cache();
     }
 }

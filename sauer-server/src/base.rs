@@ -1,8 +1,9 @@
-/// The built-in Sauerbraten base plugin, always present as the innermost plugin.
-/// User plugins run before it and can cancel any handler.
+//! The built-in Sauerbraten base plugin, always present as the innermost plugin.
+//! User plugins run before it and can cancel any handler.
+
 use crate::{
     Server,
-    items::{ServerItem, apply_pickup, canpickup, entity_to_item_type, spawntime},
+    items::{ServerItem, apply_pickup, canpickup, spawntime},
     players::combat::{explosion_damage, gun_damage_per_ray},
     players::{ClipboardData, clear_player, init_player},
     plugin::{Context, Plugin},
@@ -15,22 +16,21 @@ use sauer_proto::{
         ShotFx, SpawnServer, UndoServer,
     },
     channel2,
-    data::{ClientState, GameMode, MasterMode, PlayerState, Privilege, SetTeamReason},
+    data::{ClientState, GameMode, ItemType, MasterMode, PlayerState, Privilege, SetTeamReason},
 };
 use std::sync::{Arc, Weak};
 use tracing::info;
 
 pub(crate) struct Base<P: Plugin> {
-    /// Weak back-reference to the full `(Base<P>, P)` arc so that `Base` can
+    /// Weak back-reference to the full `(P, Base<P>)` arc so that `Base` can
     /// fire semantic hooks back through the complete plugin chain.
-    plugin: Weak<(Base<P>, P)>,
+    plugin: Weak<(P, Base<P>)>,
 }
 
 impl<P: Plugin> Base<P> {
-    pub(crate) fn new(plugin: Weak<(Base<P>, P)>) -> Self {
+    pub(crate) fn new(plugin: Weak<(P, Base<P>)>) -> Self {
         Self { plugin }
     }
-
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -600,8 +600,8 @@ impl<P: Plugin> Plugin for Base<P> {
         let idx = packet.ent_id as usize;
         let new_item = {
             let mut items = server.items.write().unwrap();
-            match entity_to_item_type(packet.type_) {
-                Some(item_type) => {
+            match ItemType::try_from(packet.type_) {
+                Ok(item_type) => {
                     if items.list.len() <= idx {
                         items.list.resize_with(idx + 1, || ServerItem {
                             item_type,
@@ -622,7 +622,7 @@ impl<P: Plugin> Plugin for Base<P> {
                         }
                     }
                 }
-                None => {
+                Err(_) => {
                     if let Some(item) = items.list.get_mut(idx) {
                         item.spawned = false;
                         item.spawn_time_ms = 0;

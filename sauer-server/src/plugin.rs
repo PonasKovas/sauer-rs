@@ -205,12 +205,11 @@ macro_rules! make_packet_handlers_for_tuple {
     ) => {
         $(
             async fn $method_name(&self, ctx: &mut Context, packet: & $packet_struct) {
-                // run the right (newer) plugin, and the left - older
-                self.1.$method_name(ctx, packet).await;
+                self.0.$method_name(ctx, packet).await;
                 if ctx.cancelled {
                     return;
                 }
-                self.0.$method_name(ctx, packet).await;
+                self.1.$method_name(ctx, packet).await;
             }
         )*
     };
@@ -220,76 +219,71 @@ impl Plugin for () {}
 
 impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
     async fn init(&self, server: &mut Server) {
-        // run the right (newer) plugin, and the left - older
+        self.0.init(server).await;
         self.1.init(server).await;
-        self.0.init(server).await
     }
     async fn start(&self, server: &Arc<Server>) {
-        // run the right (newer) plugin, and the left - older
+        self.0.start(server).await;
         self.1.start(server).await;
-        self.0.start(server).await
     }
     async fn connected(&self, ctx: &mut Context) {
-        // run the right (newer) plugin, and the left - older
-        self.1.connected(ctx).await;
+        self.0.connected(ctx).await;
         if ctx.cancelled {
             return;
         }
-        self.0.connected(ctx).await;
+        self.1.connected(ctx).await;
     }
     async fn disconnected(&self, ctx: &mut Context) {
-        // run the right (newer) plugin, and the left - older
-        self.1.disconnected(ctx).await;
         self.0.disconnected(ctx).await;
+        self.1.disconnected(ctx).await;
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
-        self.1.on_client_welcomed(ctx).await;
+        self.0.on_client_welcomed(ctx).await;
         if ctx.cancelled {
             return;
         }
-        self.0.on_client_welcomed(ctx).await;
+        self.1.on_client_welcomed(ctx).await;
     }
 
     async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {
-        self.1.map_changed(ctx, map_name, mode).await;
+        self.0.map_changed(ctx, map_name, mode).await;
         if ctx.cancelled {
             return;
         }
-        self.0.map_changed(ctx, map_name, mode).await;
+        self.1.map_changed(ctx, map_name, mode).await;
     }
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
-        self.1.on_spawn(ctx, state).await;
+        self.0.on_spawn(ctx, state).await;
         if ctx.cancelled {
             return;
         }
-        self.0.on_spawn(ctx, state).await;
+        self.1.on_spawn(ctx, state).await;
     }
 
     async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) {
-        self.1.on_chat(ctx, text).await;
+        self.0.on_chat(ctx, text).await;
         if ctx.cancelled {
             return;
         }
-        self.0.on_chat(ctx, text).await;
+        self.1.on_chat(ctx, text).await;
     }
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
-        self.1.on_command(ctx, args).await;
+        self.0.on_command(ctx, args).await;
         if ctx.cancelled {
             return;
         }
-        self.0.on_command(ctx, args).await;
+        self.1.on_command(ctx, args).await;
     }
 
     async fn map(&self, ctx: &mut Context, p: &Bytes) {
-        // run the right (newer) plugin, and the left - older
-        self.1.map(ctx, p).await;
+        self.0.map(ctx, p).await;
         if ctx.cancelled {
             return;
         }
-        self.0.map(ctx, p).await;
+        self.1.map(ctx, p).await;
     }
 
     make_packet_handlers_for_tuple! {
