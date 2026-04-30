@@ -211,9 +211,9 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
         sleep(Duration::from_millis(500)).await;
 
         let mut chunks = Vec::new();
-        crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 8, &mut chunks);
+        crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
         chunks.shuffle(&mut rand::thread_rng());
-        crate::geo_sync::broadcast_chunks(&server, author_cn, chunks, &vslots, 5).await;
+        crate::geo_sync::broadcast_chunks(&server, author_cn, chunks, &vslots, 20).await;
 
         sleep(Duration::from_millis(500)).await;
 
@@ -421,11 +421,11 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
         sleep(Duration::from_millis(500)).await;
 
         let mut chunks = Vec::new();
-        crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 8, &mut chunks);
+        crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
         chunks.shuffle(&mut rand::thread_rng());
 
         let author_cn = server.client_cns().first().copied().unwrap_or(0) as i32;
-        crate::geo_sync::send_chunks_to_client(&server, target_cn, author_cn, chunks, &vslots, 5)
+        crate::geo_sync::send_chunks_to_client(&server, target_cn, author_cn, chunks, &vslots, 20)
             .await;
 
         sleep(Duration::from_millis(500)).await;
