@@ -25,8 +25,6 @@ pub const TRAP_EDIT_PARTICLE_ATTRS: [i16; 5] = [34, 100, 100, 0, 0];
 pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
 pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
 pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
-pub const TRAP_EDIT_PARTICLE_ENT_ID_1: i32 = 9998;
-pub const TRAP_EDIT_PARTICLE_ENT_ID_2: i32 = 9999;
 
 // ─── Packet Memory Tracker ────────────────────────────────────────────────────
 
@@ -118,27 +116,54 @@ impl Plugin for DeathrunEdit {
             z: origin[2] + forward[2] * dist,
         };
 
-        let ent1 = Client {
-            client_num: cn as i32,
-            packet: channel1::EditEnt {
-                ent_id: TRAP_EDIT_PARTICLE_ENT_ID_1,
-                pos: particle_pos.clone(),
-                type_: EntityType::Particles,
-                attrs: TRAP_EDIT_PARTICLE_ATTRS.map(|x| x as i32),
-            },
+        let ent_id = {
+            let mut state = get_server_state(server).write().unwrap();
+
+            if let Some(id) = state.trap_edit_particle_ent {
+                id
+            } else {
+                let map = match state.map.as_mut() {
+                    Some(m) => m,
+                    None => return,
+                };
+
+                let id = map
+                    .world
+                    .entities
+                    .iter()
+                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                    .unwrap_or_else(|| {
+                        let i = map.world.entities.len();
+                        map.world.entities.push(ogz_rs::data::Entity {
+                            position: [0.0; 3],
+                            attrs: [0; 5],
+                            ent_type: ogz_rs::data::EntityType::Empty,
+                            extra_data: vec![],
+                        });
+                        i
+                    });
+
+                if let Some(ent) = map.world.entities.get_mut(id) {
+                    ent.ent_type = ogz_rs::data::EntityType::Particles;
+                    ent.attrs = TRAP_EDIT_PARTICLE_ATTRS;
+                }
+
+                state.trap_edit_particle_ent = Some(id);
+                id
+            }
         };
-        let ent2 = Client {
+
+        let ent = Client {
             client_num: cn as i32,
             packet: channel1::EditEnt {
-                ent_id: TRAP_EDIT_PARTICLE_ENT_ID_2,
+                ent_id: ent_id as i32,
                 pos: particle_pos,
                 type_: EntityType::Particles,
                 attrs: TRAP_EDIT_PARTICLE_ATTRS.map(|x| x as i32),
             },
         };
 
-        server.send_chan1(cn, &ent1);
-        server.send_chan1(cn, &ent2);
+        server.send_chan1(cn, &ent);
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {

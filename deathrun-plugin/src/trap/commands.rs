@@ -500,26 +500,24 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
     };
 
-    let clear_ent1 = Client {
-        client_num: ctx.cn() as i32,
-        packet: channel1::EditEnt {
-            ent_id: crate::edit::TRAP_EDIT_PARTICLE_ENT_ID_1,
-            pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-            type_: sauer_proto::data::EntityType::Empty,
-            attrs: [0; 5],
-        },
-    };
-    let clear_ent2 = Client {
-        client_num: ctx.cn() as i32,
-        packet: channel1::EditEnt {
-            ent_id: crate::edit::TRAP_EDIT_PARTICLE_ENT_ID_2,
-            pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-            type_: sauer_proto::data::EntityType::Empty,
-            attrs: [0; 5],
-        },
-    };
-    server.broadcast_chan1(&clear_ent1);
-    server.broadcast_chan1(&clear_ent2);
+    if let Some(ent_id) = state.trap_edit_particle_ent.take() {
+        server.broadcast_chan1(&Client {
+            client_num: ctx.cn() as i32,
+            packet: channel1::EditEnt {
+                ent_id: ent_id as i32,
+                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                type_: sauer_proto::data::EntityType::Empty,
+                attrs: [0; 5],
+            },
+        });
+
+        if let Some(map) = state.map.as_mut() {
+            if let Some(ent) = map.world.entities.get_mut(ent_id) {
+                ent.ent_type = ogz_rs::data::EntityType::Empty;
+                ent.attrs = [0; 5];
+            }
+        }
+    }
 
     // Collect the minimal per-cell diff to get accurate (no artifact) tight bounds.
     let current_map = state.map.as_ref().unwrap();

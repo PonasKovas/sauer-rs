@@ -348,6 +348,7 @@ pub struct DeathrunState {
     pub waiting_for_map: bool,
     pub traps: Vec<Trap>,
     pub trap_edit: Option<crate::trap::TrapEditState>,
+    pub trap_edit_particle_ent: Option<usize>,
 }
 
 impl Default for DeathrunState {
@@ -357,6 +358,7 @@ impl Default for DeathrunState {
             waiting_for_map: false,
             traps: Vec::new(),
             trap_edit: None,
+            trap_edit_particle_ent: None,
         }
     }
 }
