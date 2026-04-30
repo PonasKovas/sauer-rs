@@ -368,63 +368,54 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
     });
 }
 
-fn check_win_conditions(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>) {
+fn check_win_conditions(
+    server: &Arc<Server>,
+    maps: &Arc<RwLock<PlayMaps>>,
+    ignore_cn: Option<u32>,
+) {
     let mut lock = maps.write().unwrap();
     if lock.round_state != RoundState::Playing {
         return;
     }
 
     let cns = server.client_cns();
-    if cns.is_empty() {
-        lock.round_state = RoundState::NotStarted;
-        server.set_master_mode(MasterMode::Veto);
-        return;
-    }
-
-    let evil_cn = match lock.evil_cn {
-        Some(cn) => cn,
-        None => return,
-    };
-
-    if !cns.contains(&evil_cn) {
-        declare_win(
-            server,
-            maps,
-            &mut lock,
-            "\x0C1Good\x0C7 (Evil disconnected)",
-        );
-        return;
-    }
-
-    let evil_state = server.players.try_get(evil_cn).map(|p| p.client_state);
-    if evil_state == Some(ClientState::Dead) || evil_state == Some(ClientState::Spectator) {
-        declare_win(server, maps, &mut lock, "\x0C1Good\x0C7 (Evil died)");
-        return;
-    }
-
-    let mut good_spawned_count = 0;
-    let mut good_alive_count = 0;
+    let mut evil_alive = 0;
+    let mut good_alive = 0;
 
     for &cn in &cns {
-        if cn == evil_cn {
+        if Some(cn) == ignore_cn {
             continue;
         }
-        if lock.spawned_this_round.contains(&cn) {
-            good_spawned_count += 1;
-            if let Some(p) = server.players.try_get(cn) {
-                if p.client_state == ClientState::Alive {
-                    good_alive_count += 1;
-                }
-            }
+        let Some(p) = server.players.try_get(cn) else {
+            continue;
+        };
+        if p.client_state != ClientState::Alive {
+            continue;
+        }
+
+        if Some(cn) == lock.evil_cn {
+            evil_alive += 1;
+        } else {
+            good_alive += 1;
         }
     }
 
-    if good_spawned_count > 0 && good_alive_count == 0 {
+    if evil_alive == 0 && good_alive == 0 {
+        // Only trigger if round was actually running and we aren't just empty (e.g. at start)
+        declare_win(server, maps, &mut lock, "Round reset (No players left)");
+    } else if evil_alive == 0 {
         declare_win(
             server,
             maps,
             &mut lock,
-            "\x0C3Evil\x0C7 (All Good players died)",
+            "\x0C1Good\x0C7 (Evil died/disconnected)",
+        );
+    } else if good_alive == 0 {
+        declare_win(
+            server,
+            maps,
+            &mut lock,
+            "\x0C3Evil\x0C7 (All Good players died/disconnected)",
         );
     }
 }
@@ -598,7 +589,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
     }
 
     if !to_spectate.is_empty() {
-        check_win_conditions(server, maps);
+        check_win_conditions(server, maps, None);
     }
 }
 
@@ -667,7 +658,7 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.write().unwrap().remove_player_afk(cn);
-        check_win_conditions(server, &maps);
+        check_win_conditions(server, &maps, Some(cn));
     }
 
     async fn on_player_died(&self, ctx: &mut Context, victim_cn: u32, _actor_cn: u32) {
@@ -676,7 +667,7 @@ impl Plugin for DeathrunPlay {
         if maps.read().unwrap().round_state == RoundState::Playing {
             server.set_spectator(victim_cn, true);
         }
-        check_win_conditions(server, &maps);
+        check_win_conditions(server, &maps, None);
     }
 
     async fn on_damage(&self, ctx: &mut Context, target_cn: u32, actor_cn: u32, _damage: &mut i32) {
