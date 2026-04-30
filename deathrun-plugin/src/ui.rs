@@ -167,18 +167,34 @@ pub fn broadcast_round_start(server: &Server, evil_name: Option<&str>) {
     }
 }
 
-pub fn broadcast_round_over(server: &Server, winner: &str) {
-    broadcast_banner(
-        server,
-        &[
-            header("ROUND OVER"),
-            b().color(THEME.hi)
-                .push_str("  Winner: ")
-                .color(THEME.accent)
-                .push_str(winner)
-                .build(),
-        ],
-    );
+pub fn broadcast_round_over(server: &Server, winner: &str, top_times: &[(String, f32)]) {
+    let mut lines = vec![
+        header("ROUND OVER"),
+        b().color(THEME.hi)
+            .push_str("  Winner: ")
+            .color(THEME.accent)
+            .push_str(winner)
+            .build(),
+    ];
+
+    if !top_times.is_empty() {
+        lines.push(section("Top Times"));
+        for (i, (name, time)) in top_times.iter().enumerate() {
+            lines.push(
+                b().color(THEME.dim)
+                    .push_str(&format!("    {}. ", i + 1))
+                    .color(THEME.good)
+                    .push_str(name)
+                    .color(THEME.dim)
+                    .push_str(" - ")
+                    .color(THEME.hi)
+                    .push_str(&format!("{:.2}s", time))
+                    .build()
+            );
+        }
+    }
+
+    broadcast_banner(server, &lines);
 }
 
 pub fn broadcast_map_changed(server: &Server, player_name: &str, map_name: &str) {
