@@ -122,6 +122,19 @@ fn broadcast_banner(server: &Server, lines: &[CubeString]) {
 
 // ─── Game event messages ──────────────────────────────────────────────────────
 
+pub fn broadcast_trap_edit_started(server: &Server, trap_idx: usize) {
+    broadcast_banner(
+        server,
+        &[
+            header(&format!("TRAP {} EDIT MODE", trap_idx)),
+            body("  You are now editing this trap's active state."),
+            body("  Any geometry, texture, and entity changes you make"),
+            body("  within the bounds of your edits will be recorded."),
+            tip("#endtrap", "save your changes and return to normal mode"),
+        ],
+    );
+}
+
 pub fn broadcast_round_start(server: &Server, evil_name: Option<&str>) {
     if let Some(name) = evil_name {
         broadcast_banner(

@@ -381,13 +381,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
             affected_entities: std::collections::HashSet::new(),
         });
         drop(state);
-        server.broadcast_chan1(&ServMsg {
-            text: format!(
-                "Trap edit mode started for trap {}. Type #endtrap to finish and save.",
-                trap_idx
-            )
-            .lossy_cubestring(),
-        });
+        crate::ui::broadcast_trap_edit_started(server, trap_idx);
         return;
     };
 
@@ -440,13 +434,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         });
     }
 
-    server.broadcast_chan1(&ServMsg {
-        text: format!(
-            "Trap {} edit mode: existing trigger applied. Edit and #endtrap to save.",
-            trap_idx
-        )
-        .lossy_cubestring(),
-    });
+    crate::ui::broadcast_trap_edit_started(server, trap_idx);
 }
 
 pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
@@ -490,14 +478,9 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
         original_map: Box::new(original_map),
         affected_entities: std::collections::HashSet::new(),
     });
+    drop(state);
 
-    server.broadcast_chan1(&ServMsg {
-        text: format!(
-            "Trap edit mode started for trap {}. Type #endtrap to finish and save.",
-            trap_idx
-        )
-        .lossy_cubestring(),
-    });
+    crate::ui::broadcast_trap_edit_started(server, trap_idx);
 }
 
 pub fn cmd_endtrap(ctx: &Context) {
@@ -516,6 +499,27 @@ pub fn cmd_endtrap(ctx: &Context) {
             return;
         }
     };
+
+    let clear_ent1 = Client {
+        client_num: ctx.cn() as i32,
+        packet: channel1::EditEnt {
+            ent_id: crate::edit::TRAP_EDIT_PARTICLE_ENT_ID_1,
+            pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            type_: sauer_proto::data::EntityType::Empty,
+            attrs: [0; 5],
+        },
+    };
+    let clear_ent2 = Client {
+        client_num: ctx.cn() as i32,
+        packet: channel1::EditEnt {
+            ent_id: crate::edit::TRAP_EDIT_PARTICLE_ENT_ID_2,
+            pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+            type_: sauer_proto::data::EntityType::Empty,
+            attrs: [0; 5],
+        },
+    };
+    server.broadcast_chan1(&clear_ent1);
+    server.broadcast_chan1(&clear_ent2);
 
     // Collect the minimal per-cell diff to get accurate (no artifact) tight bounds.
     let current_map = state.map.as_ref().unwrap();

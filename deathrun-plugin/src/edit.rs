@@ -12,7 +12,7 @@ use sauer_map::raycast::raycast;
 use sauer_proto::{
     Client, channel0,
     channel1::{self, EditMode},
-    data::{ClientState, Direction, GameMode, PlayerState, Privilege},
+    data::{ClientState, Direction, EntityType, GameMode, PlayerState, Privilege, Vec3},
 };
 use sauer_server::{
     Server,
@@ -20,6 +20,12 @@ use sauer_server::{
 };
 use std::sync::RwLock;
 use tracing::{info, warn};
+
+pub const TRAP_EDIT_PARTICLE_ATTRS: [i16; 5] = [34, 100, 100, 0, 0];
+pub const TRAP_EDIT_PARTICLE_DIST: f32 = 5.0;
+pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 15.0;
+pub const TRAP_EDIT_PARTICLE_ENT_ID_1: i32 = 9998;
+pub const TRAP_EDIT_PARTICLE_ENT_ID_2: i32 = 9999;
 
 // ─── Packet Memory Tracker ────────────────────────────────────────────────────
 
@@ -35,12 +41,14 @@ fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
 
 pub struct DeathrunEdit {
     player_dirs: DashMap<u32, Direction>,
+    last_particle_update: DashMap<u32, tokio::time::Instant>,
 }
 
 impl DeathrunEdit {
     pub fn new() -> Self {
         Self {
             player_dirs: DashMap::new(),
+            last_particle_update: DashMap::new(),
         }
     }
 }
@@ -54,8 +62,72 @@ impl Plugin for DeathrunEdit {
         server.extra.insert(RwLock::new(state));
     }
 
-    async fn pos(&self, _ctx: &mut Context, packet: &channel0::Position) {
+    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
         self.player_dirs.insert(packet.client_num, packet.dir);
+
+        let server = ctx.server();
+        let is_editing_trap = get_server_state(server)
+            .read()
+            .unwrap()
+            .trap_edit
+            .is_some();
+
+        if !is_editing_trap {
+            return;
+        }
+
+        let cn = packet.client_num;
+        let now = tokio::time::Instant::now();
+        if let Some(mut last) = self.last_particle_update.get_mut(&cn) {
+            if now.duration_since(*last).as_millis() < 200 {
+                return;
+            }
+            *last = now;
+        } else {
+            self.last_particle_update.insert(cn, now);
+        }
+
+        let yaw_rad = (packet.dir.yaw as f32).to_radians();
+        let mut pitch = (packet.dir.pitch as f32) + TRAP_EDIT_PARTICLE_PITCH_OFFSET;
+        if pitch > 90.0 {
+            pitch = 90.0;
+        }
+        let pitch_rad = pitch.to_radians();
+
+        let forward = [
+            -yaw_rad.sin() * pitch_rad.cos(),
+            yaw_rad.cos() * pitch_rad.cos(),
+            pitch_rad.sin(),
+        ];
+
+        let eye_z = packet.pos.z + 14.0;
+        let particle_pos = Vec3 {
+            x: packet.pos.x + forward[0] * TRAP_EDIT_PARTICLE_DIST,
+            y: packet.pos.y + forward[1] * TRAP_EDIT_PARTICLE_DIST,
+            z: eye_z + forward[2] * TRAP_EDIT_PARTICLE_DIST,
+        };
+
+        let ent1 = Client {
+            client_num: cn as i32,
+            packet: channel1::EditEnt {
+                ent_id: TRAP_EDIT_PARTICLE_ENT_ID_1,
+                pos: particle_pos.clone(),
+                type_: EntityType::Particles,
+                attrs: TRAP_EDIT_PARTICLE_ATTRS.map(|x| x as i32),
+            },
+        };
+        let ent2 = Client {
+            client_num: cn as i32,
+            packet: channel1::EditEnt {
+                ent_id: TRAP_EDIT_PARTICLE_ENT_ID_2,
+                pos: particle_pos,
+                type_: EntityType::Particles,
+                attrs: TRAP_EDIT_PARTICLE_ATTRS.map(|x| x as i32),
+            },
+        };
+
+        server.send_chan1(cn, &ent1);
+        server.send_chan1(cn, &ent2);
     }
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
@@ -225,6 +297,7 @@ impl Plugin for DeathrunEdit {
             state.map = None;
             state.waiting_for_map = true;
             state.traps.clear();
+            state.trap_edit = None;
         }
         for c in server.client_cns() {
             server.set_spectator(c, true);
@@ -297,6 +370,7 @@ impl Plugin for DeathrunEdit {
                     s.map = Some(state);
                     s.traps = loaded_traps;
                     s.waiting_for_map = false;
+                    s.trap_edit = None;
                     // Reset button vslot colors in the map before it's sent to clients.
                     let traps_snapshot: Vec<_> = s
                         .traps
