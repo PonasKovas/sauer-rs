@@ -2,10 +2,10 @@ use crate::map_state::{DeathrunState, MapState, Trap, get_server_state};
 use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
-use rand::seq::SliceRandom;
 use ogz_rs::data::{MapConfig, Variable};
+use rand::seq::SliceRandom;
 use sauer_proto::{
-    Client, channel1,
+    Client, channel0, channel1,
     data::{
         ClientState, EditVarValue, EntityType, GameMode, MasterMode, Orient, SelInfo,
         SetTeamReason, Vec3,
@@ -15,10 +15,33 @@ use sauer_server::{
     Server,
     plugin::{Context, Plugin},
 };
-use std::collections::{HashMap, HashSet};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, Instant, sleep};
 use tracing::{info, warn};
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayConfig {
+    /// Seconds without movement before a player is auto-spectated for AFK.
+    #[serde(default = "default_afk_timeout")]
+    pub afk_timeout_secs: u64,
+}
+
+fn default_afk_timeout() -> u64 {
+    10
+}
+
+impl Default for PlayConfig {
+    fn default() -> Self {
+        Self {
+            afk_timeout_secs: default_afk_timeout(),
+        }
+    }
+}
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum RoundState {
@@ -41,6 +64,10 @@ pub struct PlayMaps {
     pub evil_cn: Option<u32>,
     pub round_state: RoundState,
     pub spawned_this_round: HashSet<u32>,
+    /// Last recorded position per connected player.
+    afk_last_pos: HashMap<u32, [f32; 3]>,
+    /// Time of the last significant movement per player.
+    afk_last_move: HashMap<u32, Instant>,
 }
 
 impl Default for PlayMaps {
@@ -53,6 +80,8 @@ impl Default for PlayMaps {
             evil_cn: None,
             round_state: RoundState::NotStarted,
             spawned_this_round: HashSet::new(),
+            afk_last_pos: HashMap::new(),
+            afk_last_move: HashMap::new(),
         }
     }
 }
@@ -113,16 +142,34 @@ impl PlayMaps {
         }
         (None, ds)
     }
+
+    pub fn update_afk_pos(&mut self, cn: u32, pos: [f32; 3]) {
+        let moved = self.afk_last_pos.get(&cn).map_or(true, |last| {
+            let d = [pos[0] - last[0], pos[1] - last[1], pos[2] - last[2]];
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 0.25 // 0.5 unit threshold
+        });
+        self.afk_last_pos.insert(cn, pos);
+        if moved {
+            self.afk_last_move.insert(cn, Instant::now());
+        }
+    }
+
+    pub fn remove_player_afk(&mut self, cn: u32) {
+        self.afk_last_pos.remove(&cn);
+        self.afk_last_move.remove(&cn);
+    }
 }
 
 pub struct DeathrunPlay {
     maps: Arc<RwLock<PlayMaps>>,
+    config: PlayConfig,
 }
 
 impl DeathrunPlay {
-    pub fn new() -> Self {
+    pub fn new(config: PlayConfig) -> Self {
         Self {
             maps: Arc::new(RwLock::new(PlayMaps::default())),
+            config,
         }
     }
 
@@ -497,6 +544,47 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
     true
 }
 
+fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Duration) {
+    let now = Instant::now();
+
+    let to_spectate: Vec<u32> = {
+        let lock = maps.read().unwrap();
+        if lock.round_state != RoundState::Playing {
+            return;
+        }
+        let cns = server.client_cns();
+        if cns.len() <= 1 {
+            return;
+        }
+        cns.into_iter()
+            .filter(|&cn| {
+                server
+                    .players
+                    .try_get(cn)
+                    .map_or(false, |p| p.client_state == ClientState::Alive)
+                    && lock
+                        .afk_last_move
+                        .get(&cn)
+                        .map_or(false, |&t| now.duration_since(t) >= timeout)
+            })
+            .collect()
+    };
+
+    for cn in &to_spectate {
+        let name = server
+            .players
+            .try_get(*cn)
+            .map(|p| p.name.strip_colors().to_utf8())
+            .unwrap_or_default();
+        ui::broadcast(server, ui::warn_msg(&format!("{name} was spectated for being AFK.")));
+        server.set_spectator(*cn, true);
+    }
+
+    if !to_spectate.is_empty() {
+        check_win_conditions(server, maps);
+    }
+}
+
 impl Plugin for DeathrunPlay {
     async fn init(&self, server: &mut Server) {
         *server.map_name.write().unwrap() = "".lossy_cubestring();
@@ -506,6 +594,18 @@ impl Plugin for DeathrunPlay {
         let (_, state) = self.maps.read().unwrap().make_active_state();
         server.extra.insert(RwLock::new(state));
         server.extra.insert(Arc::clone(&self.maps));
+    }
+
+    async fn start(&self, server: &Arc<Server>) {
+        let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        let server = Arc::clone(server);
+        let timeout = Duration::from_secs(self.config.afk_timeout_secs);
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(1)).await;
+                check_afk(&server, &maps, timeout);
+            }
+        });
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
@@ -536,9 +636,18 @@ impl Plugin for DeathrunPlay {
         }
     }
 
+    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+        let cn = ctx.cn();
+        let server = ctx.server();
+        let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
+        maps.write().unwrap().update_afk_pos(cn, [packet.pos.x, packet.pos.y, packet.pos.z]);
+    }
+
     async fn disconnected(&self, ctx: &mut Context) {
+        let cn = ctx.cn();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        maps.write().unwrap().remove_player_afk(cn);
         check_win_conditions(server, &maps);
     }
 

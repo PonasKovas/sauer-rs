@@ -1,6 +1,6 @@
 use clap::Parser;
 use cube_string::IntoCubeStringLossy;
-use deathrun_plugin::{DeathrunEdit, DeathrunPlay, play::PlayMaps};
+use deathrun_plugin::{DeathrunEdit, DeathrunPlay, play::{PlayConfig, PlayMaps}};
 use sauer_plugin_lua::{LuaPlugin, LuaPluginOptions};
 use sauer_proto::data::MasterMode;
 use sauer_server::{Server, ServerBuilder, plugin::Plugin};
@@ -37,6 +37,8 @@ struct Config {
     pub map_dir: Option<PathBuf>,
     #[serde(default)]
     pub base: BaseConfig,
+    #[serde(default)]
+    pub deathrun_play: PlayConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,7 +190,7 @@ async fn main() {
             }
         }
         ServerMode::Play => {
-            let play = DeathrunPlay::new();
+            let play = DeathrunPlay::new(config.deathrun_play.clone());
 
             if let Some(ref map_dir) = config.map_dir {
                 load_maps_from_dir(map_dir, &play).await;

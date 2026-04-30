@@ -7,3 +7,6 @@ map_dir = "maps/"
 server_desc = "sauer-rs"
 server_auth = ""
 master_mode = "Locked"
+
+[deathrun_play]
+afk_timeout_secs = 10

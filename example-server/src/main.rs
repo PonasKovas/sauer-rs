@@ -47,7 +47,7 @@ async fn main() {
         .max_peers(config.max_peers)
         .plugin(config.base)
         .plugin(DeathrunEdit::new())
-        .plugin(DeathrunPlay::new())
+        .plugin(DeathrunPlay::new(Default::default()))
         .plugin(lua_plugin);
 
     if let Err(e) = server.run().await {
