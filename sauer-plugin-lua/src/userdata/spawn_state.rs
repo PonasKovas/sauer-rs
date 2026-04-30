@@ -50,7 +50,9 @@ impl UserData for SpawnStateUD {
             Ok(())
         });
 
-        fields.add_field_method_get("ammo_rocket_launcher", |_, this| Ok(this.0.ammo.rocket_launcher));
+        fields.add_field_method_get("ammo_rocket_launcher", |_, this| {
+            Ok(this.0.ammo.rocket_launcher)
+        });
         fields.add_field_method_set("ammo_rocket_launcher", |_, this, val: i32| {
             this.0.ammo.rocket_launcher = val;
             Ok(())
@@ -62,7 +64,9 @@ impl UserData for SpawnStateUD {
             Ok(())
         });
 
-        fields.add_field_method_get("ammo_grenade_launcher", |_, this| Ok(this.0.ammo.grenade_launcher));
+        fields.add_field_method_get("ammo_grenade_launcher", |_, this| {
+            Ok(this.0.ammo.grenade_launcher)
+        });
         fields.add_field_method_set("ammo_grenade_launcher", |_, this, val: i32| {
             this.0.ammo.grenade_launcher = val;
             Ok(())

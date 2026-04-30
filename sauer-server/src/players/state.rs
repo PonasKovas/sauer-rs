@@ -50,7 +50,13 @@ impl Server {
             p.state = Some(state.clone());
             p.quad_millis = 0;
         }
-        self.send_chan1(cn, &SpawnState { client_num: cn as i32, state });
+        self.send_chan1(
+            cn,
+            &SpawnState {
+                client_num: cn as i32,
+                state,
+            },
+        );
     }
 
     /// Prepare a respawn: increment life_sequence, reset state, send N_SPAWNSTATE to this client.

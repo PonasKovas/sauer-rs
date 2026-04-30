@@ -32,7 +32,12 @@ impl SauerRead for BaseInfo {
         let ammotype = if ammotype_val == 0 {
             None
         } else {
-            Some(ItemType::try_from(ammotype_val).map_err(|_| crate::ParseError::InvalidEnumValue { value: ammotype_val, enum_name: "ItemType" })?)
+            Some(ItemType::try_from(ammotype_val).map_err(|_| {
+                crate::ParseError::InvalidEnumValue {
+                    value: ammotype_val,
+                    enum_name: "ItemType",
+                }
+            })?)
         };
 
         Ok(Self {

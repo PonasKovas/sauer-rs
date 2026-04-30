@@ -22,7 +22,11 @@ pub(super) fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 
 // ─── Selection helpers ────────────────────────────────────────────────────────
 
-pub(super) fn get_selections(adj: [i32; 3], button_size: i32, hit_orient: u8) -> (SelInfo, SelInfo) {
+pub(super) fn get_selections(
+    adj: [i32; 3],
+    button_size: i32,
+    hit_orient: u8,
+) -> (SelInfo, SelInfo) {
     let d = (hit_orient >> 1) as usize;
     let dc = (hit_orient & 1) as usize;
     let mut editf_o = adj;
@@ -202,7 +206,10 @@ pub(super) fn send_atomic_rebuild(
 
 // ─── check_and_rebuild_traps ──────────────────────────────────────────────────
 
-pub fn check_and_rebuild_traps(ctx: &sauer_server::plugin::Context, intersects: impl Fn(&crate::map_state::Trap) -> bool) {
+pub fn check_and_rebuild_traps(
+    ctx: &sauer_server::plugin::Context,
+    intersects: impl Fn(&crate::map_state::Trap) -> bool,
+) {
     let server = ctx.server().clone();
     let cn = ctx.cn();
     let mut state = get_server_state(&server).write().unwrap();
@@ -245,10 +252,15 @@ pub fn check_and_rebuild_traps(ctx: &sauer_server::plugin::Context, intersects: 
     for trap in to_rebuild {
         if let Some(map) = state.map.as_mut() {
             let sel = sauer_map::Selection {
-                o: Vec3 { x: trap.button_pos[0], y: trap.button_pos[1], z: trap.button_pos[2] },
+                o: Vec3 {
+                    x: trap.button_pos[0],
+                    y: trap.button_pos[1],
+                    z: trap.button_pos[2],
+                },
                 s: Vec3 { x: 1, y: 1, z: 1 },
                 grid: trap.button_size,
-                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
+                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
+                    .unwrap_or(sauer_proto::data::Orient::Left),
                 cx: 0,
                 cxs: 2,
                 cy: 0,

@@ -5,8 +5,8 @@ use crate::{
 };
 use bytes::Bytes;
 use cube_string::CubeString;
-use sauer_proto::{channel0, channel1, data::GameMode};
 use sauer_proto::data::PlayerState;
+use sauer_proto::{channel0, channel1, data::GameMode};
 use sauer_server::{Context, Plugin, Server};
 use std::sync::Arc;
 use tracing::error;
@@ -130,7 +130,9 @@ impl Plugin for LuaPlugin {
         for callback in &self.callbacks.map_changed {
             let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), map_name.clone(), mode, event))
+                callback
+                    .callback
+                    .call::<()>((ctx.cn(), map_name.clone(), mode, event))
             });
 
             if let Err(e) = r {
@@ -152,7 +154,9 @@ impl Plugin for LuaPlugin {
             let r = self.lua.scope(|scope| {
                 let state_ref = scope.create_userdata_ref_mut(&mut ud)?;
                 let event_ref = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), state_ref, event_ref))
+                callback
+                    .callback
+                    .call::<()>((ctx.cn(), state_ref, event_ref))
             });
 
             if let Err(e) = r {

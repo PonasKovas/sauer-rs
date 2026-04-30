@@ -62,8 +62,7 @@ pub async fn send_chunks_to_client(
     delay_ms: u64,
 ) {
     for (pos, size, node) in chunks {
-        let (unpack_len, data) =
-            sauer_map::clipboard::generate_clipboard(&node, size, vslots);
+        let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, vslots);
         let sel = SelInfo {
             o: Vec3 {
                 x: pos[0],
@@ -98,8 +97,7 @@ pub async fn broadcast_chunks(
     delay_ms: u64,
 ) {
     for (pos, size, node) in chunks {
-        let (unpack_len, data) =
-            sauer_map::clipboard::generate_clipboard(&node, size, vslots);
+        let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, vslots);
         let sel = SelInfo {
             o: Vec3 {
                 x: pos[0],

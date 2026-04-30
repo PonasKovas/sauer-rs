@@ -23,9 +23,7 @@ pub mod utils;
 mod welcome;
 
 pub use builder::ServerBuilder;
-pub use items::{
-    Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
-};
+pub use items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime};
 pub use players::{ClipboardData, PlayerData, Players};
 pub use plugin::{Context, Plugin};
 
@@ -72,14 +70,22 @@ impl Server {
 
     // ── Targeted sends ────────────────────────────────────────────────────────
 
-    pub fn send_chan0(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug) {
+    pub fn send_chan0(
+        &self,
+        cn: u32,
+        pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug,
+    ) {
         packet_log::trace_out(cn, &pkt);
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan0(pkt);
         }
     }
 
-    pub fn send_chan1(&self, cn: u32, pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug) {
+    pub fn send_chan1(
+        &self,
+        cn: u32,
+        pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug,
+    ) {
         packet_log::trace_out(cn, &pkt);
         if let Some(peer) = self.clients.get(&cn) {
             peer.try_send_chan1(pkt);
@@ -108,7 +114,11 @@ impl Server {
         }
     }
 
-    pub fn broadcast_except_chan0(&self, except: u32, pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug) {
+    pub fn broadcast_except_chan0(
+        &self,
+        except: u32,
+        pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug,
+    ) {
         packet_log::trace_out_broadcast_except(except, &pkt);
         for entry in self.clients.iter() {
             if *entry.key() != except {
@@ -117,7 +127,11 @@ impl Server {
         }
     }
 
-    pub fn broadcast_except_chan1(&self, except: u32, pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug) {
+    pub fn broadcast_except_chan1(
+        &self,
+        except: u32,
+        pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug,
+    ) {
         packet_log::trace_out_broadcast_except(except, &pkt);
         for entry in self.clients.iter() {
             if *entry.key() != except {
@@ -149,7 +163,6 @@ impl Server {
     pub fn client_count(&self) -> usize {
         self.clients.len()
     }
-
 }
 
 impl Default for Server {

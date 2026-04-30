@@ -1,9 +1,11 @@
 use crate::Server;
 use bytes::Bytes;
 use cube_string::CubeString;
-use sauer_proto::{channel0, channel1, data::{GameMode, PlayerState}};
+use sauer_proto::{
+    channel0, channel1,
+    data::{GameMode, PlayerState},
+};
 use std::sync::Arc;
-
 
 pub struct Context {
     pub(crate) server: Arc<Server>,

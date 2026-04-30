@@ -1,3 +1,5 @@
+use super::stored::sync_traps_to_map;
+use super::{BUTTON_FRONT_TEX, BUTTON_SIDE_TEX, BUTTON_SIZE, TrapEditState};
 use crate::map_state::{Trap, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use ogz_rs::data::Material;
@@ -8,8 +10,6 @@ use sauer_proto::{
     data::{EditFaceMode, SelInfo, Vec3},
 };
 use sauer_server::plugin::Context;
-use super::{BUTTON_FRONT_TEX, BUTTON_SIDE_TEX, BUTTON_SIZE, TrapEditState};
-use super::stored::sync_traps_to_map;
 
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let cn = ctx.cn();
@@ -39,7 +39,11 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
 
     let map = state.map.as_mut().unwrap();
     let sel = Selection {
-        o: Vec3 { x: trap.button_pos[0], y: trap.button_pos[1], z: trap.button_pos[2] },
+        o: Vec3 {
+            x: trap.button_pos[0],
+            y: trap.button_pos[1],
+            z: trap.button_pos[2],
+        },
         s: Vec3 { x: 1, y: 1, z: 1 },
         grid: trap.button_size,
         orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
@@ -87,7 +91,11 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     };
 
     let mut adj = [0i32; 3];
-    adj[d] = if dc == 0 { snap_d - BUTTON_SIZE } else { snap_d };
+    adj[d] = if dc == 0 {
+        snap_d - BUTTON_SIZE
+    } else {
+        snap_d
+    };
     adj[r_axis] = snap(hit_pt[r_axis]);
     adj[c_axis] = snap(hit_pt[c_axis]);
 
@@ -100,7 +108,11 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     }
 
     let sel = Selection {
-        o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        o: Vec3 {
+            x: adj[0],
+            y: adj[1],
+            z: adj[2],
+        },
         s: Vec3 { x: 1, y: 1, z: 1 },
         grid: BUTTON_SIZE,
         orient: sauer_proto::data::Orient::try_from(hit_orient as i32)
@@ -116,12 +128,14 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     map.world.set_texture(&sel, BUTTON_FRONT_TEX, false);
     map.world.set_material(
         &sel,
-        Material { alpha: true, ..Default::default() },
+        Material {
+            alpha: true,
+            ..Default::default()
+        },
     );
 
     let target_cn = cn as i32;
-    let (adj_sel, fill_sel) =
-        super::placement::get_selections(adj, BUTTON_SIZE, hit_orient);
+    let (adj_sel, fill_sel) = super::placement::get_selections(adj, BUTTON_SIZE, hit_orient);
 
     super::placement::apply_internal_vslots(map, &adj_sel);
 
@@ -176,7 +190,9 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     server.broadcast_chan1(&Client {
         client_num: target_cn,
-        packet: channel1::DelCube { sel: adj_sel.clone() },
+        packet: channel1::DelCube {
+            sel: adj_sel.clone(),
+        },
     });
     crate::geo_sync::broadcast_geometry(&server, target_cn, &adj_sel, clip_unpack_len, &clip_data);
 
@@ -201,7 +217,10 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             server.broadcast_chan1(&Client {
                 client_num: target_cn,
                 packet: channel1::EditFace {
-                    sel: SelInfo { corner, ..adj_sel.clone() },
+                    sel: SelInfo {
+                        corner,
+                        ..adj_sel.clone()
+                    },
                     dir: 1,
                     mode: EditFaceMode::Corner,
                 },
@@ -226,7 +245,9 @@ pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
         None => {
             server.send_chan1(
                 cn,
-                &ServMsg { text: "Not looking at a trap.".lossy_cubestring() },
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
             );
             return;
         }
@@ -260,7 +281,9 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
         None => {
             server.send_chan1(
                 cn,
-                &ServMsg { text: "Not looking at a trap.".lossy_cubestring() },
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
             );
             return;
         }
@@ -306,7 +329,9 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
             None => {
                 server.send_chan1(
                     cn,
-                    &ServMsg { text: "Not looking at a trap.".lossy_cubestring() },
+                    &ServMsg {
+                        text: "Not looking at a trap.".lossy_cubestring(),
+                    },
                 );
                 return;
             }
@@ -368,8 +393,16 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
 
     // Phase 2: apply the existing trigger state to the server map and broadcast to clients.
     let region_sel = SelInfo {
-        o: Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-        s: Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+        o: Vec3 {
+            x: clip_pos[0],
+            y: clip_pos[1],
+            z: clip_pos[2],
+        },
+        s: Vec3 {
+            x: clip_s[0],
+            y: clip_s[1],
+            z: clip_s[2],
+        },
         grid: clip_grid,
         orient: sauer_proto::data::Orient::Left,
         cx: 0,
@@ -442,7 +475,9 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
         None => {
             server.send_chan1(
                 cn,
-                &ServMsg { text: "Not looking at a trap.".lossy_cubestring() },
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
             );
             return;
         }
@@ -474,7 +509,9 @@ pub fn cmd_endtrap(ctx: &Context) {
         None => {
             server.send_chan1(
                 ctx.cn(),
-                &ServMsg { text: "No trap is currently being edited.".lossy_cubestring() },
+                &ServMsg {
+                    text: "No trap is currently being edited.".lossy_cubestring(),
+                },
             );
             return;
         }
@@ -608,8 +645,16 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     let target_cn = ctx.cn() as i32;
     let region_sel = SelInfo {
-        o: sauer_proto::data::Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
-        s: sauer_proto::data::Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+        o: sauer_proto::data::Vec3 {
+            x: clip_pos[0],
+            y: clip_pos[1],
+            z: clip_pos[2],
+        },
+        s: sauer_proto::data::Vec3 {
+            x: clip_s[0],
+            y: clip_s[1],
+            z: clip_s[2],
+        },
         grid: clip_grid,
         orient: sauer_proto::data::Orient::Left,
         cx: 0,
@@ -624,7 +669,9 @@ pub fn cmd_endtrap(ctx: &Context) {
     if !trigger_cells.is_empty() {
         server.broadcast_chan1(&Client {
             client_num: target_cn,
-            packet: channel1::DelCube { sel: region_sel.clone() },
+            packet: channel1::DelCube {
+                sel: region_sel.clone(),
+            },
         });
         crate::geo_sync::broadcast_geometry(
             server,

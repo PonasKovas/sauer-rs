@@ -1,5 +1,5 @@
-use crate::{Cube, Node};
 use crate::world::World;
+use crate::{Cube, Node};
 
 /// Contains information about a successful raycast hit.
 #[derive(Debug, Clone)]

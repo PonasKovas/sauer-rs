@@ -21,11 +21,31 @@ pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
 
 pub use sauer_core::{EntityType, ItemType, Orient, Selection as SelInfo, Vec3};
 
-impl crate::internal::SauerWrite for Orient { fn sauer_write(&self, out: &mut Vec<u8>) { (*self as i32).sauer_write(out); } }
-impl crate::internal::SauerRead for Orient { fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> { Ok(Orient::try_from(i32::sauer_read(reader)?).unwrap_or(Orient::Left)) } }
-impl crate::internal::SauerWrite for EntityType { fn sauer_write(&self, out: &mut Vec<u8>) { (i32::from(*self)).sauer_write(out); } }
-impl crate::internal::SauerRead for EntityType { fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> { Ok(EntityType::try_from(i32::sauer_read(reader)?).unwrap_or(EntityType::Empty)) } }
-impl crate::internal::SauerWrite for ItemType { fn sauer_write(&self, out: &mut Vec<u8>) { (*self as i32).sauer_write(out); } }
+impl crate::internal::SauerWrite for Orient {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        (*self as i32).sauer_write(out);
+    }
+}
+impl crate::internal::SauerRead for Orient {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+        Ok(Orient::try_from(i32::sauer_read(reader)?).unwrap_or(Orient::Left))
+    }
+}
+impl crate::internal::SauerWrite for EntityType {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        (i32::from(*self)).sauer_write(out);
+    }
+}
+impl crate::internal::SauerRead for EntityType {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+        Ok(EntityType::try_from(i32::sauer_read(reader)?).unwrap_or(EntityType::Empty))
+    }
+}
+impl crate::internal::SauerWrite for ItemType {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        (*self as i32).sauer_write(out);
+    }
+}
 impl crate::internal::SauerRead for ItemType {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
         Ok(ItemType::try_from(i32::sauer_read(reader)?).unwrap_or(ItemType::Shells))

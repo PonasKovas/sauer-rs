@@ -3,7 +3,9 @@ use crate::{
     internal::{SauerRead, SauerWrite},
 };
 
-pub(crate) fn read_quantized<const Q: u32>(reader: &mut &[u8]) -> Result<sauer_core::Vec3<f32>, ParseError> {
+pub(crate) fn read_quantized<const Q: u32>(
+    reader: &mut &[u8],
+) -> Result<sauer_core::Vec3<f32>, ParseError> {
     Ok(sauer_core::Vec3 {
         x: i32::sauer_read(reader)? as f32 / Q as f32,
         y: i32::sauer_read(reader)? as f32 / Q as f32,

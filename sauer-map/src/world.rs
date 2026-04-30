@@ -13,36 +13,89 @@ pub struct World {
     pub entities: Vec<Entity>,
 }
 
-use std::collections::HashSet;
 use ogz_rs::data::VSlot;
+use std::collections::HashSet;
 
 impl World {
     pub fn new_empty_root() -> Node {
-        let solid = Node::Leaf(Cube { edges: [0x80; 12], textures: [1; 6], material: Default::default() });
-        let air = Node::Leaf(Cube { edges: [0x00; 12], textures: [0; 6], material: Default::default() });
-        Node::Branch(Box::new([solid.clone(), solid.clone(), solid.clone(), solid, air.clone(), air.clone(), air.clone(), air]))
+        let solid = Node::Leaf(Cube {
+            edges: [0x80; 12],
+            textures: [1; 6],
+            material: Default::default(),
+        });
+        let air = Node::Leaf(Cube {
+            edges: [0x00; 12],
+            textures: [0; 6],
+            material: Default::default(),
+        });
+        Node::Branch(Box::new([
+            solid.clone(),
+            solid.clone(),
+            solid.clone(),
+            solid,
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air,
+        ]))
     }
 
     pub fn new_empty(size: i32) -> Self {
-        World { size, root: Self::new_empty_root(), entities: vec![] }
+        World {
+            size,
+            root: Self::new_empty_root(),
+            entities: vec![],
+        }
     }
 
     pub fn enlarge(&mut self) {
         let new_size = self.size * 2;
-        let solid = Node::Leaf(Cube { edges: [0x80; 12], textures: [1; 6], material: Default::default() });
-        let air = Node::Leaf(Cube { edges: [0x00; 12], textures: [0; 6], material: Default::default() });
+        let solid = Node::Leaf(Cube {
+            edges: [0x80; 12],
+            textures: [1; 6],
+            material: Default::default(),
+        });
+        let air = Node::Leaf(Cube {
+            edges: [0x00; 12],
+            textures: [0; 6],
+            material: Default::default(),
+        });
         let old_root = std::mem::replace(&mut self.root, air.clone());
-        self.root = Node::Branch(Box::new([old_root, solid.clone(), solid.clone(), solid, air.clone(), air.clone(), air.clone(), air]));
+        self.root = Node::Branch(Box::new([
+            old_root,
+            solid.clone(),
+            solid.clone(),
+            solid,
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air,
+        ]));
         self.size = new_size;
     }
 
-    pub fn apply_material(&mut self, sel: &Selection, matid: u16, matmask: u16, filtermat: u16, filtermask: u16, filtergeom: i32) {
+    pub fn apply_material(
+        &mut self,
+        sel: &Selection,
+        matid: u16,
+        matmask: u16,
+        filtermat: u16,
+        filtermask: u16,
+        filtergeom: i32,
+    ) {
         const EDITMATF_EMPTY: i32 = 0x10000;
         const EDITMATF_NOTEMPTY: i32 = 0x20000;
         const EDITMATF_SOLID: i32 = 0x30000;
         const EDITMATF_NOTSOLID: i32 = 0x40000;
         const MAT_AIR: u16 = 0;
-        fn apply(node: &mut Node, matid: u16, matmask: u16, filtermat: u16, filtermask: u16, filtergeom: i32) {
+        fn apply(
+            node: &mut Node,
+            matid: u16,
+            matmask: u16,
+            filtermat: u16,
+            filtermask: u16,
+            filtergeom: i32,
+        ) {
             match node {
                 Node::Leaf(cube) => {
                     let current = cube.material.to_bits();
@@ -55,27 +108,41 @@ impl World {
                             _ => false,
                         };
                         if !skip {
-                            let new_bits = if matid != MAT_AIR { (current & matmask) | matid } else { MAT_AIR };
+                            let new_bits = if matid != MAT_AIR {
+                                (current & matmask) | matid
+                            } else {
+                                MAT_AIR
+                            };
                             cube.material = Material::from_bits(new_bits);
                         }
                     }
                 }
                 Node::Branch(children) => {
-                    for child in children.iter_mut() { apply(child, matid, matmask, filtermat, filtermask, filtergeom); }
+                    for child in children.iter_mut() {
+                        apply(child, matid, matmask, filtermat, filtermask, filtergeom);
+                    }
                 }
             }
         }
-        self.edit_sel(sel, |node, _| apply(node, matid, matmask, filtermat, filtermask, filtergeom));
+        self.edit_sel(sel, |node, _| {
+            apply(node, matid, matmask, filtermat, filtermask, filtergeom)
+        });
     }
 
     pub fn replace_texture(&mut self, sel: Option<&Selection>, old_tex: u16, new_tex: u16) {
         fn replace(node: &mut Node, old_tex: u16, new_tex: u16) {
             match node {
                 Node::Leaf(cube) => {
-                    for t in &mut cube.textures { if *t == old_tex { *t = new_tex; } }
+                    for t in &mut cube.textures {
+                        if *t == old_tex {
+                            *t = new_tex;
+                        }
+                    }
                 }
                 Node::Branch(children) => {
-                    for child in children.iter_mut() { replace(child, old_tex, new_tex); }
+                    for child in children.iter_mut() {
+                        replace(child, old_tex, new_tex);
+                    }
                 }
             }
         }
@@ -86,75 +153,165 @@ impl World {
         }
     }
 
-    pub fn apply_vslots(&mut self, sel: &Selection, all_faces: bool, delta: bool, extra_data: &[u8], vslots: &mut Vec<Option<VSlot>>) {
-        let Some(ds) = crate::vslot::parse_packed_vslot(extra_data) else { return; };
+    pub fn apply_vslots(
+        &mut self,
+        sel: &Selection,
+        all_faces: bool,
+        delta: bool,
+        extra_data: &[u8],
+        vslots: &mut Vec<Option<VSlot>>,
+    ) {
+        let Some(ds) = crate::vslot::parse_packed_vslot(extra_data) else {
+            return;
+        };
         let orient = sel.orient as usize;
-        
-        fn crushededge(e: u8, dc: usize) -> bool { if dc != 0 { e == 0 } else { e == 0x88 } }
+
+        fn crushededge(e: u8, dc: usize) -> bool {
+            if dc != 0 { e == 0 } else { e == 0x88 }
+        }
         fn touchingface(cube: &Cube, orient: usize) -> bool {
-            let d = orient >> 1; let dc = orient & 1;
+            let d = orient >> 1;
+            let dc = orient & 1;
             for x in 0..2 {
                 for y in 0..2 {
                     let edge = cube.edges[(d << 2) + (y << 1) + x];
                     let val = if dc == 1 { edge >> 4 } else { edge & 0x0F };
-                    if val != (if dc == 1 { 8 } else { 0 }) { return false; }
+                    if val != (if dc == 1 { 8 } else { 0 }) {
+                        return false;
+                    }
                 }
             }
             true
         }
         fn visible_orient(cube: &Cube, orient: usize) -> usize {
-            const FACEEDGESIDX: [[usize; 4]; 6] = [[4,5,8,10], [6,7,9,11], [8,9,0,2], [10,11,1,3], [0,1,4,6], [2,3,5,7]];
+            const FACEEDGESIDX: [[usize; 4]; 6] = [
+                [4, 5, 8, 10],
+                [6, 7, 9, 11],
+                [8, 9, 0, 2],
+                [10, 11, 1, 3],
+                [0, 1, 4, 6],
+                [2, 3, 5, 7],
+            ];
             for i in 0..2 {
-                let a = FACEEDGESIDX[orient][i * 2 + 0]; let b = FACEEDGESIDX[orient][i * 2 + 1];
+                let a = FACEEDGESIDX[orient][i * 2 + 0];
+                let b = FACEEDGESIDX[orient][i * 2 + 1];
                 for j in 0..2 {
-                    if crushededge(cube.edges[a], j) && crushededge(cube.edges[b], j) && touchingface(cube, orient) {
+                    if crushededge(cube.edges[a], j)
+                        && crushededge(cube.edges[b], j)
+                        && touchingface(cube, orient)
+                    {
                         return ((a >> 2) << 1) + j;
                     }
                 }
             }
             orient
         }
-        fn collect_vslots(node: &Node, orient: usize, all_faces: bool, seen: &mut HashSet<u16>, ordered: &mut Vec<u16>) {
+        fn collect_vslots(
+            node: &Node,
+            orient: usize,
+            all_faces: bool,
+            seen: &mut HashSet<u16>,
+            ordered: &mut Vec<u16>,
+        ) {
             match node {
-                Node::Branch(children) => { for child in children.as_ref() { collect_vslots(child, orient, all_faces, seen, ordered); } }
+                Node::Branch(children) => {
+                    for child in children.as_ref() {
+                        collect_vslots(child, orient, all_faces, seen, ordered);
+                    }
+                }
                 Node::Leaf(cube) => {
-                    if all_faces { for face in 0..6 { let t = cube.textures[face]; if seen.insert(t) { ordered.push(t); } } }
-                    else { let i = visible_orient(cube, orient); let t = cube.textures[i]; if seen.insert(t) { ordered.push(t); } }
+                    if all_faces {
+                        for face in 0..6 {
+                            let t = cube.textures[face];
+                            if seen.insert(t) {
+                                ordered.push(t);
+                            }
+                        }
+                    } else {
+                        let i = visible_orient(cube, orient);
+                        let t = cube.textures[i];
+                        if seen.insert(t) {
+                            ordered.push(t);
+                        }
+                    }
                 }
             }
         }
-        fn apply_vslots_recursive(node: &mut Node, orient: usize, all_faces: bool, remap: &HashMap<u16, u16>) {
+        fn apply_vslots_recursive(
+            node: &mut Node,
+            orient: usize,
+            all_faces: bool,
+            remap: &HashMap<u16, u16>,
+        ) {
             match node {
-                Node::Branch(children) => { for child in children.iter_mut() { apply_vslots_recursive(child, orient, all_faces, remap); } }
+                Node::Branch(children) => {
+                    for child in children.iter_mut() {
+                        apply_vslots_recursive(child, orient, all_faces, remap);
+                    }
+                }
                 Node::Leaf(cube) => {
-                    if all_faces { for face in 0..6 { if let Some(&new_t) = remap.get(&cube.textures[face]) { cube.textures[face] = new_t; } } }
-                    else { let i = visible_orient(cube, orient); if let Some(&new_t) = remap.get(&cube.textures[i]) { cube.textures[i] = new_t; } }
+                    if all_faces {
+                        for face in 0..6 {
+                            if let Some(&new_t) = remap.get(&cube.textures[face]) {
+                                cube.textures[face] = new_t;
+                            }
+                        }
+                    } else {
+                        let i = visible_orient(cube, orient);
+                        if let Some(&new_t) = remap.get(&cube.textures[i]) {
+                            cube.textures[i] = new_t;
+                        }
+                    }
                 }
             }
         }
 
-        let mut seen = HashSet::new(); let mut ordered_textures = Vec::new();
-        let orient_dim = sel.orient as usize >> 1; let dc = sel.orient as usize & 1;
-        let r_dim = [1, 2, 0][orient_dim]; let c_dim = [2, 0, 1][orient_dim]; let d_dim = [0, 1, 2][orient_dim];
-        let s_r = sel.s[r_dim]; let s_c = sel.s[c_dim]; let s_d = sel.s[d_dim];
+        let mut seen = HashSet::new();
+        let mut ordered_textures = Vec::new();
+        let orient_dim = sel.orient as usize >> 1;
+        let dc = sel.orient as usize & 1;
+        let r_dim = [1, 2, 0][orient_dim];
+        let c_dim = [2, 0, 1][orient_dim];
+        let d_dim = [0, 1, 2][orient_dim];
+        let s_r = sel.s[r_dim];
+        let s_c = sel.s[c_dim];
+        let s_d = sel.s[d_dim];
 
         for z in 0..s_d {
             for y in 0..s_c {
                 for x in 0..s_r {
                     let mut pos = [0; 3];
-                    pos[r_dim] = x * sel.grid; pos[c_dim] = y * sel.grid; pos[d_dim] = dc as i32 * (s_d - 1) * sel.grid;
-                    pos[0] += sel.o[0]; pos[1] += sel.o[1]; pos[2] += sel.o[2];
-                    if dc == 1 { pos[d_dim] -= z * sel.grid; } else { pos[d_dim] += z * sel.grid; }
-                    let node = crate::octree::extract_node_at(&self.root, [0,0,0], self.size, pos, sel.grid);
+                    pos[r_dim] = x * sel.grid;
+                    pos[c_dim] = y * sel.grid;
+                    pos[d_dim] = dc as i32 * (s_d - 1) * sel.grid;
+                    pos[0] += sel.o[0];
+                    pos[1] += sel.o[1];
+                    pos[2] += sel.o[2];
+                    if dc == 1 {
+                        pos[d_dim] -= z * sel.grid;
+                    } else {
+                        pos[d_dim] += z * sel.grid;
+                    }
+                    let node = crate::octree::extract_node_at(
+                        &self.root,
+                        [0, 0, 0],
+                        self.size,
+                        pos,
+                        sel.grid,
+                    );
                     collect_vslots(&node, orient, all_faces, &mut seen, &mut ordered_textures);
                 }
             }
         }
 
-        let tex_remap: HashMap<u16, u16> = ordered_textures.iter()
-            .map(|&t| (t, crate::vslot::resolve_vslot(vslots, t, &ds, delta))).collect();
+        let tex_remap: HashMap<u16, u16> = ordered_textures
+            .iter()
+            .map(|&t| (t, crate::vslot::resolve_vslot(vslots, t, &ds, delta)))
+            .collect();
 
-        self.edit_sel(sel, |node, _| apply_vslots_recursive(node, orient, all_faces, &tex_remap));
+        self.edit_sel(sel, |node, _| {
+            apply_vslots_recursive(node, orient, all_faces, &tex_remap)
+        });
     }
 
     /// Constructs the spatial tree from raw OGZ data.
@@ -284,7 +441,14 @@ impl World {
     /// Directly sets the octree node at a power-of-2 aligned (pos, size) coordinate.
     /// Subdivides any Leaf nodes encountered on the way down as needed.
     pub fn set_node_at(&mut self, pos: [i32; 3], size: i32, node: Node) {
-        fn recurse(cur: &mut Node, cur_pos: [i32; 3], cur_size: i32, target_pos: [i32; 3], target_size: i32, new_node: Node) {
+        fn recurse(
+            cur: &mut Node,
+            cur_pos: [i32; 3],
+            cur_size: i32,
+            target_pos: [i32; 3],
+            target_size: i32,
+            new_node: Node,
+        ) {
             if cur_size == target_size {
                 *cur = new_node;
                 return;
@@ -304,7 +468,14 @@ impl World {
                     cur_pos[1] + cy as i32 * half,
                     cur_pos[2] + cz as i32 * half,
                 ];
-                recurse(&mut children[child_idx], child_pos, half, target_pos, target_size, new_node);
+                recurse(
+                    &mut children[child_idx],
+                    child_pos,
+                    half,
+                    target_pos,
+                    target_size,
+                    new_node,
+                );
             }
         }
         recurse(&mut self.root, [0, 0, 0], self.size, pos, size, node);

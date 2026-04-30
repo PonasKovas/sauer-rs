@@ -22,7 +22,11 @@ struct LimitedWriter {
 
 impl LimitedWriter {
     fn new() -> Self {
-        Self { head: String::with_capacity(MAX_HEAD), tail: String::new(), overflow: 0 }
+        Self {
+            head: String::with_capacity(MAX_HEAD),
+            tail: String::new(),
+            overflow: 0,
+        }
     }
 
     fn into_string(self) -> String {
@@ -31,23 +35,32 @@ impl LimitedWriter {
         } else if self.overflow == 0 {
             self.head + &self.tail
         } else {
-            format!("{}…[{} chars omitted]…{}", self.head, self.overflow, self.tail)
+            format!(
+                "{}…[{} chars omitted]…{}",
+                self.head, self.overflow, self.tail
+            )
         }
     }
 }
 
 // Largest char boundary index that is <= max.
 fn char_boundary_le(s: &str, max: usize) -> usize {
-    if max >= s.len() { return s.len(); }
+    if max >= s.len() {
+        return s.len();
+    }
     let mut i = max;
-    while !s.is_char_boundary(i) { i -= 1; }
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
     i
 }
 
 // Smallest char boundary index that is >= min.
 fn char_boundary_ge(s: &str, min: usize) -> usize {
     let mut i = min;
-    while i < s.len() && !s.is_char_boundary(i) { i += 1; }
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
     i
 }
 
@@ -58,7 +71,9 @@ impl fmt::Write for LimitedWriter {
         self.head.push_str(&s[..split]);
 
         let rest = &s[split..];
-        if rest.is_empty() { return Ok(()); }
+        if rest.is_empty() {
+            return Ok(());
+        }
 
         self.tail.push_str(rest);
         if self.tail.len() > MAX_TAIL {
@@ -126,14 +141,20 @@ fn parse_filters(expr: &str) -> Filters {
     let mut out_incl: HashSet<&'static str> = HashSet::new();
 
     for raw in expr.split(',').map(str::trim) {
-        if raw.is_empty() { continue; }
+        if raw.is_empty() {
+            continue;
+        }
 
         let (exclude, token) = match raw.strip_prefix('-') {
             Some(rest) => (true, rest),
             None => (false, raw),
         };
 
-        enum Dir { Both, In, Out }
+        enum Dir {
+            Both,
+            In,
+            Out,
+        }
         let (dir, name) = if let Some(n) = token.strip_prefix("in:") {
             (Dir::In, n)
         } else if let Some(n) = token.strip_prefix("out:") {
@@ -144,9 +165,16 @@ fn parse_filters(expr: &str) -> Filters {
 
         if name == "*" && !exclude {
             match dir {
-                Dir::Both => { in_all = true; out_all = true; }
-                Dir::In   => { in_all = true; }
-                Dir::Out  => { out_all = true; }
+                Dir::Both => {
+                    in_all = true;
+                    out_all = true;
+                }
+                Dir::In => {
+                    in_all = true;
+                }
+                Dir::Out => {
+                    out_all = true;
+                }
             }
             continue;
         }
@@ -154,15 +182,29 @@ fn parse_filters(expr: &str) -> Filters {
         let s = intern(name);
         if exclude {
             match dir {
-                Dir::Both => { in_excl.insert(s); out_excl.insert(s); }
-                Dir::In   => { in_excl.insert(s); }
-                Dir::Out  => { out_excl.insert(s); }
+                Dir::Both => {
+                    in_excl.insert(s);
+                    out_excl.insert(s);
+                }
+                Dir::In => {
+                    in_excl.insert(s);
+                }
+                Dir::Out => {
+                    out_excl.insert(s);
+                }
             }
         } else {
             match dir {
-                Dir::Both => { in_incl.insert(s); out_incl.insert(s); }
-                Dir::In   => { in_incl.insert(s); }
-                Dir::Out  => { out_incl.insert(s); }
+                Dir::Both => {
+                    in_incl.insert(s);
+                    out_incl.insert(s);
+                }
+                Dir::In => {
+                    in_incl.insert(s);
+                }
+                Dir::Out => {
+                    out_incl.insert(s);
+                }
             }
         }
     }
@@ -188,8 +230,7 @@ fn intern(s: &str) -> &'static str {
 fn filters() -> &'static Filters {
     static FILTERS: OnceLock<Filters> = OnceLock::new();
     FILTERS.get_or_init(|| {
-        let expr = std::env::var(ENV_VAR)
-            .unwrap_or_else(|_| DEFAULT_FILTER.to_string());
+        let expr = std::env::var(ENV_VAR).unwrap_or_else(|_| DEFAULT_FILTER.to_string());
         parse_filters(&expr)
     })
 }

@@ -5,7 +5,11 @@ pub mod io;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Vec3<T> { pub x: T, pub y: T, pub z: T }
+pub struct Vec3<T> {
+    pub x: T,
+    pub y: T,
+    pub z: T,
+}
 
 impl<T> std::ops::Index<usize> for Vec3<T> {
     type Output = T;
@@ -43,27 +47,47 @@ const _: () = {
     impl<T: FromLua> FromLua for Vec3<T> {
         fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
             let table = mlua::Table::from_lua(value, lua)?;
-            Ok(Self { x: table.get("x")?, y: table.get("y")?, z: table.get("z")? })
+            Ok(Self {
+                x: table.get("x")?,
+                y: table.get("y")?,
+                z: table.get("z")?,
+            })
         }
     }
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, TryFromPrimitive, IntoPrimitive)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy, TryFromPrimitive, IntoPrimitive,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
-pub enum Orient { Left = 0, Right = 1, Back = 2, Front = 3, Bottom = 4, Top = 5 }
+pub enum Orient {
+    Left = 0,
+    Right = 1,
+    Back = 2,
+    Front = 3,
+    Bottom = 4,
+    Top = 5,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Selection {
-    pub o: Vec3<i32>, pub s: Vec3<i32>, pub grid: i32, pub orient: Orient,
-    pub cx: i32, pub cxs: i32, pub cy: i32, pub cys: i32, pub corner: i32,
+    pub o: Vec3<i32>,
+    pub s: Vec3<i32>,
+    pub grid: i32,
+    pub orient: Orient,
+    pub cx: i32,
+    pub cxs: i32,
+    pub cy: i32,
+    pub cys: i32,
+    pub corner: i32,
 }
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{FromLua, IntoLua, Value, UserData, UserDataFields};
-    
+    use mlua::{FromLua, IntoLua, UserData, UserDataFields, Value};
+
     impl UserData for Selection {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
             fields.add_field_method_get("o", |_lua, this| Ok(this.o.clone()));
@@ -122,8 +146,21 @@ const _: () = {
     }
 
     impl_lua_enum!(Orient, Left, Right, Back, Front, Bottom, Top);
-    impl_lua_enum!(ItemType, Shells, Bullets, Rockets, Rounds, Grenades, Cartridges, Health, Boost, GreenArmour, YellowArmour, Quad);
-    
+    impl_lua_enum!(
+        ItemType,
+        Shells,
+        Bullets,
+        Rockets,
+        Rounds,
+        Grenades,
+        Cartridges,
+        Health,
+        Boost,
+        GreenArmour,
+        YellowArmour,
+        Quad
+    );
+
     impl IntoLua for EntityType {
         fn into_lua(self, lua: &mlua::Lua) -> mlua::Result<Value> {
             let s = match self {
@@ -214,22 +251,45 @@ const _: () = {
 impl Selection {
     pub fn bounds(&self) -> ([i32; 3], [i32; 3]) {
         let min = [self.o.x, self.o.y, self.o.z];
-        let max = [min[0] + self.s.x * self.grid, min[1] + self.s.y * self.grid, min[2] + self.s.z * self.grid];
+        let max = [
+            min[0] + self.s.x * self.grid,
+            min[1] + self.s.y * self.grid,
+            min[2] + self.s.z * self.grid,
+        ];
         (min, max)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive, IntoPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive, IntoPrimitive,
+)]
 #[repr(u8)]
-pub enum Volume { #[default] Air = 0, Water, Lava, Glass }
+pub enum Volume {
+    #[default]
+    Air = 0,
+    Water,
+    Lava,
+    Glass,
+}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive, IntoPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive, IntoPrimitive,
+)]
 #[repr(u8)]
-pub enum Clip { #[default] None = 0, NoClip, Clip, GameClip }
+pub enum Clip {
+    #[default]
+    None = 0,
+    NoClip,
+    Clip,
+    GameClip,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Material {
-    pub volume: Volume, pub clip: Clip, pub death: bool, pub alpha: bool,
+    pub volume: Volume,
+    pub clip: Clip,
+    pub death: bool,
+    pub alpha: bool,
 }
 impl Material {
     pub fn from_bits(bits: u16) -> Self {
@@ -241,68 +301,139 @@ impl Material {
         }
     }
     pub fn to_bits(self) -> u16 {
-        ((self.volume as u16) << 2) | ((self.clip as u16) << 5) | ((self.death as u16) << 8) | ((self.alpha as u16) << 10)
+        ((self.volume as u16) << 2)
+            | ((self.clip as u16) << 5)
+            | ((self.death as u16) << 8)
+            | ((self.alpha as u16) << 10)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Node { Branch(Box<[Node; 8]>), Leaf(Cube) }
+pub enum Node {
+    Branch(Box<[Node; 8]>),
+    Leaf(Cube),
+}
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Cube {
-    pub edges: [u8; 12], pub textures: [u16; 6],
+    pub edges: [u8; 12],
+    pub textures: [u16; 6],
     #[cfg_attr(feature = "serde", serde(skip))]
     pub material: Material,
 }
 impl Cube {
-    pub fn is_empty(&self) -> bool { self.edges == [0x00; 12] }
-    pub fn is_entirely_solid(&self) -> bool { self.edges == [0x80; 12] }
+    pub fn is_empty(&self) -> bool {
+        self.edges == [0x00; 12]
+    }
+    pub fn is_entirely_solid(&self) -> bool {
+        self.edges == [0x80; 12]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct VSlotParam { pub name: CubeString, pub values: [f32; 4] }
+pub struct VSlotParam {
+    pub name: CubeString,
+    pub values: [f32; 4],
+}
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
 pub struct VSlot {
-    pub prev: i32, pub params: Vec<VSlotParam>, pub scale: Option<f32>, pub rotation: Option<i32>,
-    pub offset: Option<(i32, i32)>, pub scroll: Option<(f32, f32)>, pub layer: Option<i32>,
-    pub alpha: Option<(f32, f32)>, pub color: Option<(f32, f32, f32)>,
+    pub prev: i32,
+    pub params: Vec<VSlotParam>,
+    pub scale: Option<f32>,
+    pub rotation: Option<i32>,
+    pub offset: Option<(i32, i32)>,
+    pub scroll: Option<(f32, f32)>,
+    pub layer: Option<i32>,
+    pub alpha: Option<(f32, f32)>,
+    pub color: Option<(f32, f32, f32)>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, IntoPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, IntoPrimitive,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum EntityType {
-    Empty = 0, Light = 1, MapModel = 2, PlayerStart = 3, EnvMap = 4, Particles = 5, MapSound = 6, SpotLight = 7,
-    IShells = 8, IBullets = 9, IRockets = 10, IRounds = 11, IGrenades = 12, ICartridges = 13, IHealth = 14, IBoost = 15,
-    IGreenArmour = 16, IYellowArmour = 17, IQuad = 18, Teleport = 19, TeleDest = 20, Monster = 21, Carrot = 22, JumpPad = 23,
-    Base = 24, RespawnPoint = 25, Box = 26, Barrel = 27, Platform = 28, Elevator = 29, Flag = 30,
-    #[num_enum(catch_all)] GameSpecific(i32),
+    Empty = 0,
+    Light = 1,
+    MapModel = 2,
+    PlayerStart = 3,
+    EnvMap = 4,
+    Particles = 5,
+    MapSound = 6,
+    SpotLight = 7,
+    IShells = 8,
+    IBullets = 9,
+    IRockets = 10,
+    IRounds = 11,
+    IGrenades = 12,
+    ICartridges = 13,
+    IHealth = 14,
+    IBoost = 15,
+    IGreenArmour = 16,
+    IYellowArmour = 17,
+    IQuad = 18,
+    Teleport = 19,
+    TeleDest = 20,
+    Monster = 21,
+    Carrot = 22,
+    JumpPad = 23,
+    Base = 24,
+    RespawnPoint = 25,
+    Box = 26,
+    Barrel = 27,
+    Platform = 28,
+    Elevator = 29,
+    Flag = 30,
+    #[num_enum(catch_all)]
+    GameSpecific(i32),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, IntoPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, IntoPrimitive,
+)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]
 pub enum ItemType {
-    Shells = 8, Bullets = 9, Rockets = 10, Rounds = 11, Grenades = 12, Cartridges = 13, Health = 14, Boost = 15, GreenArmour = 16, YellowArmour = 17, Quad = 18,
+    Shells = 8,
+    Bullets = 9,
+    Rockets = 10,
+    Rounds = 11,
+    Grenades = 12,
+    Cartridges = 13,
+    Health = 14,
+    Boost = 15,
+    GreenArmour = 16,
+    YellowArmour = 17,
+    Quad = 18,
 }
 impl TryFrom<EntityType> for ItemType {
     type Error = ();
     fn try_from(ent_type: EntityType) -> Result<Self, Self::Error> {
         match ent_type {
-            EntityType::IShells => Ok(ItemType::Shells), EntityType::IBullets => Ok(ItemType::Bullets),
-            EntityType::IRockets => Ok(ItemType::Rockets), EntityType::IRounds => Ok(ItemType::Rounds),
-            EntityType::IGrenades => Ok(ItemType::Grenades), EntityType::ICartridges => Ok(ItemType::Cartridges),
-            EntityType::IHealth => Ok(ItemType::Health), EntityType::IBoost => Ok(ItemType::Boost),
-            EntityType::IGreenArmour => Ok(ItemType::GreenArmour), EntityType::IYellowArmour => Ok(ItemType::YellowArmour),
-            EntityType::IQuad => Ok(ItemType::Quad), _ => Err(()),
+            EntityType::IShells => Ok(ItemType::Shells),
+            EntityType::IBullets => Ok(ItemType::Bullets),
+            EntityType::IRockets => Ok(ItemType::Rockets),
+            EntityType::IRounds => Ok(ItemType::Rounds),
+            EntityType::IGrenades => Ok(ItemType::Grenades),
+            EntityType::ICartridges => Ok(ItemType::Cartridges),
+            EntityType::IHealth => Ok(ItemType::Health),
+            EntityType::IBoost => Ok(ItemType::Boost),
+            EntityType::IGreenArmour => Ok(ItemType::GreenArmour),
+            EntityType::IYellowArmour => Ok(ItemType::YellowArmour),
+            EntityType::IQuad => Ok(ItemType::Quad),
+            _ => Err(()),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Entity {
-    pub position: [f32; 3], pub attrs: [i16; 5], pub ent_type: EntityType, pub extra_data: Vec<u8>,
+    pub position: [f32; 3],
+    pub attrs: [i16; 5],
+    pub ent_type: EntityType,
+    pub extra_data: Vec<u8>,
 }

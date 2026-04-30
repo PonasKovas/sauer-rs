@@ -134,11 +134,8 @@ impl MapState {
     }
 
     pub fn handle_edit_tex(&mut self, packet: &channel1::EditTex) {
-        self.world.set_texture(
-            &packet.sel,
-            packet.tex as u16,
-            packet.all_faces,
-        );
+        self.world
+            .set_texture(&packet.sel, packet.tex as u16, packet.all_faces);
         self.invalidate_cache();
     }
 

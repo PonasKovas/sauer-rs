@@ -70,7 +70,6 @@ impl Plugin for DeathrunEdit {
             && cmd != "#endtrap"
             && cmd != "#traptime"
             && cmd != "#traptimeout"
-            && cmd != "#recreate"
         {
             return;
         }
@@ -84,15 +83,13 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        if cmd == "#recreate" {
-            let divisions = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(8);
-            let delay_ms = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(5);
-            crate::recreate::spawn_recreate_map(server, cn, divisions, delay_ms);
-            return;
-        }
-
         if cmd == "#newtrap" || cmd == "#deltrap" {
-            if get_server_state(&server).read().unwrap().trap_edit.is_some() {
+            if get_server_state(&server)
+                .read()
+                .unwrap()
+                .trap_edit
+                .is_some()
+            {
                 server.send_chan1(
                     cn,
                     &ServMsg {
@@ -550,18 +547,18 @@ impl Plugin for DeathrunEdit {
                 let cb_data = cb.data.clone();
                 with_map_state_mut(ctx, |state| state.handle_paste(packet, &cb_data));
 
-        if let Some((cb_sel, _)) = sauer_map::clipboard::decode_clipboard(&cb_data) {
-            let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-            let max = [
-                min[0] + cb_sel.s[0] * packet.sel.grid,
-                min[1] + cb_sel.s[1] * packet.sel.grid,
-                min[2] + cb_sel.s[2] * packet.sel.grid,
-            ];
-            crate::trap::check_and_rebuild_traps(ctx, |trap| {
-                crate::trap::intersects_bounds(min, max, trap)
-            });
-            return;
-        }
+                if let Some((cb_sel, _)) = sauer_map::clipboard::decode_clipboard(&cb_data) {
+                    let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+                    let max = [
+                        min[0] + cb_sel.s[0] * packet.sel.grid,
+                        min[1] + cb_sel.s[1] * packet.sel.grid,
+                        min[2] + cb_sel.s[2] * packet.sel.grid,
+                    ];
+                    crate::trap::check_and_rebuild_traps(ctx, |trap| {
+                        crate::trap::intersects_bounds(min, max, trap)
+                    });
+                    return;
+                }
             }
         }
         crate::trap::check_and_rebuild_traps(ctx, |_| true);
