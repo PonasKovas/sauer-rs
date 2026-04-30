@@ -241,10 +241,9 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             let state_lock = get_server_state(&server);
             let state_read = state_lock.read().unwrap();
             let map = state_read.map.as_ref().unwrap();
-            let store_ids = crate::entity_store::get_store_entity_ids(
-                &map.world,
-                TRAP_DOMAIN
-            ).into_iter().collect::<HashSet<_>>();
+            let store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
+                .into_iter()
+                .collect::<HashSet<_>>();
             let variables = match &map.meta.config {
                 MapConfig::Modern { variables } => variables.clone(),
                 _ => vec![],
@@ -452,10 +451,9 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             Some(m) => m,
             None => return false,
         };
-        let store_ids = crate::entity_store::get_store_entity_ids(
-            &loaded.state.world,
-            TRAP_DOMAIN
-        ).into_iter().collect::<HashSet<_>>();
+        let store_ids = crate::entity_store::get_store_entity_ids(&loaded.state.world, TRAP_DOMAIN)
+            .into_iter()
+            .collect::<HashSet<_>>();
         let variables = match &loaded.state.meta.config {
             MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],
@@ -676,6 +674,19 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         check_win_conditions(server, &maps);
+    }
+
+    async fn on_damage(&self, ctx: &mut Context, target_cn: u32, actor_cn: u32, _damage: &mut i32) {
+        if target_cn == actor_cn {
+            return; // Self-damage is allowed
+        }
+        let server = ctx.server();
+        let target_team = server.players.try_get(target_cn).map(|p| p.team.clone());
+        let actor_team = server.players.try_get(actor_cn).map(|p| p.team.clone());
+
+        if target_team.is_some() && target_team == actor_team {
+            ctx.cancel();
+        }
     }
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {

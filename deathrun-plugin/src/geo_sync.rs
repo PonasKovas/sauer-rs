@@ -3,7 +3,6 @@ use sauer_proto::{
     data::{Orient, SelInfo, Vec3},
 };
 use sauer_server::Server;
-use tracing::info;
 
 /// Broadcast a ClipboardServer + PasteServer packet pair to all clients.
 pub fn broadcast_geometry(

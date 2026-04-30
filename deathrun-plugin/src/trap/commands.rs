@@ -505,7 +505,11 @@ pub fn cmd_endtrap(ctx: &Context) {
             client_num: ctx.cn() as i32,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                pos: sauer_proto::data::Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
                 type_: sauer_proto::data::EntityType::Empty,
                 attrs: [0; 5],
             },

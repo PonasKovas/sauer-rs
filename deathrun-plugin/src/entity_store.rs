@@ -116,7 +116,10 @@ fn build_entity(attrs: [u16; 5], version: u8, domain_id: u8) -> Entity {
 }
 
 pub fn get_store_entity_ids(world: &sauer_map::World, domain_id: u8) -> Vec<usize> {
-    world.entities.iter().enumerate()
+    world
+        .entities
+        .iter()
+        .enumerate()
         .filter_map(|(i, e)| entity_version(e, domain_id).map(|_| i))
         .collect()
 }

@@ -328,7 +328,16 @@ impl<P: Plugin> Plugin for Base<P> {
             if !check_hit(&server, target_cn, hit.life_sequence) {
                 continue;
             }
-            let damage = hit.rays * gun_damage_per_ray(packet.gun);
+            let mut damage = hit.rays * gun_damage_per_ray(packet.gun);
+            
+            ctx.cancelled = false;
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_damage(ctx, target_cn, cn, &mut damage).await;
+            }
+            if ctx.cancelled || damage <= 0 {
+                continue;
+            }
+
             if server.apply_damage(target_cn, cn, packet.gun, damage, hit.dir) {
                 if let Some(plugin) = self.plugin.upgrade() {
                     plugin.on_player_died(ctx, target_cn, cn).await;
@@ -356,7 +365,16 @@ impl<P: Plugin> Plugin for Base<P> {
             if !check_hit(&server, target_cn, hit.life_sequence) {
                 continue;
             }
-            let damage = explosion_damage(packet.gun, hit.dist, target_cn == cn);
+            let mut damage = explosion_damage(packet.gun, hit.dist, target_cn == cn);
+            
+            ctx.cancelled = false;
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_damage(ctx, target_cn, cn, &mut damage).await;
+            }
+            if ctx.cancelled || damage <= 0 {
+                continue;
+            }
+
             if server.apply_damage(target_cn, cn, packet.gun, damage, hit.dir) {
                 if let Some(plugin) = self.plugin.upgrade() {
                     plugin.on_player_died(ctx, target_cn, cn).await;

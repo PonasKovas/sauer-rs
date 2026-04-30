@@ -1,6 +1,9 @@
 use clap::Parser;
 use cube_string::IntoCubeStringLossy;
-use deathrun_plugin::{DeathrunEdit, DeathrunPlay, play::{PlayConfig, PlayMaps}};
+use deathrun_plugin::{
+    DeathrunEdit, DeathrunPlay,
+    play::{PlayConfig, PlayMaps},
+};
 use sauer_plugin_lua::{LuaPlugin, LuaPluginOptions};
 use sauer_proto::data::MasterMode;
 use sauer_server::{Server, ServerBuilder, plugin::Plugin};
