@@ -4,13 +4,14 @@ use crate::map_state::{
 use crate::trap::{
     check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
 };
+use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
 use sauer_map::raycast::raycast;
 use sauer_proto::{
     Client, channel0,
-    channel1::{self, EditMode, ServMsg},
+    channel1::{self, EditMode},
     data::{ClientState, Direction, GameMode, PlayerState, Privilege},
 };
 use sauer_server::{
@@ -90,11 +91,10 @@ impl Plugin for DeathrunEdit {
                 .trap_edit
                 .is_some()
             {
-                server.send_chan1(
+                ui::send_warn(
+                    &server,
                     cn,
-                    &ServMsg {
-                        text: "Cannot add or remove traps while in trap edit mode. Use #endtrap first.".lossy_cubestring(),
-                    },
+                    "Cannot add or remove traps while editing one. Use #endtrap first.",
                 );
                 return;
             }
@@ -103,12 +103,7 @@ impl Plugin for DeathrunEdit {
         let pos = match server.players.try_get(cn) {
             Some(p) => {
                 if p.client_state == ClientState::Spectator {
-                    server.send_chan1(
-                        cn,
-                        &ServMsg {
-                            text: "Cannot use trap commands while spectating.".lossy_cubestring(),
-                        },
-                    );
+                    ui::send_warn(&server, cn, "Cannot use trap commands while spectating.");
                     return;
                 }
                 p.position
@@ -211,15 +206,7 @@ impl Plugin for DeathrunEdit {
                     packet: EditMode { is_editing: false },
                 },
             );
-            ctx.server().send_chan1(
-                ctx.cn(),
-                &ServMsg {
-                    text: CubeString::builder()
-                        .color(cube_string::Color::Yellow)
-                        .push_str("Waiting for map upload.")
-                        .build(),
-                },
-            );
+            ui::send_warn(ctx.server(), ctx.cn(), "Waiting for map upload. Use /sendmap to proceed.");
             ctx.cancel();
         }
     }
@@ -255,12 +242,7 @@ impl Plugin for DeathrunEdit {
         let is_master = server.get_privilege(cn) >= Privilege::Master;
 
         if is_spectator && !is_master {
-            server.send_chan1(
-                cn,
-                &ServMsg {
-                    text: "You must be unspectated to upload a map.".lossy_cubestring(),
-                },
-            );
+            ui::send_warn(server, cn, "You must be unspectated to upload a map.");
             return;
         }
 
@@ -287,20 +269,16 @@ impl Plugin for DeathrunEdit {
                     Ok(None) => {}
                     Err(crate::entity_store::StoreError::VersionMismatch { expected, found }) => {
                         let msg = format!(
-                            "Trap store format mismatch (map has v{found}, server expects v{expected}). \
-                             Traps not loaded — please re-record traps and resave the map."
+                            "Trap store version mismatch (map v{found}, server v{expected}). \
+                             Traps not loaded - re-record traps and resave."
                         );
                         warn!("{msg}");
-                        server.broadcast_chan1(&ServMsg {
-                            text: msg.lossy_cubestring(),
-                        });
+                        ui::broadcast_warn(server, &msg);
                     }
                     Err(e) => {
                         let msg = format!("Failed to load trap store: {e}. Traps not loaded.");
                         warn!("{msg}");
-                        server.broadcast_chan1(&ServMsg {
-                            text: msg.lossy_cubestring(),
-                        });
+                        ui::broadcast_warn(server, &msg);
                     }
                 }
 
@@ -329,12 +307,7 @@ impl Plugin for DeathrunEdit {
                 }
 
                 server.set_spectator(cn, false);
-                server.send_chan1(
-                    cn,
-                    &ServMsg {
-                        text: "Map received. You can now spawn and edit.".lossy_cubestring(),
-                    },
-                );
+                ui::send(server, cn, ui::body("Map received. You can now spawn and edit freely."));
             }
             Err(e) => warn!("cn {cn} sent an invalid map: {e}"),
         }
@@ -350,6 +323,7 @@ impl Plugin for DeathrunEdit {
         if send_map_to(server, cn) {
             info!("sent map state to cn {cn} after welcome");
         }
+        ui::send_welcome_edit(server, cn);
     }
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
@@ -362,12 +336,7 @@ impl Plugin for DeathrunEdit {
 
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
         if !packet.val && is_waiting_for_map(ctx.server()) {
-            ctx.server().send_chan1(
-                ctx.cn(),
-                &ServMsg {
-                    text: "Waiting for map upload, /sendmap to proceed.".lossy_cubestring(),
-                },
-            );
+            ui::send_warn(ctx.server(), ctx.cn(), "Waiting for map upload. Use /sendmap to proceed.");
             ctx.cancel();
         }
     }

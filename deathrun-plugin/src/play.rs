@@ -1,5 +1,6 @@
 use crate::map_state::{DeathrunState, MapState, Trap, get_server_state};
 use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
+use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use rand::seq::SliceRandom;
 use sauer_proto::{
@@ -265,17 +266,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             ); // Resets screen
         }
 
-        if evil_cn.is_some() {
-            server.broadcast_chan1(&channel1::ServMsg {
-                text: "\x0C1Round Started! \x0C3Evil \x0C1has been chosen. Good luck!"
-                    .lossy_cubestring(),
-            });
-        } else {
-            server.broadcast_chan1(&channel1::ServMsg {
-                text: "\x0C1Round Started! No Evil player yet (waiting for more players)."
-                    .lossy_cubestring(),
-            });
-        }
+        let evil_name = evil_cn
+            .and_then(|cn| server.players.try_get(cn))
+            .map(|p| p.name.strip_colors().to_utf8());
+        ui::broadcast_round_start(&server, evil_name.as_deref());
     });
 }
 
@@ -347,11 +341,7 @@ fn declare_win(
     winner_text: &str,
 ) {
     lock.round_state = RoundState::Ended;
-    let msg = format!("Round Over! {} wins!", winner_text);
-    server.broadcast_chan1(&channel1::ServMsg {
-        text: msg.lossy_cubestring(),
-    });
-
+    ui::broadcast_round_over(server, winner_text);
     start_round_sequence(Arc::clone(server), Arc::clone(maps));
 }
 
@@ -475,12 +465,15 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
-        let (is_first, is_solo_round) = {
+        let (is_first, is_solo_round, map_name) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
             let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
-            (is_first, is_solo_round)
+            let map_name = lock.current_map.clone();
+            (is_first, is_solo_round, map_name)
         };
+
+        ui::send_welcome_play(server, cn, map_name.as_deref(), is_solo_round || is_first);
 
         if is_first || is_solo_round {
             // First player, or a second player joined a solo round: restart so evil gets assigned.
