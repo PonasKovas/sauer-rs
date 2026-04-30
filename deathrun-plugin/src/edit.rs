@@ -70,6 +70,7 @@ impl Plugin for DeathrunEdit {
             && cmd != "#endtrap"
             && cmd != "#traptime"
             && cmd != "#traptimeout"
+            && cmd != "#recreate"
         {
             return;
         }
@@ -80,6 +81,13 @@ impl Plugin for DeathrunEdit {
 
         if cmd == "#endtrap" {
             crate::trap::cmd_endtrap(ctx);
+            return;
+        }
+
+        if cmd == "#recreate" {
+            let divisions = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(8);
+            let delay_ms = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(5);
+            crate::recreate::spawn_recreate_map(server, cn, divisions, delay_ms);
             return;
         }
 

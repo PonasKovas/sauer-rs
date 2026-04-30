@@ -171,9 +171,12 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             server.set_spectator(cn, true);
         }
 
-        server.broadcast_chan1(&channel1::NewMap { size: world_size.trailing_zeros() as i32 });
+        server.broadcast_chan1(&channel1::NewMap {
+            size: world_size.trailing_zeros() as i32,
+        });
+        let author_cn = server.client_cns().first().copied().unwrap_or(0) as i32;
         server.broadcast_chan1(&Client {
-            client_num: -1,
+            client_num: author_cn,
             packet: channel1::DelCube {
                 sel: SelInfo {
                     o: Vec3 { x: 0, y: 0, z: 0 },
@@ -191,7 +194,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
 
         for i in 0..entities.len() {
             server.broadcast_chan1(&Client {
-                client_num: -1,
+                client_num: author_cn,
                 packet: channel1::EditEnt {
                     ent_id: i as i32,
                     pos: Vec3 {
@@ -210,13 +213,13 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
         let mut chunks = Vec::new();
         crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 8, &mut chunks);
         chunks.shuffle(&mut rand::thread_rng());
-        crate::geo_sync::broadcast_chunks(&server, -1, chunks, &vslots, 5).await;
+        crate::geo_sync::broadcast_chunks(&server, author_cn, chunks, &vslots, 5).await;
 
         sleep(Duration::from_millis(500)).await;
 
         for (i, ent) in entities.into_iter().enumerate() {
             server.broadcast_chan1(&Client {
-                client_num: -1,
+                client_num: author_cn,
                 packet: channel1::EditEnt {
                     ent_id: i as i32,
                     pos: Vec3 {
@@ -370,7 +373,9 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             target_cn,
             &Client {
                 client_num: target_cn as i32,
-                packet: channel1::NewMap { size: world_size.trailing_zeros() as i32 },
+                packet: channel1::NewMap {
+                    size: world_size.trailing_zeros() as i32,
+                },
             },
         );
 
@@ -419,7 +424,9 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
         crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 8, &mut chunks);
         chunks.shuffle(&mut rand::thread_rng());
 
-        crate::geo_sync::send_chunks_to_client(&server, target_cn, -1, chunks, &vslots, 5).await;
+        let author_cn = server.client_cns().first().copied().unwrap_or(0) as i32;
+        crate::geo_sync::send_chunks_to_client(&server, target_cn, author_cn, chunks, &vslots, 5)
+            .await;
 
         sleep(Duration::from_millis(500)).await;
 
