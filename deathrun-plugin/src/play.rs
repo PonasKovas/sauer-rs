@@ -519,8 +519,9 @@ impl Plugin for DeathrunPlay {
             let mut lock = maps.write().unwrap();
             match lock.round_state {
                 RoundState::Playing => {
-                    if lock.spawned_this_round.contains(&cn) {
-                        cancel = true; // One life only!
+                    let solo = lock.evil_cn.is_none();
+                    if !solo && lock.spawned_this_round.contains(&cn) {
+                        cancel = true; // One life only in multiplayer!
                     } else {
                         lock.spawned_this_round.insert(cn);
                     }
