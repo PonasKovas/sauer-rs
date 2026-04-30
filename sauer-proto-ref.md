@@ -81,20 +81,6 @@ Helper types used as fields in packet structs. Not packets themselves.
 - `Gl` = `5`
 - `Pistol` = `6`
 
-### `ItemType` (repr `i32`)
-
-- `Shells` = `8`
-- `Bullets` = `9`
-- `Rockets` = `10`
-- `Rounds` = `11`
-- `Grenades` = `12`
-- `Cartridges` = `13`
-- `Health` = `14`
-- `Boost` = `15`
-- `GreenArmour` = `16`
-- `YellowArmour` = `17`
-- `Quad` = `18`
-
 ### `MasterMode` (repr `i32`)
 
 - `Open` = `0`
@@ -166,51 +152,6 @@ Physical movement/contact state of an entity.
 - `StepUp` = `5`
 - `StepDown` = `6`
 - `Bounce` = `7`
-
-### `Orient` (repr `i32`)
-Cube face orientation used in cooperative editing (O_LEFT through O_TOP).
-
-- `Left` = `0`
-- `Right` = `1`
-- `Back` = `2`
-- `Front` = `3`
-- `Bottom` = `4`
-- `Top` = `5`
-
-### `EntityType` (repr `i32`)
-Map entity type.
-
-- `Empty` = `0`
-- `Light` = `1`
-- `MapModel` = `2`
-- `PlayerStart` = `3`
-- `EnvMap` = `4`
-- `Particles` = `5`
-- `MapSound` = `6`
-- `SpotLight` = `7`
-- `IShells` = `8`
-- `IBullets` = `9`
-- `IRockets` = `10`
-- `IRounds` = `11`
-- `IGrenades` = `12`
-- `ICartridges` = `13`
-- `IHealth` = `14`
-- `IBoost` = `15`
-- `IGreenArmour` = `16`
-- `IYellowArmour` = `17`
-- `IQuad` = `18`
-- `Teleport` = `19`
-- `TeleDest` = `20`
-- `Monster` = `21`
-- `Carrot` = `22`
-- `JumpPad` = `23`
-- `Base` = `24`
-- `RespawnPoint` = `25`
-- `Box` = `26`
-- `Barrel` = `27`
-- `Platform` = `28`
-- `Elevator` = `29`
-- `Flag` = `30`
 
 ### `EditFaceMode` (repr `i32`)
 Edit face operation mode.
@@ -305,19 +246,6 @@ Represents the game state of a player/client.
 - `armour_type: ArmourType`
 - `gun_select: Gun`
 - `ammo: PlayerAmmo`
-
-### `SelInfo`
-Cube selection information for cooperative editing geometry modifications.
-
-- `o: Vec3<i32>`
-- `s: Vec3<i32>`
-- `grid: i32`
-- `orient: Orient`
-- `cx: i32`
-- `cxs: i32`
-- `cy: i32`
-- `cys: i32`
-- `corner: i32`
 
 ### `HitInfo`
 Contains ray/hit information from a weapon shot or explosion.

@@ -241,16 +241,20 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             return;
         }
 
-        let evil_cn = *cns.choose(&mut rand::thread_rng()).unwrap();
+        let evil_cn = if cns.len() > 1 {
+            Some(*cns.choose(&mut rand::thread_rng()).unwrap())
+        } else {
+            None
+        };
 
         {
             let mut lock = maps.write().unwrap();
-            lock.evil_cn = Some(evil_cn);
+            lock.evil_cn = evil_cn;
             lock.round_state = RoundState::Playing;
         }
 
         for &cn in &cns {
-            let team = if cn == evil_cn { "evil" } else { "good" };
+            let team = if Some(cn) == evil_cn { "evil" } else { "good" };
             server.set_team(cn, team.lossy_cubestring(), SetTeamReason::Forced);
             server.set_spectator(cn, false); // Moves them into Dead state safely
             server.send_chan1(
@@ -261,10 +265,17 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             ); // Resets screen
         }
 
-        server.broadcast_chan1(&channel1::ServMsg {
-            text: "\x0C1Round Started! \x0C3Evil \x0C1has been chosen. Good luck!"
-                .lossy_cubestring(),
-        });
+        if evil_cn.is_some() {
+            server.broadcast_chan1(&channel1::ServMsg {
+                text: "\x0C1Round Started! \x0C3Evil \x0C1has been chosen. Good luck!"
+                    .lossy_cubestring(),
+            });
+        } else {
+            server.broadcast_chan1(&channel1::ServMsg {
+                text: "\x0C1Round Started! No Evil player yet (waiting for more players)."
+                    .lossy_cubestring(),
+            });
+        }
     });
 }
 
