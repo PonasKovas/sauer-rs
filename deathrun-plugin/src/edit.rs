@@ -22,8 +22,9 @@ use std::sync::RwLock;
 use tracing::{info, warn};
 
 pub const TRAP_EDIT_PARTICLE_ATTRS: [i16; 5] = [34, 100, 100, 0, 0];
-pub const TRAP_EDIT_PARTICLE_DIST: f32 = 5.0;
-pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 15.0;
+pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
+pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
+pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
 pub const TRAP_EDIT_PARTICLE_ENT_ID_1: i32 = 9998;
 pub const TRAP_EDIT_PARTICLE_ENT_ID_2: i32 = 9999;
 
@@ -66,13 +67,9 @@ impl Plugin for DeathrunEdit {
         self.player_dirs.insert(packet.client_num, packet.dir);
 
         let server = ctx.server();
-        let is_editing_trap = get_server_state(server)
-            .read()
-            .unwrap()
-            .trap_edit
-            .is_some();
+        let state = get_server_state(server).read().unwrap();
 
-        if !is_editing_trap {
+        if state.trap_edit.is_none() {
             return;
         }
 
@@ -87,11 +84,10 @@ impl Plugin for DeathrunEdit {
             self.last_particle_update.insert(cn, now);
         }
 
-        let yaw_rad = (packet.dir.yaw as f32).to_radians();
-        let mut pitch = (packet.dir.pitch as f32) + TRAP_EDIT_PARTICLE_PITCH_OFFSET;
-        if pitch > 90.0 {
-            pitch = 90.0;
-        }
+        let yaw = (packet.dir.yaw as f32) + TRAP_EDIT_PARTICLE_YAW_OFFSET;
+        let yaw_rad = yaw.to_radians();
+        let pitch =
+            ((packet.dir.pitch as f32) + TRAP_EDIT_PARTICLE_PITCH_OFFSET).clamp(-90.0, 90.0);
         let pitch_rad = pitch.to_radians();
 
         let forward = [
@@ -101,10 +97,25 @@ impl Plugin for DeathrunEdit {
         ];
 
         let eye_z = packet.pos.z + 14.0;
+        let origin = [packet.pos.x, packet.pos.y, eye_z];
+
+        let mut dist = TRAP_EDIT_PARTICLE_MAX_DIST;
+        if let Some(map) = state.map.as_ref() {
+            if let Some(hit) = sauer_map::raycast::raycast(
+                &map.world,
+                origin,
+                forward,
+                TRAP_EDIT_PARTICLE_MAX_DIST,
+            ) {
+                dist = (hit.dist - 1.0).max(1.0); // Pull back slightly from the wall so it doesn't clip
+            }
+        }
+        drop(state); // Drop the lock before sending to network
+
         let particle_pos = Vec3 {
-            x: packet.pos.x + forward[0] * TRAP_EDIT_PARTICLE_DIST,
-            y: packet.pos.y + forward[1] * TRAP_EDIT_PARTICLE_DIST,
-            z: eye_z + forward[2] * TRAP_EDIT_PARTICLE_DIST,
+            x: origin[0] + forward[0] * dist,
+            y: origin[1] + forward[1] * dist,
+            z: origin[2] + forward[2] * dist,
         };
 
         let ent1 = Client {
@@ -278,7 +289,11 @@ impl Plugin for DeathrunEdit {
                     packet: EditMode { is_editing: false },
                 },
             );
-            ui::send_warn(ctx.server(), ctx.cn(), "Waiting for map upload. Use /sendmap to proceed.");
+            ui::send_warn(
+                ctx.server(),
+                ctx.cn(),
+                "Waiting for map upload. Use /sendmap to proceed.",
+            );
             ctx.cancel();
         }
     }
@@ -390,7 +405,11 @@ impl Plugin for DeathrunEdit {
                 }
 
                 server.set_spectator(cn, false);
-                ui::send(server, cn, ui::body("Map received. You can now spawn and edit freely."));
+                ui::send(
+                    server,
+                    cn,
+                    ui::body("Map received. You can now spawn and edit freely."),
+                );
             }
             Err(e) => warn!("cn {cn} sent an invalid map: {e}"),
         }
@@ -419,7 +438,11 @@ impl Plugin for DeathrunEdit {
 
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
         if !packet.val && is_waiting_for_map(ctx.server()) {
-            ui::send_warn(ctx.server(), ctx.cn(), "Waiting for map upload. Use /sendmap to proceed.");
+            ui::send_warn(
+                ctx.server(),
+                ctx.cn(),
+                "Waiting for map upload. Use /sendmap to proceed.",
+            );
             ctx.cancel();
         }
     }
