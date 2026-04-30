@@ -670,9 +670,12 @@ impl Plugin for DeathrunPlay {
         check_win_conditions(server, &maps);
     }
 
-    async fn on_player_died(&self, ctx: &mut Context, _victim_cn: u32, _actor_cn: u32) {
+    async fn on_player_died(&self, ctx: &mut Context, victim_cn: u32, _actor_cn: u32) {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        if maps.read().unwrap().round_state == RoundState::Playing {
+            server.set_spectator(victim_cn, true);
+        }
         check_win_conditions(server, &maps);
     }
 
