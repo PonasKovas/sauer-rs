@@ -280,12 +280,17 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) {
-        ctx.server().kill_player(ctx.cn());
+        let cn = ctx.cn();
+        if ctx.server().kill_player(cn) {
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_player_died(ctx, cn, cn).await;
+            }
+        }
     }
 
     async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
         let cn = ctx.cn();
-        let server = ctx.server();
+        let server = ctx.server().clone();
 
         {
             let Some(mut p) = server.players.try_get_mut(cn) else {
@@ -320,17 +325,21 @@ impl<P: Plugin> Plugin for Base<P> {
 
         for hit in &packet.hits {
             let target_cn = hit.target_cn as u32;
-            if !check_hit(server, target_cn, hit.life_sequence) {
+            if !check_hit(&server, target_cn, hit.life_sequence) {
                 continue;
             }
             let damage = hit.rays * gun_damage_per_ray(packet.gun);
-            server.apply_damage(target_cn, cn, packet.gun, damage, hit.dir);
+            if server.apply_damage(target_cn, cn, packet.gun, damage, hit.dir) {
+                if let Some(plugin) = self.plugin.upgrade() {
+                    plugin.on_player_died(ctx, target_cn, cn).await;
+                }
+            }
         }
     }
 
     async fn explode(&self, ctx: &mut Context, packet: &channel1::Explode) {
         let cn = ctx.cn();
-        let server = ctx.server();
+        let server = ctx.server().clone();
 
         if server.players.get(cn).client_state != ClientState::Alive {
             return;
@@ -344,11 +353,15 @@ impl<P: Plugin> Plugin for Base<P> {
 
         for hit in &packet.hits {
             let target_cn = hit.target_cn as u32;
-            if !check_hit(server, target_cn, hit.life_sequence) {
+            if !check_hit(&server, target_cn, hit.life_sequence) {
                 continue;
             }
             let damage = explosion_damage(packet.gun, hit.dist, target_cn == cn);
-            server.apply_damage(target_cn, cn, packet.gun, damage, hit.dir);
+            if server.apply_damage(target_cn, cn, packet.gun, damage, hit.dir) {
+                if let Some(plugin) = self.plugin.upgrade() {
+                    plugin.on_player_died(ctx, target_cn, cn).await;
+                }
+            }
         }
     }
 

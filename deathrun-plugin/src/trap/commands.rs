@@ -178,7 +178,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         client_num: target_cn,
         packet: channel1::DelCube { sel: adj_sel.clone() },
     });
-    crate::geo_sync::broadcast_geometry(&server, cn, &adj_sel, clip_unpack_len, &clip_data);
+    crate::geo_sync::broadcast_geometry(&server, target_cn, &adj_sel, clip_unpack_len, &clip_data);
 
     tokio::spawn(async move {
         use tokio::time::{Duration, sleep};
@@ -628,7 +628,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         });
         crate::geo_sync::broadcast_geometry(
             server,
-            ctx.cn(),
+            target_cn,
             &region_sel,
             restore_unpack_len,
             &restore_compressed,

@@ -48,6 +48,7 @@ pub fn explosion_damage(gun: Gun, dist: f32, is_self: bool) -> i32 {
 impl Server {
     /// Apply `damage` from `actor_cn` to `target_cn`. Handles armour absorption,
     /// broadcasts N_DAMAGE and N_HITPUSH, and kills the target if health drops to 0.
+    /// Returns true if the player died from this damage event.
     pub fn apply_damage(
         &self,
         target_cn: u32,
@@ -55,7 +56,7 @@ impl Server {
         gun: Gun,
         damage: i32,
         dir: Vec3<f32>,
-    ) {
+    ) -> bool {
         // Apply quad damage multiplier from the attacker.
         let damage = damage
             * self
@@ -64,15 +65,15 @@ impl Server {
                 .map_or(1, |p| if p.quad_millis > 0 { 4 } else { 1 });
 
         let Some(mut p) = self.players.try_get_mut(target_cn) else {
-            return;
+            return false;
         };
         if p.client_state != ClientState::Alive {
-            return;
+            return false;
         }
         // Inner block: drops the &mut PlayerState borrow before we modify client_state.
         let (health, armour, killed) = {
             let Some(state) = p.state.as_mut() else {
-                return;
+                return false;
             };
             // Armour absorbs: blue=25%, green=50%, yellow=75%
             let absorbed = ((damage * (state.armour_type as i32 + 1) * 25) / 100).min(state.armour);
@@ -105,19 +106,21 @@ impl Server {
         if killed {
             self.do_kill(target_cn, actor_cn);
         }
+        killed
     }
 
-    /// Kill a player by suicide (frags -= 1).
-    pub fn kill_player(&self, cn: u32) {
+    /// Kill a player by suicide (frags -= 1). Returns true if successful.
+    pub fn kill_player(&self, cn: u32) -> bool {
         let Some(mut p) = self.players.try_get_mut(cn) else {
-            return;
+            return false;
         };
         if p.client_state != ClientState::Alive {
-            return;
+            return false;
         }
         p.client_state = ClientState::Dead;
         drop(p);
         self.do_kill(cn, cn);
+        true
     }
 
     fn do_kill(&self, victim_cn: u32, actor_cn: u32) {

@@ -7,18 +7,18 @@ use sauer_server::Server;
 /// Broadcast a ClipboardServer + PasteServer packet pair to all clients.
 pub fn broadcast_geometry(
     server: &Server,
-    cn: u32,
+    owner_cn: i32,
     sel: &sauer_proto::data::SelInfo,
     unpack_len: i32,
     data: &[u8],
 ) {
     server.broadcast_chan1(&channel1::ClipboardServer {
-        client_num: cn as i32,
+        client_num: owner_cn,
         unpack_len,
         data: data.to_vec(),
     });
     server.broadcast_chan1(&Client {
-        client_num: cn as i32,
+        client_num: owner_cn,
         packet: channel1::PasteServer { sel: sel.clone() },
     });
 }
@@ -26,23 +26,24 @@ pub fn broadcast_geometry(
 /// Send a ClipboardServer + PasteServer packet pair to a single client.
 pub fn send_geometry(
     server: &Server,
-    cn: u32,
+    target_cn: u32,
+    owner_cn: i32,
     sel: &sauer_proto::data::SelInfo,
     unpack_len: i32,
     data: &[u8],
 ) {
     server.send_chan1(
-        cn,
+        target_cn,
         &channel1::ClipboardServer {
-            client_num: cn as i32,
+            client_num: owner_cn,
             unpack_len,
             data: data.to_vec(),
         },
     );
     server.send_chan1(
-        cn,
+        target_cn,
         &Client {
-            client_num: cn as i32,
+            client_num: owner_cn,
             packet: channel1::PasteServer { sel: sel.clone() },
         },
     );
@@ -54,7 +55,8 @@ pub fn send_geometry(
 /// `chunks` must already be collected and (optionally) shuffled by the caller.
 pub async fn send_chunks_to_client(
     server: &Server,
-    cn: u32,
+    target_cn: u32,
+    owner_cn: i32,
     chunks: Vec<([i32; 3], i32, sauer_map::Node)>,
     vslots: &[Option<ogz_rs::data::VSlot>],
     delay_ms: u64,
@@ -77,7 +79,7 @@ pub async fn send_chunks_to_client(
             cys: 1,
             corner: 0,
         };
-        send_geometry(server, cn, &sel, unpack_len, &data);
+        send_geometry(server, target_cn, owner_cn, &sel, unpack_len, &data);
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
@@ -90,7 +92,7 @@ pub async fn send_chunks_to_client(
 /// `chunks` must already be collected and (optionally) shuffled by the caller.
 pub async fn broadcast_chunks(
     server: &Server,
-    cn: u32,
+    owner_cn: i32,
     chunks: Vec<([i32; 3], i32, sauer_map::Node)>,
     vslots: &[Option<ogz_rs::data::VSlot>],
     delay_ms: u64,
@@ -113,7 +115,7 @@ pub async fn broadcast_chunks(
             cys: 1,
             corner: 0,
         };
-        broadcast_geometry(server, cn, &sel, unpack_len, &data);
+        broadcast_geometry(server, owner_cn, &sel, unpack_len, &data);
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }

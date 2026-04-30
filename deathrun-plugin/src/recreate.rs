@@ -124,7 +124,7 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
 
         sleep(Duration::from_millis(500)).await;
 
-        crate::geo_sync::broadcast_chunks(&server, cn, chunks, &vslots, delay_ms).await;
+        crate::geo_sync::broadcast_chunks(&server, cn as i32, chunks, &vslots, delay_ms).await;
 
         sleep(Duration::from_millis(500)).await;
 

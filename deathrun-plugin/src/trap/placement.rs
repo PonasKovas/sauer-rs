@@ -191,7 +191,7 @@ pub(super) fn send_atomic_rebuild(
             sel: adj_sel.clone(),
         },
     });
-    crate::geo_sync::broadcast_geometry(server, cn, &adj_sel, clip_unpack_len, &clip_data);
+    crate::geo_sync::broadcast_geometry(server, target_cn, &adj_sel, clip_unpack_len, &clip_data);
     server.broadcast_chan1((
         corner_pushes(&adj_sel, 0, target_cn),
         corner_pushes(&adj_sel, 1, target_cn),

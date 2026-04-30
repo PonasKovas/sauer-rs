@@ -80,6 +80,16 @@ pub trait Plugin: Send + Sync + 'static {
         async move {}
     }
 
+    /// Fired when a player dies (e.g. from combat, falling into a trap, or suicide).
+    fn on_player_died(
+        &self,
+        ctx: &mut Context,
+        victim_cn: u32,
+        actor_cn: u32,
+    ) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
     /// Fired when a player is about to spawn (in response to `N_TRYSPAWN`).
     /// `state` holds the default spawn stats; modify it to customise the loadout.
     /// Call `ctx.cancel()` to prevent the spawn entirely (the client stays in Dead state).
@@ -252,6 +262,14 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
             return;
         }
         self.1.map_changed(ctx, map_name, mode).await;
+    }
+
+    async fn on_player_died(&self, ctx: &mut Context, victim_cn: u32, actor_cn: u32) {
+        self.0.on_player_died(ctx, victim_cn, actor_cn).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.1.on_player_died(ctx, victim_cn, actor_cn).await;
     }
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {

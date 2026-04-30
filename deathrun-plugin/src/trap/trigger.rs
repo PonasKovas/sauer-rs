@@ -260,7 +260,7 @@ pub fn apply_and_broadcast(
             client_num: actor_cn as i32,
             packet: channel1::DelCube { sel: sel.clone() },
         });
-        crate::geo_sync::broadcast_geometry(server, actor_cn, sel, unpack_len, data);
+        crate::geo_sync::broadcast_geometry(server, actor_cn as i32, sel, unpack_len, data);
     }
 
     for (ent_id, ent) in broadcast_ents {
