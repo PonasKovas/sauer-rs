@@ -353,6 +353,20 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
+        if get_server_state(ctx.server())
+            .read()
+            .unwrap()
+            .trap_edit
+            .is_some()
+        {
+            ui::send_warn(
+                ctx.server(),
+                ctx.cn(),
+                "Cannot upload map while editing a trap.",
+            );
+            ctx.cancel();
+            return;
+        }
         ctx.cancel();
         let cn = ctx.cn();
         let server = ctx.server();
@@ -682,6 +696,21 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
+        if get_server_state(ctx.server())
+            .read()
+            .unwrap()
+            .trap_edit
+            .is_some()
+        {
+            ui::send_warn(
+                ctx.server(),
+                ctx.cn(),
+                "Cannot use newmap while editing a trap.",
+            );
+            ctx.cancel();
+            crate::map_state::send_map_to(ctx.server(), ctx.cn());
+            return;
+        }
         let server = ctx.server();
         let mut state = get_server_state(server).write().unwrap();
         if packet.size >= 0 {
@@ -693,6 +722,20 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
+        if get_server_state(ctx.server())
+            .read()
+            .unwrap()
+            .trap_edit
+            .is_some()
+        {
+            ui::send_warn(
+                ctx.server(),
+                ctx.cn(),
+                "Cannot vote map while editing a trap.",
+            );
+            ctx.cancel();
+            return;
+        }
         if packet.mode != GameMode::CoopEdit {
             ctx.cancel();
         }
