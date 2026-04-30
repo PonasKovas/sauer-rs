@@ -171,7 +171,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             server.set_spectator(cn, true);
         }
 
-        server.broadcast_chan1(&channel1::NewMap { size: world_size });
+        server.broadcast_chan1(&channel1::NewMap { size: world_size.trailing_zeros() as i32 });
         server.broadcast_chan1(&Client {
             client_num: -1,
             packet: channel1::DelCube {
@@ -370,7 +370,7 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             target_cn,
             &Client {
                 client_num: target_cn as i32,
-                packet: channel1::NewMap { size: world_size },
+                packet: channel1::NewMap { size: world_size.trailing_zeros() as i32 },
             },
         );
 
