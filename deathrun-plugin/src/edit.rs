@@ -217,7 +217,8 @@ impl Plugin for DeathrunEdit {
         }
     }
 
-    async fn map_changed(&self, ctx: &mut Context, _map_name: &CubeString, _mode: GameMode) {
+    async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, _mode: GameMode) {
+        let cn = ctx.cn();
         let server = ctx.server();
         {
             let mut state = get_server_state(server).write().unwrap();
@@ -225,9 +226,17 @@ impl Plugin for DeathrunEdit {
             state.waiting_for_map = true;
             state.traps.clear();
         }
-        for cn in server.client_cns() {
-            server.set_spectator(cn, true);
+        for c in server.client_cns() {
+            server.set_spectator(c, true);
         }
+
+        let player_name = server
+            .players
+            .try_get(cn)
+            .map(|p| p.name.strip_colors().to_utf8())
+            .unwrap_or_else(|| "Someone".to_string());
+        let map_str = map_name.strip_colors().to_utf8();
+        ui::broadcast_map_changed(server, &player_name, &map_str);
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {

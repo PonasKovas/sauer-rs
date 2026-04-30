@@ -168,6 +168,34 @@ pub fn broadcast_round_over(server: &Server, winner: &str) {
     );
 }
 
+pub fn broadcast_map_changed(server: &Server, player_name: &str, map_name: &str) {
+    broadcast_banner(
+        server,
+        &[
+            header("MAP CHANGED"),
+            b().color(THEME.hi)
+                .push_str(player_name)
+                .color(THEME.body)
+                .push_str(" selected map ")
+                .color(THEME.hi)
+                .push_str(map_name)
+                .build(),
+            body("  Everyone is spectating until the map is uploaded."),
+            b().color(THEME.body)
+                .push_str("  ")
+                .color(THEME.hi)
+                .push_str(player_name)
+                .color(THEME.body)
+                .push_str(": type ")
+                .color(THEME.hi)
+                .push_str("/sendmap")
+                .color(THEME.body)
+                .push_str(" to upload and let everyone edit.")
+                .build(),
+        ],
+    );
+}
+
 // ─── Welcome messages ─────────────────────────────────────────────────────────
 
 pub fn send_welcome_edit(server: &Server, cn: u32) {
