@@ -185,43 +185,7 @@ fn send_map_to_client(server: Arc<Server>, cn: u32, maps: &Arc<RwLock<PlayMaps>>
         crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 8, &mut chunks);
         chunks.shuffle(&mut rand::thread_rng());
 
-        for (pos, size, node) in chunks {
-            let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, &vslots);
-
-            server.send_chan1(
-                cn,
-                &channel1::ClipboardServer {
-                    client_num: cn as i32,
-                    unpack_len,
-                    data,
-                },
-            );
-            server.send_chan1(
-                cn,
-                &Client {
-                    client_num: cn as i32,
-                    packet: channel1::PasteServer {
-                        sel: SelInfo {
-                            o: Vec3 {
-                                x: pos[0],
-                                y: pos[1],
-                                z: pos[2],
-                            },
-                            s: Vec3 { x: 1, y: 1, z: 1 },
-                            grid: size,
-                            orient: Orient::Left,
-                            cx: 0,
-                            cxs: 1,
-                            cy: 0,
-                            cys: 1,
-                            corner: 0,
-                        },
-                    },
-                },
-            );
-
-            sleep(Duration::from_millis(5)).await;
-        }
+        crate::geo_sync::send_chunks_to_client(&server, cn, chunks, &vslots, 5).await;
 
         sleep(Duration::from_millis(500)).await;
 

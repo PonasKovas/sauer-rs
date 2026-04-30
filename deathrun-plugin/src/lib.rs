@@ -1,5 +1,6 @@
 pub mod edit;
 pub mod entity_store;
+pub mod geo_sync;
 mod map_state;
 pub mod play;
 mod recreate;

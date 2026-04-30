@@ -124,41 +124,7 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
 
         sleep(Duration::from_millis(500)).await;
 
-        for (pos, size, chunk_node) in chunks {
-            let (unpack_len, compressed) =
-                sauer_map::clipboard::generate_clipboard(&chunk_node, size, &vslots);
-
-            server.broadcast_chan1(&channel1::ClipboardServer {
-                client_num: cn as i32,
-                unpack_len,
-                data: compressed,
-            });
-
-            server.broadcast_chan1(&Client {
-                client_num: cn as i32,
-                packet: channel1::PasteServer {
-                    sel: SelInfo {
-                        o: Vec3 {
-                            x: pos[0],
-                            y: pos[1],
-                            z: pos[2],
-                        },
-                        s: Vec3 { x: 1, y: 1, z: 1 },
-                        grid: size,
-                        orient: Orient::Left,
-                        cx: 0,
-                        cxs: 1,
-                        cy: 0,
-                        cys: 1,
-                        corner: 0,
-                    },
-                },
-            });
-
-            if delay_ms > 0 {
-                sleep(Duration::from_millis(delay_ms)).await;
-            }
-        }
+        crate::geo_sync::broadcast_chunks(&server, cn, chunks, &vslots, delay_ms).await;
 
         sleep(Duration::from_millis(500)).await;
 
