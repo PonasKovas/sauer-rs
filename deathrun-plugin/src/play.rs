@@ -347,17 +347,12 @@ fn declare_win(
     winner_text: &str,
 ) {
     lock.round_state = RoundState::Ended;
-    let msg = format!("Round Over! {} wins! Next map in 5 seconds...", winner_text);
+    let msg = format!("Round Over! {} wins!", winner_text);
     server.broadcast_chan1(&channel1::ServMsg {
         text: msg.lossy_cubestring(),
     });
 
-    let server_clone = Arc::clone(server);
-    let maps_clone = Arc::clone(maps);
-    tokio::spawn(async move {
-        sleep(Duration::from_secs(5)).await;
-        start_round_sequence(server_clone, maps_clone);
-    });
+    start_round_sequence(Arc::clone(server), Arc::clone(maps));
 }
 
 fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>) -> bool {
@@ -480,20 +475,23 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
-        let (is_playing, is_empty) = {
+        let (is_first, is_solo_round) = {
             let lock = maps.read().unwrap();
-            (
-                lock.round_state != RoundState::NotStarted,
-                server.client_count() == 1,
-            )
+            let is_first = server.client_count() == 1;
+            let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
+            (is_first, is_solo_round)
         };
 
-        if is_empty {
+        if is_first || is_solo_round {
+            // First player, or a second player joined a solo round: restart so evil gets assigned.
             start_round_sequence(Arc::clone(server), Arc::clone(&maps));
-        } else if is_playing {
-            send_map_to_client(Arc::clone(server), cn, &maps);
-            server.set_spectator(cn, true);
-            server.set_team(cn, "good".lossy_cubestring(), SetTeamReason::Forced);
+        } else {
+            let is_playing = maps.read().unwrap().round_state != RoundState::NotStarted;
+            if is_playing {
+                send_map_to_client(Arc::clone(server), cn, &maps);
+                server.set_spectator(cn, true);
+                server.set_team(cn, "good".lossy_cubestring(), SetTeamReason::Forced);
+            }
         }
     }
 
