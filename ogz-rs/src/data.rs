@@ -1,48 +1,6 @@
 use cube_string::CubeString;
-use num_enum::{FromPrimitive, IntoPrimitive};
 
-mod material;
-
-pub use material::Material;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive)]
-#[repr(u8)]
-pub enum Volume {
-    #[default]
-    Air = 0,
-    Water,
-    Lava,
-    Glass,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive)]
-#[repr(u8)]
-pub enum Clip {
-    #[default]
-    None = 0,
-    NoClip,
-    Clip,
-    GameClip,
-}
-
-/// Engine-defined entity types (shared/ents.h).
-/// Values >= 8 are game-specific and stored as `GameSpecific(u8)`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromPrimitive, IntoPrimitive,
-)]
-#[repr(u8)]
-pub enum EntityType {
-    Empty = 0,
-    Light,
-    MapModel,
-    PlayerStart,
-    Envmap,
-    Particles,
-    Sound,
-    Spotlight,
-    #[num_enum(catch_all)]
-    GameSpecific(u8),
-}
+pub use sauer_core::{Material, Volume, Clip, EntityType, ItemType, Entity, VSlot, VSlotParam};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum MapConfig {
@@ -72,33 +30,6 @@ pub enum Variable {
     Int { name: CubeString, value: i32 },
     Float { name: CubeString, value: f32 },
     String { name: CubeString, value: CubeString },
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct Entity {
-    pub position: [f32; 3],
-    pub attrs: [i16; 5],
-    pub ent_type: EntityType,
-    pub extra_data: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct VSlotParam {
-    pub name: CubeString,
-    pub values: [f32; 4],
-}
-
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
-pub struct VSlot {
-    pub prev: i32,
-    pub params: Vec<VSlotParam>,
-    pub scale: Option<f32>,
-    pub rotation: Option<i32>,
-    pub offset: Option<(i32, i32)>,
-    pub scroll: Option<(f32, f32)>,
-    pub layer: Option<i32>,
-    pub alpha: Option<(f32, f32)>,
-    pub color: Option<(f32, f32, f32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]

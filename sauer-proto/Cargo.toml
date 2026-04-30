@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sauer-core = { path = "../sauer-core", features = ["serde"] }
 num_enum.workspace = true
 thiserror.workspace = true
 cube-string.workspace = true
@@ -12,5 +13,5 @@ mlua = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [features]
-lua = ["dep:mlua"]
+lua = ["dep:mlua", "sauer-core/lua"]
 serde = ["dep:serde"]

@@ -5,6 +5,7 @@ edition = "2021"
 description = "A parser and serializer for the Cube 2: Sauerbraten .ogz map format."
 
 [dependencies]
+sauer-core = { path = "../sauer-core" }
 cube-string.workspace = true
 thiserror.workspace = true
 flate2.workspace = true

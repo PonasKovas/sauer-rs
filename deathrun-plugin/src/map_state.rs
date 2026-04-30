@@ -15,17 +15,7 @@ use tracing::error;
 
 /// Converts `sauer_proto` network bounds into `sauer_map` selection areas.
 pub fn to_selection(sel: &SelInfo) -> Selection {
-    Selection {
-        o: [sel.o.x, sel.o.y, sel.o.z],
-        s: [sel.s.x, sel.s.y, sel.s.z],
-        grid: sel.grid,
-        orient: sel.orient as u8,
-        cx: sel.cx as i32,
-        cxs: sel.cxs as i32,
-        cy: sel.cy as i32,
-        cys: sel.cys as i32,
-        corner: sel.corner as i32,
-    }
+    sel.clone()
 }
 
 pub fn to_sel_info(sel: &Selection) -> SelInfo {
@@ -263,7 +253,7 @@ impl MapState {
         self.world.edit_ent(
             packet.ent_id as usize,
             [packet.pos.x, packet.pos.y, packet.pos.z],
-            (packet.type_ as u8).into(),
+            packet.type_,
             packet.attrs.map(|x| x as i16),
         );
     }
@@ -273,7 +263,7 @@ impl MapState {
             return;
         }
 
-        let orient = sel.orient as usize;
+        let orient = sel.orient as i32 as usize;
         let d = orient >> 1;
         let r_dim = [1usize, 2, 0][d];
         let c_dim = [2usize, 0, 1][d];

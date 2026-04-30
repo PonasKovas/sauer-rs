@@ -53,7 +53,7 @@ impl From<&ogz_rs::data::Entity> for StoredEntity {
         Self {
             position: ent.position,
             attrs: ent.attrs,
-            ent_type: u8::from(ent.ent_type),
+            ent_type: i32::from(ent.ent_type) as u8,
             extra_data: ent.extra_data.clone(),
         }
     }
@@ -64,7 +64,7 @@ impl StoredEntity {
         ogz_rs::data::Entity {
             position: self.position,
             attrs: self.attrs,
-            ent_type: ogz_rs::data::EntityType::from(self.ent_type),
+            ent_type: ogz_rs::data::EntityType::try_from(self.ent_type as i32).unwrap_or(ogz_rs::data::EntityType::Empty),
             extra_data: self.extra_data,
         }
     }
@@ -239,9 +239,7 @@ pub fn sync_traps_to_map(server: &Server, cn: u32) {
         ) {
             Ok(changed) => {
                 for (id, ent) in changed {
-                    let ent_type =
-                        sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-                            .unwrap_or(sauer_proto::data::EntityType::Empty);
+                    let ent_type = ent.ent_type;
                     server.broadcast_chan1(&Client {
                         client_num: cn as i32,
                         packet: channel1::EditEnt {
@@ -512,10 +510,10 @@ pub fn check_and_rebuild_traps(ctx: &Context, intersects: impl Fn(&Trap) -> bool
     for trap in to_rebuild {
         if let Some(map) = state.map.as_mut() {
             let sel = Selection {
-                o: trap.button_pos,
-                s: [1, 1, 1],
+                o: Vec3 { x: trap.button_pos[0], y: trap.button_pos[1], z: trap.button_pos[2] },
+                s: Vec3 { x: 1, y: 1, z: 1 },
                 grid: trap.button_size,
-                orient: trap.button_orient,
+                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
                 cx: 0,
                 cxs: 2,
                 cy: 0,
@@ -601,10 +599,10 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
 
     let map = state.map.as_mut().unwrap();
     let sel = Selection {
-        o: trap.button_pos,
-        s: [1, 1, 1],
+        o: Vec3 { x: trap.button_pos[0], y: trap.button_pos[1], z: trap.button_pos[2] },
+        s: Vec3 { x: 1, y: 1, z: 1 },
         grid: trap.button_size,
-        orient: trap.button_orient,
+        orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
         cx: 0,
         cxs: 2,
         cy: 0,
@@ -664,10 +662,10 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     }
 
     let sel = Selection {
-        o: adj,
-        s: [1, 1, 1],
+        o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        s: Vec3 { x: 1, y: 1, z: 1 },
         grid: BUTTON_SIZE,
-        orient: hit_orient,
+        orient: sauer_proto::data::Orient::try_from(hit_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
         cx: 0,
         cxs: 2,
         cy: 0,
@@ -1110,8 +1108,7 @@ pub fn cmd_endtrap(ctx: &Context) {
             .entities
             .get(ent_id)
             .unwrap_or(&empty_ent);
-        let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-            .unwrap_or(sauer_proto::data::EntityType::Empty);
+        let ent_type = ent.ent_type;
         server.broadcast_chan1(&Client {
             client_num: target_cn,
             packet: channel1::EditEnt {
@@ -1410,8 +1407,7 @@ fn apply_and_broadcast(
     }
 
     for (ent_id, ent) in broadcast_ents {
-        let ent_type = sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32)
-            .unwrap_or(sauer_proto::data::EntityType::Empty);
+        let ent_type = ent.ent_type;
         server.broadcast_chan1(&Client {
             client_num: actor_cn as i32,
             packet: channel1::EditEnt {

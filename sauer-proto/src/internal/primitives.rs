@@ -49,89 +49,39 @@ impl SauerRead for bool {
     }
 }
 
-// i32 = varint
 impl SauerWrite for i32 {
     fn sauer_write(&self, out: &mut Vec<u8>) {
-        if (-126..=127).contains(self) {
-            out.push(*self as u8);
-        } else if (-32768..=32767).contains(self) {
-            out.push(0x80);
-            out.extend_from_slice(&(*self as i16).to_le_bytes());
-        } else {
-            out.push(0x81);
-            out.extend_from_slice(&self.to_le_bytes());
-        }
+        sauer_core::io::putint(out, *self);
     }
 }
 impl SauerRead for i32 {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        let c = u8::sauer_read(reader)? as i8;
-        if c == -128 {
-            // 0x80
-            let s = read_slice(reader, 2)?;
-            Ok(i16::from_le_bytes([s[0], s[1]]) as i32)
-        } else if c == -127 {
-            // 0x81
-            let s = read_slice(reader, 4)?;
-            Ok(i32::from_le_bytes([s[0], s[1], s[2], s[3]]))
-        } else {
-            Ok(c as i32)
-        }
+        sauer_core::io::getint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })
     }
 }
 
-// putuint/getuint: Cube2 7-bit continuation encoding for unsigned integers.
-// Used for N_POS client_num and flags fields.
-// Values 0-127 are 1 byte; higher values use continuation bytes with bit 7 as
-// "more follows" marker (identical to C++ putuint/getuint in tools.cpp).
 impl SauerWrite for u32 {
     fn sauer_write(&self, out: &mut Vec<u8>) {
-        let n = *self as i32;
-        if n < 0 || n >= (1 << 21) {
-            out.push((0x80 | (n & 0x7F)) as u8);
-            out.push((0x80 | ((n >> 7) & 0x7F)) as u8);
-            out.push((0x80 | ((n >> 14) & 0x7F)) as u8);
-            out.push((n >> 21) as u8);
-        } else if n < (1 << 7) {
-            out.push(n as u8);
-        } else if n < (1 << 14) {
-            out.push((0x80 | (n & 0x7F)) as u8);
-            out.push((n >> 7) as u8);
-        } else {
-            out.push((0x80 | (n & 0x7F)) as u8);
-            out.push((0x80 | ((n >> 7) & 0x7F)) as u8);
-            out.push((n >> 14) as u8);
-        }
+        sauer_core::io::putuint(out, *self as i32);
     }
 }
 impl SauerRead for u32 {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        let mut n = u8::sauer_read(reader)? as i32;
-        if n & 0x80 != 0 {
-            n += ((u8::sauer_read(reader)? as i32) << 7) - 0x80;
-            if n & (1 << 14) != 0 {
-                n += ((u8::sauer_read(reader)? as i32) << 14) - (1 << 14);
-                if n & (1 << 21) != 0 {
-                    n += ((u8::sauer_read(reader)? as i32) << 21) - (1 << 21);
-                    if n & (1 << 28) != 0 {
-                        n |= !0i32 << 28;
-                    }
-                }
-            }
-        }
-        Ok(n as u32)
+        Ok(
+            sauer_core::io::getuint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?
+                as u32,
+        )
     }
 }
 
 impl SauerWrite for f32 {
     fn sauer_write(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.to_le_bytes());
+        sauer_core::io::putfloat(out, *self);
     }
 }
 impl SauerRead for f32 {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        let s = read_slice(reader, 4)?;
-        Ok(f32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+        sauer_core::io::getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })
     }
 }
 
@@ -148,16 +98,7 @@ impl SauerWrite for CubeString {
 }
 impl SauerRead for CubeString {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
-        let mut string_bytes = Vec::new();
-        loop {
-            let b = u8::sauer_read(reader)?;
-            if b == 0 {
-                break;
-            }
-            string_bytes.push(b);
-        }
-
-        Ok(CubeString::from_bytes(string_bytes))
+        sauer_core::io::getstring(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })
     }
 }
 

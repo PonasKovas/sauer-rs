@@ -2,7 +2,6 @@ use crate::ParseError;
 use crate::Session;
 use crate::data;
 use crate::data::*;
-use crate::error::EnumConvertResultExt;
 use crate::error::ParseResultExt;
 use crate::internal::SauerReadStateful;
 use crate::internal::macros::{make_packet_enum, make_struct};
@@ -1326,7 +1325,7 @@ impl SauerRead for BasesClient {
                 let ammotype = if ammotype_val == 0 {
                     None
                 } else {
-                    Some(ItemType::try_from(ammotype_val).in_enum("ItemType")?)
+                    Some(ItemType::try_from(ammotype_val).map_err(|_| crate::ParseError::InvalidEnumValue { value: ammotype_val, enum_name: "ItemType" })?)
                 };
                 bases.push(BaseSpawn {
                     ammotype,

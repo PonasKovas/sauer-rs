@@ -1,5 +1,4 @@
-use crate::node::{Cube, Node};
-use crate::selection::Selection;
+use crate::{Cube, Node, Selection};
 use flate2::{Compression, write::ZlibEncoder, read::ZlibDecoder};
 use ogz_rs::data::VSlot;
 use std::io::{Read, Write};
@@ -184,8 +183,8 @@ pub fn unpack_block(bytes: &[u8], pos: &mut usize) -> Option<(Selection, Vec<Nod
     for _ in 0..total { nodes.push(unpack_cube(bytes, pos)?); }
 
     let sel = Selection {
-        o: [o_x, o_y, o_z], s: [s_x, s_y, s_z], grid,
-        orient: orient as u8, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+        o: sauer_core::Vec3 { x: o_x, y: o_y, z: o_z }, s: sauer_core::Vec3 { x: s_x, y: s_y, z: s_z }, grid,
+        orient: sauer_core::Orient::try_from(orient).unwrap_or(sauer_core::Orient::Left), cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
     };
     Some((sel, nodes))
 }

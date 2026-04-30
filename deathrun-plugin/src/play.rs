@@ -227,9 +227,7 @@ fn send_map_to_client(server: Arc<Server>, cn: u32, maps: &Arc<RwLock<PlayMaps>>
 
         // 5. Restore entities.
         for (i, ent) in entities.into_iter().enumerate() {
-            let Ok(ent_type) = EntityType::try_from(u8::from(ent.ent_type) as i32) else {
-                continue;
-            };
+            let ent_type = ent.ent_type;
             server.send_chan1(
                 cn,
                 &Client {

@@ -247,7 +247,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         entities.push(Entity {
             position,
             attrs,
-            ent_type: EntityType::from(ent_type),
+            ent_type: EntityType::try_from(ent_type as i32).unwrap_or(EntityType::Empty),
             extra_data,
         });
     }

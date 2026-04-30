@@ -163,11 +163,7 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
         sleep(Duration::from_millis(500)).await;
 
         for (i, ent) in entities.into_iter().enumerate() {
-            let ent_type =
-                match sauer_proto::data::EntityType::try_from(u8::from(ent.ent_type) as i32) {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
+            let ent_type = ent.ent_type;
             server.broadcast_chan1(&Client {
                 client_num: cn as i32,
                 packet: channel1::EditEnt {

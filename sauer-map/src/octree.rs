@@ -1,4 +1,4 @@
-use crate::node::{Cube, Node};
+use crate::{Cube, Node};
 use ogz_rs::data::{CubeInfo, ModernSurfaceData, OctreeNode, Surfaces};
 
 pub fn extract_node_at(node: &Node, node_pos: [i32; 3], node_size: i32, target_pos: [i32; 3], target_size: i32) -> Node {

@@ -18,7 +18,48 @@ pub use base_spawn::BaseSpawn;
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
-pub use vec3::Vec3;
+
+pub use sauer_core::{EntityType, ItemType, Orient, Selection as SelInfo, Vec3};
+
+impl crate::internal::SauerWrite for Orient { fn sauer_write(&self, out: &mut Vec<u8>) { (*self as i32).sauer_write(out); } }
+impl crate::internal::SauerRead for Orient { fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> { Ok(Orient::try_from(i32::sauer_read(reader)?).unwrap_or(Orient::Left)) } }
+impl crate::internal::SauerWrite for EntityType { fn sauer_write(&self, out: &mut Vec<u8>) { (i32::from(*self)).sauer_write(out); } }
+impl crate::internal::SauerRead for EntityType { fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> { Ok(EntityType::try_from(i32::sauer_read(reader)?).unwrap_or(EntityType::Empty)) } }
+impl crate::internal::SauerWrite for ItemType { fn sauer_write(&self, out: &mut Vec<u8>) { (*self as i32).sauer_write(out); } }
+impl crate::internal::SauerRead for ItemType {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+        Ok(ItemType::try_from(i32::sauer_read(reader)?).unwrap_or(ItemType::Shells))
+    }
+}
+
+impl crate::internal::SauerWrite for SelInfo {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        self.o.sauer_write(out);
+        self.s.sauer_write(out);
+        self.grid.sauer_write(out);
+        self.orient.sauer_write(out);
+        self.cx.sauer_write(out);
+        self.cxs.sauer_write(out);
+        self.cy.sauer_write(out);
+        self.cys.sauer_write(out);
+        self.corner.sauer_write(out);
+    }
+}
+impl crate::internal::SauerRead for SelInfo {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+        Ok(SelInfo {
+            o: crate::internal::SauerRead::sauer_read(reader)?,
+            s: crate::internal::SauerRead::sauer_read(reader)?,
+            grid: crate::internal::SauerRead::sauer_read(reader)?,
+            orient: crate::internal::SauerRead::sauer_read(reader)?,
+            cx: crate::internal::SauerRead::sauer_read(reader)?,
+            cxs: crate::internal::SauerRead::sauer_read(reader)?,
+            cy: crate::internal::SauerRead::sauer_read(reader)?,
+            cys: crate::internal::SauerRead::sauer_read(reader)?,
+            corner: crate::internal::SauerRead::sauer_read(reader)?,
+        })
+    }
+}
 
 make_enum!([i32] SetTeamReason {
     Switched = 0, Forced = 1,
@@ -26,12 +67,6 @@ make_enum!([i32] SetTeamReason {
 
 make_enum!([i32] Gun {
     Fist = 0, Sg = 1, Cg = 2, Rl = 3, Rifle = 4, Gl = 5, Pistol = 6,
-});
-
-make_enum!([i32] ItemType {
-    Shells = 8, Bullets = 9, Rockets = 10, Rounds = 11, Grenades = 12,
-    Cartridges = 13, Health = 14, Boost = 15, GreenArmour = 16,
-    YellowArmour = 17, Quad = 18,
 });
 
 make_enum!([i32] MasterMode {
@@ -101,44 +136,6 @@ make_enum!(
     #[default] Float = 0, Fall = 1, Slide = 2, Slope = 3, Floor = 4,
     StepUp = 5, StepDown = 6, Bounce = 7,
 });
-
-make_enum!(
-/// Cube face orientation used in cooperative editing (O_LEFT through O_TOP).
-[i32] Orient {
-    Left = 0, Right = 1, Back = 2, Front = 3, Bottom = 4, Top = 5,
-});
-
-make_enum!(
-/// Map entity type.
-[i32] EntityType {
-    Empty = 0, Light = 1, MapModel = 2, PlayerStart = 3, EnvMap = 4,
-    Particles = 5, MapSound = 6, SpotLight = 7, IShells = 8, IBullets = 9,
-    IRockets = 10, IRounds = 11, IGrenades = 12, ICartridges = 13,
-    IHealth = 14, IBoost = 15, IGreenArmour = 16, IYellowArmour = 17,
-    IQuad = 18, Teleport = 19, TeleDest = 20, Monster = 21, Carrot = 22,
-    JumpPad = 23, Base = 24, RespawnPoint = 25, Box = 26, Barrel = 27,
-    Platform = 28, Elevator = 29, Flag = 30,
-});
-
-impl TryFrom<EntityType> for ItemType {
-    type Error = ();
-    fn try_from(ent_type: EntityType) -> Result<Self, Self::Error> {
-        match ent_type {
-            EntityType::IShells => Ok(ItemType::Shells),
-            EntityType::IBullets => Ok(ItemType::Bullets),
-            EntityType::IRockets => Ok(ItemType::Rockets),
-            EntityType::IRounds => Ok(ItemType::Rounds),
-            EntityType::IGrenades => Ok(ItemType::Grenades),
-            EntityType::ICartridges => Ok(ItemType::Cartridges),
-            EntityType::IHealth => Ok(ItemType::Health),
-            EntityType::IBoost => Ok(ItemType::Boost),
-            EntityType::IGreenArmour => Ok(ItemType::GreenArmour),
-            EntityType::IYellowArmour => Ok(ItemType::YellowArmour),
-            EntityType::IQuad => Ok(ItemType::Quad),
-            _ => Err(()),
-        }
-    }
-}
 
 make_enum!(
 /// Edit face operation mode.
@@ -296,20 +293,6 @@ PlayerState {
     armour_type: ArmourType,
     gun_select: Gun,
     ammo: PlayerAmmo,
-});
-
-make_struct!(
-/// Cube selection information for cooperative editing geometry modifications.
-SelInfo {
-    o: Vec3<i32>,
-    s: Vec3<i32>,
-    grid: i32,
-    orient: Orient,
-    cx: i32,
-    cxs: i32,
-    cy: i32,
-    cys: i32,
-    corner: i32,
 });
 
 make_struct!(

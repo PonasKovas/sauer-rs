@@ -651,6 +651,7 @@ dependencies = [
  "cube-string",
  "flate2",
  "num_enum",
+ "sauer-core",
  "thiserror",
 ]
 
@@ -806,6 +807,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "sauer-core"
+version = "0.1.0"
+dependencies = [
+ "cube-string",
+ "mlua",
+ "num_enum",
+ "serde",
+]
+
+[[package]]
 name = "sauer-map"
 version = "0.1.0"
 dependencies = [
@@ -814,6 +825,7 @@ dependencies = [
  "flate2",
  "glam",
  "ogz-rs",
+ "sauer-core",
  "serde",
  "thiserror",
 ]
@@ -839,6 +851,7 @@ dependencies = [
  "cube-string",
  "mlua",
  "num_enum",
+ "sauer-core",
  "serde",
  "thiserror",
 ]

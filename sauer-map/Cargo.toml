@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sauer-core = { path = "../sauer-core", features = ["serde"] }
 glam.workspace = true
 ogz-rs.workspace = true
 cube-string.workspace = true

@@ -1,4 +1,4 @@
-use crate::node::{Cube, Node};
+use crate::{Cube, Node};
 use ogz_rs::data::Material;
 
 // Change the closure signature to include the `[i32; 3]` pos:

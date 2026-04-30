@@ -1,6 +1,5 @@
 use crate::edit::{apply_region, fill, set_material, set_texture};
-use crate::node::{Cube, Node};
-use crate::selection::Selection;
+use crate::{Cube, Node, Selection};
 use ogz_rs::OgzMap;
 use ogz_rs::data::Material;
 use ogz_rs::data::{Entity, EntityType};
@@ -135,7 +134,7 @@ impl World {
         }
 
         let mut seen = HashSet::new(); let mut ordered_textures = Vec::new();
-        let orient_dim = (sel.orient >> 1) as usize; let dc = (sel.orient & 1) as usize;
+        let orient_dim = (sel.orient as usize >> 1); let dc = (sel.orient as usize & 1);
         let r_dim = [1, 2, 0][orient_dim]; let c_dim = [2, 0, 1][orient_dim]; let d_dim = [0, 1, 2][orient_dim];
         let s_r = sel.s[r_dim]; let s_c = sel.s[c_dim]; let s_d = sel.s[d_dim];
 
@@ -246,7 +245,7 @@ impl World {
     where
         F: FnMut(&mut Node, [i32; 3]),
     {
-        if sel.grid <= 0 || sel.s.iter().any(|&n| n <= 0) {
+        if sel.grid <= 0 || [sel.s.x, sel.s.y, sel.s.z].into_iter().any(|n| n <= 0) {
             return;
         }
         let (min, max) = sel.bounds();

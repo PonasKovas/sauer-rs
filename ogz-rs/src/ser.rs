@@ -78,7 +78,7 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         for a in &ent.attrs {
             encoder.write_i16::<LittleEndian>(*a)?;
         }
-        encoder.write_u8(ent.ent_type.into())?;
+        encoder.write_u8(i32::from(ent.ent_type) as u8)?;
         encoder.write_u8(0)?; // reserved
         if map.eif > 0 {
             encoder.write_all(&ent.extra_data)?;

@@ -1,4 +1,4 @@
-use crate::node::Cube;
+use crate::Cube;
 
 // Sauerbraten's coordinate mapping permutations per axis
 pub const R: [usize; 3] = [1, 2, 0];

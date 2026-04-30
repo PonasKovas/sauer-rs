@@ -1,0 +1,14 @@
+[package]
+name = "sauer-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cube-string.workspace = true
+num_enum.workspace = true
+serde = { workspace = true, features = ["derive"], optional = true }
+mlua = { workspace = true, optional = true }
+
+[features]
+serde = ["dep:serde"]
+lua = ["dep:mlua"]
