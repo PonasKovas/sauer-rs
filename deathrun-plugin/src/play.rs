@@ -1,5 +1,5 @@
 use crate::map_state::{DeathrunState, MapState, Trap, get_server_state};
-use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
+use crate::trap::{StoredTrap, TRAP_DOMAIN, TRAP_STORE_VERSION};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use ogz_rs::data::{MapConfig, Variable};
@@ -219,7 +219,7 @@ fn send_map_vars(server: &Server, target_cn: u32, author_cn: i32, variables: &[V
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
     tokio::spawn(async move {
-        let (world_size, root, entities, vslots, variables) = {
+        let (world_size, root, entities, vslots, variables, store_ids) = {
             let mut lock = maps.write().unwrap();
             if lock.rotation.is_empty() {
                 return;
@@ -241,6 +241,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             let state_lock = get_server_state(&server);
             let state_read = state_lock.read().unwrap();
             let map = state_read.map.as_ref().unwrap();
+            let store_ids = crate::entity_store::get_store_entity_ids(
+                &map.world,
+                TRAP_DOMAIN
+            ).into_iter().collect::<HashSet<_>>();
             let variables = match &map.meta.config {
                 MapConfig::Modern { variables } => variables.clone(),
                 _ => vec![],
@@ -251,6 +255,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
                 map.world.entities.clone(),
                 map.meta.vslots.clone(),
                 variables,
+                store_ids,
             )
         };
 
@@ -307,6 +312,9 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
         sleep(Duration::from_millis(500)).await;
 
         for (i, ent) in entities.into_iter().enumerate() {
+            if store_ids.contains(&i) {
+                continue;
+            }
             server.broadcast_chan1(&Client {
                 client_num: author_cn,
                 packet: channel1::EditEnt {
@@ -434,7 +442,7 @@ fn declare_win(
 }
 
 fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>) -> bool {
-    let (world_size, root, entities, vslots, variables) = {
+    let (world_size, root, entities, vslots, variables, store_ids) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -444,6 +452,10 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             Some(m) => m,
             None => return false,
         };
+        let store_ids = crate::entity_store::get_store_entity_ids(
+            &loaded.state.world,
+            TRAP_DOMAIN
+        ).into_iter().collect::<HashSet<_>>();
         let variables = match &loaded.state.meta.config {
             MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],
@@ -454,6 +466,7 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             loaded.state.world.entities.clone(),
             loaded.state.meta.vslots.clone(),
             variables,
+            store_ids,
         )
     };
 
@@ -522,6 +535,9 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
         sleep(Duration::from_millis(500)).await;
 
         for (i, ent) in entities.into_iter().enumerate() {
+            if store_ids.contains(&i) {
+                continue;
+            }
             server.send_chan1(
                 target_cn,
                 &Client {

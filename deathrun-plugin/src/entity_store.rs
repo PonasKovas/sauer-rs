@@ -83,7 +83,7 @@ fn unpack(entities: &[&Entity]) -> Result<Vec<u8>, StoreError> {
     Ok(stream[2..2 + len].to_vec())
 }
 
-fn entity_version(ent: &Entity, domain_id: u8) -> Option<u8> {
+pub fn entity_version(ent: &Entity, domain_id: u8) -> Option<u8> {
     if !matches!(ent.ent_type, EntityType::Particles) {
         return None;
     }
@@ -113,6 +113,12 @@ fn build_entity(attrs: [u16; 5], version: u8, domain_id: u8) -> Entity {
         ent_type: EntityType::Particles,
         extra_data: vec![],
     }
+}
+
+pub fn get_store_entity_ids(world: &sauer_map::World, domain_id: u8) -> Vec<usize> {
+    world.entities.iter().enumerate()
+        .filter_map(|(i, e)| entity_version(e, domain_id).map(|_| i))
+        .collect()
 }
 
 pub fn read<T: DeserializeOwned>(
