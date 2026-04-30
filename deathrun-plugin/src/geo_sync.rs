@@ -3,6 +3,7 @@ use sauer_proto::{
     data::{Orient, SelInfo, Vec3},
 };
 use sauer_server::Server;
+use tracing::info;
 
 /// Broadcast a ClipboardServer + PasteServer packet pair to all clients.
 pub fn broadcast_geometry(
@@ -61,8 +62,42 @@ pub async fn send_chunks_to_client(
     vslots: &[Option<ogz_rs::data::VSlot>],
     delay_ms: u64,
 ) {
-    for (pos, size, node) in chunks {
+    let mut queue: std::collections::VecDeque<_> = chunks.into();
+    while let Some((pos, size, node)) = queue.pop_front() {
         let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, vslots);
+
+        if unpack_len > 1000 * 1024 && size > 1 {
+            let half = size / 2;
+            match node {
+                sauer_map::Node::Branch(children) => {
+                    for i in 0..8 {
+                        let cx = (i & 1) as i32;
+                        let cy = ((i >> 1) & 1) as i32;
+                        let cz = ((i >> 2) & 1) as i32;
+                        let child_pos =
+                            [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                        queue.push_back((child_pos, half, children[i].clone()));
+                    }
+                }
+                sauer_map::Node::Leaf(cube) => {
+                    let children = sauer_map::subdivide(&cube);
+                    for i in 0..8 {
+                        let cx = (i & 1) as i32;
+                        let cy = ((i >> 1) & 1) as i32;
+                        let cz = ((i >> 2) & 1) as i32;
+                        let child_pos =
+                            [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                        queue.push_back((
+                            child_pos,
+                            half,
+                            sauer_map::Node::Leaf(children[i as usize].clone()),
+                        ));
+                    }
+                }
+            }
+            continue;
+        }
+
         let sel = SelInfo {
             o: Vec3 {
                 x: pos[0],
@@ -96,8 +131,42 @@ pub async fn broadcast_chunks(
     vslots: &[Option<ogz_rs::data::VSlot>],
     delay_ms: u64,
 ) {
-    for (pos, size, node) in chunks {
+    let mut queue: std::collections::VecDeque<_> = chunks.into();
+    while let Some((pos, size, node)) = queue.pop_front() {
         let (unpack_len, data) = sauer_map::clipboard::generate_clipboard(&node, size, vslots);
+
+        if unpack_len > 1000 * 1024 && size > 1 {
+            let half = size / 2;
+            match node {
+                sauer_map::Node::Branch(children) => {
+                    for i in 0..8 {
+                        let cx = (i & 1) as i32;
+                        let cy = ((i >> 1) & 1) as i32;
+                        let cz = ((i >> 2) & 1) as i32;
+                        let child_pos =
+                            [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                        queue.push_back((child_pos, half, children[i].clone()));
+                    }
+                }
+                sauer_map::Node::Leaf(cube) => {
+                    let children = sauer_map::subdivide(&cube);
+                    for i in 0..8 {
+                        let cx = (i & 1) as i32;
+                        let cy = ((i >> 1) & 1) as i32;
+                        let cz = ((i >> 2) & 1) as i32;
+                        let child_pos =
+                            [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                        queue.push_back((
+                            child_pos,
+                            half,
+                            sauer_map::Node::Leaf(children[i as usize].clone()),
+                        ));
+                    }
+                }
+            }
+            continue;
+        }
+
         let sel = SelInfo {
             o: Vec3 {
                 x: pos[0],

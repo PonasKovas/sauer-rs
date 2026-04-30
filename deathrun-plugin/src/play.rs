@@ -301,7 +301,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
 
         let mut chunks = Vec::new();
         crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
-        chunks.shuffle(&mut rand::thread_rng());
+        //chunks.shuffle(&mut rand::thread_rng());
         crate::geo_sync::broadcast_chunks(&server, author_cn, chunks, &vslots, 20).await;
 
         sleep(Duration::from_millis(500)).await;
@@ -513,7 +513,7 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
 
         let mut chunks = Vec::new();
         crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
-        chunks.shuffle(&mut rand::thread_rng());
+        //chunks.shuffle(&mut rand::thread_rng());
 
         let author_cn = server.client_cns().first().copied().unwrap_or(0) as i32;
         crate::geo_sync::send_chunks_to_client(&server, target_cn, author_cn, chunks, &vslots, 20)
@@ -576,7 +576,10 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
             .try_get(*cn)
             .map(|p| p.name.strip_colors().to_utf8())
             .unwrap_or_default();
-        ui::broadcast(server, ui::warn_msg(&format!("{name} was spectated for being AFK.")));
+        ui::broadcast(
+            server,
+            ui::warn_msg(&format!("{name} was spectated for being AFK.")),
+        );
         server.set_spectator(*cn, true);
     }
 
@@ -640,7 +643,9 @@ impl Plugin for DeathrunPlay {
         let cn = ctx.cn();
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
-        maps.write().unwrap().update_afk_pos(cn, [packet.pos.x, packet.pos.y, packet.pos.z]);
+        maps.write()
+            .unwrap()
+            .update_afk_pos(cn, [packet.pos.x, packet.pos.y, packet.pos.z]);
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
