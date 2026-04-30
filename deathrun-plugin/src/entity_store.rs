@@ -162,12 +162,7 @@ pub fn write<T: Serialize>(
     let n_new = chunks.len();
     let mut changed = Vec::new();
 
-    for i in 0..n_old.min(n_new) {
-        let id = old_ids[i];
-        world.entities[id] = build_entity(chunks[i], version, domain_id);
-        changed.push((id, world.entities[id].clone()));
-    }
-
+    // Release excess old slots back to the empty pool first.
     for i in n_new..n_old {
         let id = old_ids[i];
         world.entities[id] = Entity {
@@ -179,8 +174,11 @@ pub fn write<T: Serialize>(
         changed.push((id, world.entities[id].clone()));
     }
 
+    // Build the full set of target slots: keep existing domain slots, then
+    // fill from empty slots, then push new entities as a last resort.
+    let mut slots: Vec<usize> = old_ids[..n_old.min(n_new)].to_vec();
     if n_new > n_old {
-        let mut empty_slots = world
+        let mut empty_iter = world
             .entities
             .iter()
             .enumerate()
@@ -188,18 +186,30 @@ pub fn write<T: Serialize>(
             .map(|(i, _)| i)
             .collect::<Vec<_>>()
             .into_iter();
-        for i in n_old..n_new {
-            if let Some(slot) = empty_slots.next() {
-                world.entities[slot] = build_entity(chunks[i], version, domain_id);
-                changed.push((slot, world.entities[slot].clone()));
+        for _ in n_old..n_new {
+            if let Some(slot) = empty_iter.next() {
+                slots.push(slot);
             } else {
                 let id = world.entities.len();
-                world
-                    .entities
-                    .push(build_entity(chunks[i], version, domain_id));
-                changed.push((id, world.entities[id].clone()));
+                world.entities.push(Entity {
+                    position: [0.0; 3],
+                    attrs: [0; 5],
+                    ent_type: EntityType::Empty,
+                    extra_data: vec![],
+                });
+                slots.push(id);
             }
         }
     }
+
+    // Sort so chunk index matches entity-list order, which is what unpack
+    // assumes when reading.
+    slots.sort_unstable();
+
+    for (i, &slot) in slots.iter().enumerate() {
+        world.entities[slot] = build_entity(chunks[i], version, domain_id);
+        changed.push((slot, world.entities[slot].clone()));
+    }
+
     Ok(changed)
 }
