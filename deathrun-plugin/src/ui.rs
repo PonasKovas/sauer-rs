@@ -3,8 +3,7 @@ use sauer_proto::channel1::ServMsg;
 use sauer_server::Server;
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
-// Tweak these colors to taste. All visible colors:
-//   Green=0  Blue=1  Yellow=2  Red=3  Gray=4  Magenta=5  Orange=6  White=7  Cyan=8
+// Tweak these colors to taste.
 
 pub struct Theme {
     pub accent: Color, // headers, server name
@@ -45,11 +44,11 @@ pub fn sep() -> CubeString {
 
 pub fn header(text: &str) -> CubeString {
     b().color(THEME.sep)
-        .push_str("== ")
+        .push_str("# ")
         .color(THEME.accent)
         .push_str(text)
         .color(THEME.sep)
-        .push_str(" ==")
+        .push_str(" #")
         .build()
 }
 
@@ -130,7 +129,7 @@ pub fn broadcast_round_start(server: &Server, evil_name: Option<&str>) {
             &[
                 header("ROUND STARTED"),
                 b().color(THEME.evil)
-                    .push_str("  Evil: ")
+                    .push_str("  Terrorist: ")
                     .color(THEME.hi)
                     .push_str(name)
                     .build(),
@@ -146,7 +145,7 @@ pub fn broadcast_round_start(server: &Server, evil_name: Option<&str>) {
             server,
             &[
                 header("PRACTICE MODE"),
-                body("  Respawn freely - no evil player yet."),
+                body("  Respawn freely - no terrorist yet."),
                 b().color(THEME.dim)
                     .push_str("  Waiting for more players...")
                     .build(),
@@ -179,18 +178,27 @@ pub fn send_welcome_edit(server: &Server, cn: u32) {
             header("DEATHRUN EDIT SERVER"),
             body("  Build and test Deathrun maps here."),
             section("Getting started"),
-            tip("/sendmap", "upload your map to begin editing"),
-            tip("F4", "toggle edit mode"),
+            body("  Just start editing, or"),
+            tip(
+                "/map",
+                "select local map to start editing (/sendmap afterwards to start editing)",
+            ),
             section("Trap commands  (aim at a wall first)"),
             tip("#newtrap", "create a trap at the aimed surface"),
             tip("#deltrap", "remove the trap at the aimed surface"),
-            tip("#settrap", "mark the block the trap moves"),
-            tip("#edittrap", "enter trap recording mode"),
-            tip("#endtrap", "finish recording"),
-            tip("#traptime <ms>", "extend duration  (default 2000ms)"),
-            tip("#traptimeout <ms>", "auto-retract delay  (0 = manual)"),
+            tip(
+                "#settrap",
+                "reset and enter edit mode for a trap (just make edits now)",
+            ),
+            tip("#edittrap", "enter edit mode for a trap without resetting"),
+            tip("#endtrap", "finish editing the trap"),
+            tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
+            tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
             section("Saving"),
-            tip("/sendmap", "re-upload to save changes to this server"),
+            tip(
+                "/savemap",
+                "like a normal map. It must be edited on deathrun server for the traps to work.",
+            ),
         ],
     );
 }
@@ -199,14 +207,14 @@ pub fn send_welcome_play(server: &Server, cn: u32, map_name: Option<&str>, is_so
     let mut lines = vec![
         header("DEATHRUN"),
         b().color(THEME.evil)
-            .push_str("  Evil")
+            .push_str("  Terrorist")
             .color(THEME.body)
             .push_str(": controls traps, tries to stop the good team.")
             .build(),
         b().color(THEME.good)
             .push_str("  Good")
             .color(THEME.body)
-            .push_str(": run past the traps and reach the end alive!")
+            .push_str(": complete the map alive or kill the terrorist!")
             .build(),
     ];
 

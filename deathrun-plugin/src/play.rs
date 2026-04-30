@@ -3,9 +3,13 @@ use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use rand::seq::SliceRandom;
+use ogz_rs::data::{MapConfig, Variable};
 use sauer_proto::{
     Client, channel1,
-    data::{ClientState, EntityType, GameMode, MasterMode, Orient, SelInfo, SetTeamReason, Vec3},
+    data::{
+        ClientState, EditVarValue, EntityType, GameMode, MasterMode, Orient, SelInfo,
+        SetTeamReason, Vec3,
+    },
 };
 use sauer_server::{
     Server,
@@ -135,9 +139,40 @@ impl DeathrunPlay {
     }
 }
 
+fn broadcast_map_vars(server: &Server, author_cn: i32, variables: &[Variable]) {
+    for var in variables {
+        let (name, val) = match var {
+            Variable::Int { name, value } => (name.clone(), EditVarValue::Int(*value)),
+            Variable::Float { name, value } => (name.clone(), EditVarValue::Float(*value)),
+            Variable::String { name, value } => (name.clone(), EditVarValue::String(value.clone())),
+        };
+        server.broadcast_chan1(&Client {
+            client_num: author_cn,
+            packet: channel1::EditVar { name, val },
+        });
+    }
+}
+
+fn send_map_vars(server: &Server, target_cn: u32, author_cn: i32, variables: &[Variable]) {
+    for var in variables {
+        let (name, val) = match var {
+            Variable::Int { name, value } => (name.clone(), EditVarValue::Int(*value)),
+            Variable::Float { name, value } => (name.clone(), EditVarValue::Float(*value)),
+            Variable::String { name, value } => (name.clone(), EditVarValue::String(value.clone())),
+        };
+        server.send_chan1(
+            target_cn,
+            &Client {
+                client_num: author_cn,
+                packet: channel1::EditVar { name, val },
+            },
+        );
+    }
+}
+
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
     tokio::spawn(async move {
-        let (world_size, root, entities, vslots) = {
+        let (world_size, root, entities, vslots, variables) = {
             let mut lock = maps.write().unwrap();
             if lock.rotation.is_empty() {
                 return;
@@ -159,11 +194,16 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             let state_lock = get_server_state(&server);
             let state_read = state_lock.read().unwrap();
             let map = state_read.map.as_ref().unwrap();
+            let variables = match &map.meta.config {
+                MapConfig::Modern { variables } => variables.clone(),
+                _ => vec![],
+            };
             (
                 map.world.size,
                 map.world.root.clone(),
                 map.world.entities.clone(),
                 map.meta.vslots.clone(),
+                variables,
             )
         };
 
@@ -192,6 +232,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
                 },
             },
         });
+        broadcast_map_vars(&server, author_cn, &variables);
 
         for i in 0..entities.len() {
             server.broadcast_chan1(&Client {
@@ -346,7 +387,7 @@ fn declare_win(
 }
 
 fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>) -> bool {
-    let (world_size, root, entities, vslots) = {
+    let (world_size, root, entities, vslots, variables) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -356,11 +397,16 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             Some(m) => m,
             None => return false,
         };
+        let variables = match &loaded.state.meta.config {
+            MapConfig::Modern { variables } => variables.clone(),
+            _ => vec![],
+        };
         (
             loaded.state.world.size,
             loaded.state.world.root.clone(),
             loaded.state.world.entities.clone(),
             loaded.state.meta.vslots.clone(),
+            variables,
         )
     };
 
@@ -394,6 +440,8 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
                 },
             },
         );
+        let author_cn = server.client_cns().first().copied().unwrap_or(target_cn) as i32;
+        send_map_vars(&server, target_cn, author_cn, &variables);
 
         for i in 0..entities.len() {
             server.send_chan1(
