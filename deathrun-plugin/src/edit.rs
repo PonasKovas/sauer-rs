@@ -435,17 +435,17 @@ impl Plugin for DeathrunEdit {
             .map
             .as_mut()
         {
-            let sel = crate::map_state::to_selection(&packet.sel);
+            let sel = &packet.sel;
 
-            let d = (sel.orient as i32 >> 1) as usize;
+            let d = sel.orient as usize >> 1;
             let r_dim = [1usize, 2, 0][d];
             let c_dim = [2usize, 0, 1][d];
             let d_dim = [0usize, 1, 2][d];
 
-            let s_r = sel.s[r_dim] as i32;
-            let s_c = sel.s[c_dim] as i32;
-            let s_d = sel.s[d_dim] as i32;
-            let dc = sel.orient as i32 & 1;
+            let s_r = sel.s[r_dim];
+            let s_c = sel.s[c_dim];
+            let s_d = sel.s[d_dim];
+            let dc = sel.orient as usize & 1;
 
             let total_nodes = (s_r * s_c * s_d) as usize;
             let mut extracted_nodes = vec![

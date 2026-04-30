@@ -3,7 +3,7 @@ use ogz_rs::{
     OgzMap,
     data::{MapConfig, Variable},
 };
-use sauer_map::{Selection, World};
+use sauer_map::World;
 use sauer_proto::{
     channel1, channel2,
     data::{EditVarValue, SelInfo},
@@ -12,34 +12,6 @@ use sauer_server::plugin::Context;
 use sauer_server::{Server, ServerItem, delay_spawn, spawntime};
 use std::sync::RwLock;
 use tracing::error;
-
-/// Converts `sauer_proto` network bounds into `sauer_map` selection areas.
-pub fn to_selection(sel: &SelInfo) -> Selection {
-    sel.clone()
-}
-
-pub fn to_sel_info(sel: &Selection) -> SelInfo {
-    SelInfo {
-        o: sauer_proto::data::Vec3 {
-            x: sel.o[0],
-            y: sel.o[1],
-            z: sel.o[2],
-        },
-        s: sauer_proto::data::Vec3 {
-            x: sel.s[0],
-            y: sel.s[1],
-            z: sel.s[2],
-        },
-        grid: sel.grid,
-        orient: sauer_proto::data::Orient::try_from(sel.orient as i32)
-            .unwrap_or(sauer_proto::data::Orient::Left),
-        cx: sel.cx,
-        cxs: sel.cxs,
-        cy: sel.cy,
-        cys: sel.cys,
-        corner: sel.corner,
-    }
-}
 
 #[derive(Clone)]
 pub struct MapState {
@@ -163,7 +135,7 @@ impl MapState {
 
     pub fn handle_edit_tex(&mut self, packet: &channel1::EditTex) {
         self.world.set_texture(
-            &to_selection(&packet.sel),
+            &packet.sel,
             packet.tex as u16,
             packet.all_faces,
         );
@@ -217,7 +189,7 @@ impl MapState {
         };
 
         self.world.apply_material(
-            &to_selection(&packet.sel),
+            &packet.sel,
             matid,
             matmask,
             filtermat,
@@ -228,13 +200,13 @@ impl MapState {
     }
 
     pub fn handle_del_cube(&mut self, packet: &channel1::DelCube) {
-        self.world.fill(&to_selection(&packet.sel), false);
+        self.world.fill(&packet.sel, false);
         self.invalidate_cache();
     }
 
     pub fn handle_replace(&mut self, packet: &channel1::Replace) {
         let sel = if packet.in_sel != 0 {
-            Some(to_selection(&packet.sel))
+            Some(packet.sel.clone())
         } else {
             None
         };
@@ -245,7 +217,7 @@ impl MapState {
 
     pub fn handle_edit_face(&mut self, packet: &channel1::EditFace) {
         self.world
-            .edit_face(&to_selection(&packet.sel), packet.dir, packet.mode as i32);
+            .edit_face(&packet.sel, packet.dir, packet.mode as i32);
         self.invalidate_cache();
     }
 
@@ -263,26 +235,23 @@ impl MapState {
             return;
         }
 
-        let orient = sel.orient as i32 as usize;
+        let orient = sel.orient as usize;
         let d = orient >> 1;
         let r_dim = [1usize, 2, 0][d];
         let c_dim = [2usize, 0, 1][d];
         let d_dim = [0usize, 1, 2][d];
 
-        let s_arr = [sel.s.x, sel.s.y, sel.s.z];
-        let s_r = s_arr[r_dim];
-        let s_c = s_arr[c_dim];
-        let s_d = s_arr[d_dim];
+        let s_r = sel.s[r_dim];
+        let s_c = sel.s[c_dim];
+        let s_d = sel.s[d_dim];
 
-        let sel_o = [sel.o.x, sel.o.y, sel.o.z];
-
-        self.world.edit_sel(&to_selection(sel), |dest_node, pos| {
-            let dx = (pos[r_dim] - sel_o[r_dim]) / sel.grid;
-            let dy = (pos[c_dim] - sel_o[c_dim]) / sel.grid;
+        self.world.edit_sel(sel, |dest_node, pos| {
+            let dx = (pos[r_dim] - sel.o[r_dim]) / sel.grid;
+            let dy = (pos[c_dim] - sel.o[c_dim]) / sel.grid;
 
             // Sauerbraten maps the Z-axis backwards in the array when dimcoord(orient) != 0
             let dc = orient & 1;
-            let pos_d = (pos[d_dim] - sel_o[d_dim]) / sel.grid;
+            let pos_d = (pos[d_dim] - sel.o[d_dim]) / sel.grid;
             let dz = if dc != 0 { s_d - 1 - pos_d } else { pos_d };
 
             if dx >= 0 && dx < s_r && dy >= 0 && dy < s_c && dz >= 0 && dz < s_d {
@@ -311,20 +280,15 @@ impl MapState {
     pub fn handle_paste(&mut self, packet: &channel1::PasteClient, clipboard_data: &[u8]) {
         if let Some((cb_sel, nodes)) = sauer_map::clipboard::decode_clipboard(clipboard_data) {
             let mut paste_sel = packet.sel.clone();
-            paste_sel.s = sauer_proto::data::Vec3 {
-                x: cb_sel.s[0],
-                y: cb_sel.s[1],
-                z: cb_sel.s[2],
-            };
-            paste_sel.orient = sauer_proto::data::Orient::try_from(cb_sel.orient as i32)
-                .unwrap_or(sauer_proto::data::Orient::Left);
+            paste_sel.s = cb_sel.s;
+            paste_sel.orient = cb_sel.orient;
             self.apply_block(&paste_sel, nodes, true);
         }
     }
 
     pub fn handle_undo_redo(&mut self, data: &[u8]) {
         if let Some((sel, nodes)) = sauer_map::clipboard::decode_undo(data) {
-            self.apply_block(&to_sel_info(&sel), nodes, false);
+            self.apply_block(&sel, nodes, false);
         }
     }
 
@@ -333,7 +297,7 @@ impl MapState {
             return;
         }
         self.world.apply_vslots(
-            &to_selection(&packet.sel),
+            &packet.sel,
             packet.all_faces,
             packet.delta != 0,
             &packet.extra_data,
