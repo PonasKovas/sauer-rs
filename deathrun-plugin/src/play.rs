@@ -677,9 +677,6 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn on_damage(&self, ctx: &mut Context, target_cn: u32, actor_cn: u32, _damage: &mut i32) {
-        if target_cn == actor_cn {
-            return; // Self-damage is allowed
-        }
         let server = ctx.server();
         let target_team = server.players.try_get(target_cn).map(|p| p.team.clone());
         let actor_team = server.players.try_get(actor_cn).map(|p| p.team.clone());
