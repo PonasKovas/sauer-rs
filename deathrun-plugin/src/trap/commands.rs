@@ -278,6 +278,144 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
     sync_traps_to_map(server, cn);
 }
 
+pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
+    let cn = ctx.cn();
+    let server = ctx.server();
+
+    // Phase 1: validate, snapshot the base state, and collect existing trigger data.
+    // All done under a single write lock that is released before apply_and_broadcast.
+    let (trap_idx, original_map, trigger_data) = {
+        let state = get_server_state(server).write().unwrap();
+
+        if state.trap_edit.is_some() {
+            server.send_chan1(
+                cn,
+                &ServMsg {
+                    text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
+                },
+            );
+            return;
+        }
+
+        let trap_idx = match state.traps.iter().position(|t| {
+            (0..3).all(|ax| {
+                hit_pt[ax] >= t.button_pos[ax] as f32
+                    && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+            })
+        }) {
+            None => {
+                server.send_chan1(
+                    cn,
+                    &ServMsg { text: "Not looking at a trap.".lossy_cubestring() },
+                );
+                return;
+            }
+            Some(i) => i,
+        };
+
+        let trap = &state.traps[trap_idx];
+        let original_map = state.map.clone().unwrap();
+
+        let trigger_data = if !trap.trigger_clipboard.is_empty()
+            || !trap.trigger_entities_mod.is_empty()
+            || !trap.trigger_entities_add.is_empty()
+        {
+            Some((
+                trap.trigger_cells.clone(),
+                trap.trigger_entities_mod.clone(),
+                trap.trigger_entities_add.clone(),
+                trap.trigger_clipboard.clone(),
+                trap.trigger_unpack_len,
+                trap.clip_pos,
+                trap.clip_s,
+                trap.clip_grid,
+            ))
+        } else {
+            None
+        };
+
+        (trap_idx, original_map, trigger_data)
+    };
+
+    let Some((
+        trigger_cells,
+        trigger_entities_mod,
+        trigger_entities_add,
+        trigger_clipboard,
+        trigger_unpack_len,
+        clip_pos,
+        clip_s,
+        clip_grid,
+    )) = trigger_data
+    else {
+        // No existing trigger: start recording from current state (same as #settrap).
+        let mut state = get_server_state(server).write().unwrap();
+        state.trap_edit = Some(TrapEditState {
+            trap_idx,
+            original_map: Box::new(original_map),
+            affected_entities: std::collections::HashSet::new(),
+        });
+        drop(state);
+        server.broadcast_chan1(&ServMsg {
+            text: format!(
+                "Trap edit mode started for trap {}. Type #endtrap to finish and save.",
+                trap_idx
+            )
+            .lossy_cubestring(),
+        });
+        return;
+    };
+
+    // Phase 2: apply the existing trigger state to the server map and broadcast to clients.
+    let region_sel = SelInfo {
+        o: Vec3 { x: clip_pos[0], y: clip_pos[1], z: clip_pos[2] },
+        s: Vec3 { x: clip_s[0], y: clip_s[1], z: clip_s[2] },
+        grid: clip_grid,
+        orient: sauer_proto::data::Orient::Left,
+        cx: 0,
+        cxs: 0,
+        cy: 0,
+        cys: 0,
+        corner: 0,
+    };
+
+    let assigned_ids = super::trigger::apply_and_broadcast(
+        server,
+        cn,
+        &region_sel,
+        trigger_unpack_len,
+        &trigger_clipboard,
+        &trigger_cells,
+        &trigger_entities_mod,
+        &trigger_entities_add,
+    );
+
+    // Phase 3: set trap_edit with the pre-trigger map as the baseline for diffing.
+    {
+        let mut state = get_server_state(server).write().unwrap();
+        let mut affected = std::collections::HashSet::new();
+        for &(id, _) in &trigger_entities_mod {
+            affected.insert(id);
+        }
+        for id in assigned_ids {
+            affected.insert(id);
+        }
+        state.trap_edit = Some(TrapEditState {
+            trap_idx,
+            original_map: Box::new(original_map),
+            affected_entities: affected,
+        });
+    }
+
+    server.broadcast_chan1(&ServMsg {
+        text: format!(
+            "Trap {} edit mode: existing trigger applied. Edit and #endtrap to save.",
+            trap_idx
+        )
+        .lossy_cubestring(),
+    });
+}
+
 pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     let cn = ctx.cn();
     let server = ctx.server();

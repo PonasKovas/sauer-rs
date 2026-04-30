@@ -66,6 +66,7 @@ impl Plugin for DeathrunEdit {
         if cmd != "#newtrap"
             && cmd != "#deltrap"
             && cmd != "#settrap"
+            && cmd != "#edittrap"
             && cmd != "#endtrap"
             && cmd != "#traptime"
             && cmd != "#traptimeout"
@@ -80,6 +81,18 @@ impl Plugin for DeathrunEdit {
         if cmd == "#endtrap" {
             crate::trap::cmd_endtrap(ctx);
             return;
+        }
+
+        if cmd == "#newtrap" || cmd == "#deltrap" {
+            if get_server_state(&server).read().unwrap().trap_edit.is_some() {
+                server.send_chan1(
+                    cn,
+                    &ServMsg {
+                        text: "Cannot add or remove traps while in trap edit mode. Use #endtrap first.".lossy_cubestring(),
+                    },
+                );
+                return;
+            }
         }
 
         let pos = match server.players.try_get(cn) {
@@ -139,6 +152,8 @@ impl Plugin for DeathrunEdit {
             cmd_newtrap(ctx, hit_pt, hit_orient);
         } else if cmd == "#settrap" {
             crate::trap::cmd_settrap(ctx, hit_pt);
+        } else if cmd == "#edittrap" {
+            crate::trap::cmd_edittrap(ctx, hit_pt);
         } else if cmd == "#traptime" {
             let time = parts
                 .next()
