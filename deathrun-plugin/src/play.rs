@@ -4,6 +4,7 @@ use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use ogz_rs::data::{MapConfig, Variable};
 use rand::seq::SliceRandom;
+use sauer_proto::data::PlayerState;
 use sauer_proto::{
     Client, channel0, channel1,
     data::{
@@ -830,6 +831,17 @@ impl Plugin for DeathrunPlay {
         }
 
         check_win_conditions(server, &maps, None);
+    }
+
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
+        let cn = ctx.cn();
+        let maps = self.maps.read().unwrap();
+        let is_evil = maps.evil_cn == Some(cn);
+
+        state.ammo.pistol = 200;
+        if is_evil {
+            state.ammo.grenade_launcher = 0;
+        }
     }
 
     async fn on_damage(&self, ctx: &mut Context, target_cn: u32, actor_cn: u32, _damage: &mut i32) {
