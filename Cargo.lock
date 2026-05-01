@@ -262,6 +262,7 @@ dependencies = [
  "flate2",
  "ogz-rs",
  "rand",
+ "sauer-core",
  "sauer-map",
  "sauer-plugin-lua",
  "sauer-proto",

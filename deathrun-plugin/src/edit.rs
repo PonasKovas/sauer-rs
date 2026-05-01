@@ -99,11 +99,12 @@ impl Plugin for DeathrunEdit {
 
         let mut dist = TRAP_EDIT_PARTICLE_MAX_DIST;
         if let Some(map) = state.map.as_ref() {
-            if let Some(hit) = sauer_map::raycast::raycast(
+            if let Some(hit) = sauer_map::raycast::raycast_with_filter(
                 &map.world,
                 origin,
                 forward,
                 TRAP_EDIT_PARTICLE_MAX_DIST,
+                |c| !c.is_empty() || c.material != sauer_core::Material::default(),
             ) {
                 dist = (hit.dist - 1.0).max(1.0); // Pull back slightly from the wall so it doesn't clip
             }
@@ -242,7 +243,9 @@ impl Plugin for DeathrunEdit {
                 Some(m) => m,
             };
 
-            let hit = match raycast(&map.world, origin, ray, 2048.0) {
+            let hit = match sauer_map::raycast::raycast_with_filter(&map.world, origin, ray, 2048.0, |c| {
+                !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
+            }) {
                 None => return,
                 Some(h) => h,
             };

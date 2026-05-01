@@ -35,6 +35,20 @@ pub fn raycast<'a>(
     ray: [f32; 3],
     max_dist: f32,
 ) -> Option<RayHit<'a>> {
+    raycast_with_filter(world, origin, ray, max_dist, |c| !c.is_empty())
+}
+
+/// Casts a ray through the octree with a custom cube filter.
+pub fn raycast_with_filter<'a, F>(
+    world: &'a World,
+    origin: [f32; 3],
+    ray: [f32; 3],
+    max_dist: f32,
+    filter: F,
+) -> Option<RayHit<'a>>
+where
+    F: Fn(&Cube) -> bool + Copy,
+{
     let mag = (ray[0] * ray[0] + ray[1] * ray[1] + ray[2] * ray[2]).sqrt();
     if mag == 0.0 {
         return None;
@@ -75,13 +89,14 @@ pub fn raycast<'a>(
                 tmin,
                 tmax.min(max_dist),
                 axis,
+                filter,
             );
         }
     }
     None
 }
 
-fn traverse<'a>(
+fn traverse<'a, F>(
     node: &'a Node,
     origin: [f32; 3],
     ray: [f32; 3],
@@ -91,14 +106,18 @@ fn traverse<'a>(
     t_min: f32,
     t_max: f32,
     entry_axis: usize,
-) -> Option<RayHit<'a>> {
+    filter: F,
+) -> Option<RayHit<'a>>
+where
+    F: Fn(&Cube) -> bool + Copy,
+{
     match node {
         Node::Leaf(cube) => {
-            if cube.is_empty() {
+            if !filter(cube) {
                 return None;
             }
 
-            if cube.is_entirely_solid() {
+            if cube.is_entirely_solid() || cube.is_empty() {
                 // Perfect cubic bounding box hit
                 let orient = if ray[entry_axis] > 0.0 {
                     (entry_axis * 2) as u8
@@ -226,6 +245,7 @@ fn traverse<'a>(
                     ct_min,
                     ct_max,
                     c_axis,
+                    filter,
                 ) {
                     return Some(hit);
                 }
