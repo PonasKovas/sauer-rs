@@ -71,6 +71,8 @@ pub struct PlayMaps {
     afk_last_pos: HashMap<u32, [f32; 3]>,
     /// Time of the last significant movement per player.
     afk_last_move: HashMap<u32, Instant>,
+    /// Players who have already received the AFK warning sound.
+    afk_warned: HashSet<u32>,
 }
 
 impl Default for PlayMaps {
@@ -87,6 +89,7 @@ impl Default for PlayMaps {
             finished_players: Vec::new(),
             afk_last_pos: HashMap::new(),
             afk_last_move: HashMap::new(),
+            afk_warned: HashSet::new(),
         }
     }
 }
@@ -156,12 +159,14 @@ impl PlayMaps {
         self.afk_last_pos.insert(cn, pos);
         if moved {
             self.afk_last_move.insert(cn, Instant::now());
+            self.afk_warned.remove(&cn);
         }
     }
 
     pub fn remove_player_afk(&mut self, cn: u32) {
         self.afk_last_pos.remove(&cn);
         self.afk_last_move.remove(&cn);
+        self.afk_warned.remove(&cn);
     }
 }
 
@@ -473,6 +478,17 @@ fn declare_win(
     lock.round_state = RoundState::Ended;
     ui::broadcast_round_over(server, winner_text, top_times);
     drop(lock);
+
+    for cn in server.client_cns() {
+        server.send_chan1(
+            cn,
+            &Client {
+                client_num: cn as i32,
+                packet: channel1::Sound { sound_id: 63 },
+            },
+        );
+    }
+
     let s = Arc::clone(server);
     let m = Arc::clone(maps);
     tokio::spawn(async move {
@@ -568,9 +584,12 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
 
 fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Duration) {
     let now = Instant::now();
+    let warn_timeout = timeout.saturating_sub(Duration::from_secs(5));
 
-    let to_spectate: Vec<u32> = {
-        let lock = maps.read().unwrap();
+    let mut to_spectate = Vec::new();
+    let mut to_warn = Vec::new();
+    {
+        let mut lock = maps.write().unwrap();
         if lock.round_state != RoundState::Playing {
             return;
         }
@@ -578,19 +597,36 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
         if cns.len() <= 1 {
             return;
         }
-        cns.into_iter()
-            .filter(|&cn| {
-                server
-                    .players
-                    .try_get(cn)
-                    .map_or(false, |p| p.client_state == ClientState::Alive)
-                    && lock
-                        .afk_last_move
-                        .get(&cn)
-                        .map_or(false, |&t| now.duration_since(t) >= timeout)
-            })
-            .collect()
-    };
+        for cn in cns {
+            if !server
+                .players
+                .try_get(cn)
+                .map_or(false, |p| p.client_state == ClientState::Alive)
+            {
+                continue;
+            }
+            if let Some(&t) = lock.afk_last_move.get(&cn) {
+                let elapsed = now.duration_since(t);
+                if elapsed >= timeout {
+                    to_spectate.push(cn);
+                    lock.afk_warned.remove(&cn);
+                } else if elapsed >= warn_timeout && !lock.afk_warned.contains(&cn) {
+                    to_warn.push(cn);
+                    lock.afk_warned.insert(cn);
+                }
+            }
+        }
+    }
+
+    for cn in to_warn {
+        server.send_chan1(
+            cn,
+            &Client {
+                client_num: cn as i32,
+                packet: channel1::Sound { sound_id: 61 },
+            },
+        );
+    }
 
     for cn in &to_spectate {
         let name = server
@@ -738,53 +774,101 @@ impl Plugin for DeathrunPlay {
                         )),
                     );
 
+                    for client_cn in server.client_cns() {
+                        server.send_chan1(
+                            client_cn,
+                            &sauer_proto::Client {
+                                client_num: client_cn as i32,
+                                packet: sauer_proto::channel1::Sound { sound_id: 60 },
+                            },
+                        );
+                    }
+
                     if first_finish {
                         if let Some(pos) = flag_pos {
                             let mut state =
                                 crate::map_state::get_server_state(server).write().unwrap();
-                            let mut ent_id = None;
+                            let mut ent_ids = (None, None);
                             if let Some(map) = state.map.as_mut() {
-                                let new_ent = ogz_rs::data::Entity {
+                                let new_ent1 = ogz_rs::data::Entity {
                                     position: pos,
                                     attrs: [0, 1000, 0, -1, 0],
                                     ent_type: ogz_rs::data::EntityType::Particles,
                                     extra_data: vec![],
                                 };
-                                let id = map
-                                    .world
-                                    .entities
-                                    .iter()
-                                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
-                                    .unwrap_or_else(|| {
-                                        let i = map.world.entities.len();
-                                        map.world.entities.push(new_ent.clone());
-                                        i
-                                    });
-                                map.world.entities[id] = new_ent;
-                                ent_id = Some(id);
+                                let new_ent2 = ogz_rs::data::Entity {
+                                    position: pos,
+                                    attrs: [12, 1000, 1000, 0, 0],
+                                    ent_type: ogz_rs::data::EntityType::Particles,
+                                    extra_data: vec![],
+                                };
+
+                                let find_empty = |m: &mut crate::map_state::MapState| {
+                                    m.world
+                                        .entities
+                                        .iter()
+                                        .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                                        .unwrap_or_else(|| {
+                                            let i = m.world.entities.len();
+                                            m.world.entities.push(ogz_rs::data::Entity {
+                                                position: [0.0; 3],
+                                                attrs: [0; 5],
+                                                ent_type: ogz_rs::data::EntityType::Empty,
+                                                extra_data: vec![],
+                                            });
+                                            i
+                                        })
+                                };
+
+                                let id1 = find_empty(map);
+                                map.world.entities[id1] = new_ent1;
+                                let id2 = find_empty(map);
+                                map.world.entities[id2] = new_ent2;
+                                ent_ids = (Some(id1), Some(id2));
                             }
                             drop(state);
 
-                            if let Some(id) = ent_id {
-                                server.broadcast_chan1(&sauer_proto::Client {
-                                    client_num: cn as i32,
-                                    packet: sauer_proto::channel1::EditEnt {
-                                        ent_id: id as i32,
-                                        pos: sauer_proto::data::Vec3 {
-                                            x: pos[0],
-                                            y: pos[1],
-                                            z: pos[2],
+                            if let (Some(id1), Some(id2)) = ent_ids {
+                                for client_cn in server.client_cns() {
+                                    server.send_chan1(
+                                        client_cn,
+                                        &sauer_proto::Client {
+                                            client_num: cn as i32,
+                                            packet: sauer_proto::channel1::EditEnt {
+                                                ent_id: id1 as i32,
+                                                pos: sauer_proto::data::Vec3 {
+                                                    x: pos[0],
+                                                    y: pos[1],
+                                                    z: pos[2],
+                                                },
+                                                type_: sauer_proto::data::EntityType::Particles,
+                                                attrs: [0, 1000, 0, -1, 0],
+                                            },
                                         },
-                                        type_: sauer_proto::data::EntityType::Particles,
-                                        attrs: [0, 1000, 0, -1, 0],
-                                    },
-                                });
+                                    );
+                                    server.send_chan1(
+                                        client_cn,
+                                        &sauer_proto::Client {
+                                            client_num: cn as i32,
+                                            packet: sauer_proto::channel1::EditEnt {
+                                                ent_id: id2 as i32,
+                                                pos: sauer_proto::data::Vec3 {
+                                                    x: pos[0],
+                                                    y: pos[1],
+                                                    z: pos[2],
+                                                },
+                                                type_: sauer_proto::data::EntityType::Particles,
+                                                attrs: [12, 1000, 1000, 0, 0],
+                                            },
+                                        },
+                                    );
+                                }
                             }
                         }
                     }
-
-                    check_win_conditions(server, maps, None);
                 }
+
+                check_win_conditions(server, maps, None);
             }
         }
     }

@@ -211,6 +211,24 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             &trigger_entities_add,
         );
 
+        if let Some(epos) = server_clone.players.try_get(actor_cn).map(|p| p.position) {
+            for cn in server_clone.client_cns() {
+                if let Some(p) = server_clone.players.try_get(cn) {
+                    let d = [p.position.x - epos.x, p.position.y - epos.y, p.position.z - epos.z];
+                    let dist_sq = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    if dist_sq < 500.0 * 500.0 {
+                        server_clone.send_chan1(
+                            cn,
+                            &sauer_proto::Client {
+                                client_num: actor_cn as i32,
+                                packet: sauer_proto::channel1::Sound { sound_id: 64 },
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         let empty_ent = ogz_rs::data::Entity {
             position: [0.0; 3],
             attrs: [0; 5],
