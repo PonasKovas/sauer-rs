@@ -541,8 +541,23 @@ impl<P: Plugin> Plugin for Base<P> {
         let bytes = packet.text.as_bytes();
 
         if bytes.first() == Some(&b'#') {
-            let args = parse_command_args(&bytes[1..]);
-            if let Some(plugin) = self.plugin.upgrade() {
+            let args = parse_command_args(bytes);
+            let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
+            
+            if cmd == "#help" {
+                let mut cmds = ctx.server().commands.read().unwrap().clone();
+                cmds.sort_by(|a, b| a.name.cmp(&b.name));
+                let mut lines = vec![crate::ui::header("SERVER COMMANDS")];
+                for c in cmds {
+                    let mut usage = c.name.clone();
+                    if !c.usage.is_empty() {
+                        usage.push_str(" ");
+                        usage.push_str(&c.usage);
+                    }
+                    lines.push(crate::ui::tip(&usage, &c.desc));
+                }
+                crate::ui::send_banner(ctx.server(), ctx.cn(), &lines);
+            } else if let Some(plugin) = self.plugin.upgrade() {
                 plugin.on_command(ctx, &args).await;
             }
         } else {

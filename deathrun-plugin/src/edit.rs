@@ -53,13 +53,21 @@ impl DeathrunEdit {
 }
 
 impl Plugin for DeathrunEdit {
-    async fn init(&self, server: &mut Server) {
-        *server.map_name.write().unwrap() = "".lossy_cubestring();
-        *server.game_mode.write().unwrap() = GameMode::CoopEdit;
-        let mut state = DeathrunState::default();
-        state.map = Some(MapState::default_empty());
-        server.extra.insert(RwLock::new(state));
-    }
+async fn init(&self, server: &mut Server) {
+    *server.map_name.write().unwrap() = "".lossy_cubestring();
+    *server.game_mode.write().unwrap() = GameMode::CoopEdit;
+    let mut state = DeathrunState::default();
+    state.map = Some(MapState::default_empty());
+    server.extra.insert(RwLock::new(state));
+
+    server.register_command("#newtrap", "create a trap at the aimed surface", "");
+    server.register_command("#deltrap", "remove the trap at the aimed surface", "");
+    server.register_command("#settrap", "reset and enter edit mode for a trap", "");
+    server.register_command("#edittrap", "enter edit mode for a trap without resetting", "");
+    server.register_command("#endtrap", "finish editing the trap", "");
+    server.register_command("#traptime", "extend duration (default 2 000ms)", "<ms>");
+    server.register_command("#traptimeout", "set trap timeout (default 20 000ms)", "<ms>");
+}
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
         self.player_dirs.insert(packet.client_num, packet.dir);
@@ -167,11 +175,8 @@ impl Plugin for DeathrunEdit {
         server.send_chan1(cn, &ent);
     }
 
-    async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
-        let text = packet.text.strip_colors().to_utf8();
-        let text = text.trim();
-        let mut parts = text.split_whitespace();
-        let cmd = parts.next().unwrap_or("");
+    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
+        let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
 
         if cmd != "#newtrap"
             && cmd != "#deltrap"
@@ -183,7 +188,6 @@ impl Plugin for DeathrunEdit {
         {
             return;
         }
-        ctx.cancel();
 
         let cn = ctx.cn();
         let server = ctx.server().clone();
@@ -266,14 +270,16 @@ impl Plugin for DeathrunEdit {
         } else if cmd == "#edittrap" {
             crate::trap::cmd_edittrap(ctx, hit_pt);
         } else if cmd == "#traptime" {
-            let time = parts
-                .next()
+            let time = args
+                .get(1)
+                .and_then(|s| s.as_str())
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(2000);
             crate::trap::cmd_traptime(ctx, hit_pt, time);
         } else if cmd == "#traptimeout" {
-            let timeout = parts
-                .next()
+            let timeout = args
+                .get(1)
+                .and_then(|s| s.as_str())
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or(0);
             crate::trap::cmd_traptimeout(ctx, hit_pt, timeout);

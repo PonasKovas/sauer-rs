@@ -84,6 +84,11 @@ impl UserData for LuaServer {
                 .unwrap_or_default())
         });
 
+        methods.add_method("register_command", |_lua, this, (name, desc, usage): (String, String, Option<String>)| {
+            this.inner.register_command(&name, &desc, &usage.unwrap_or_default());
+            Ok(())
+        });
+
         methods.add_method("send_server_query", |lua, this, (addr_str, table): (String, Table)| {
             let addr: SocketAddr = addr_str.parse().map_err(|e| mlua::Error::RuntimeError(format!("invalid socket addr: {e}")))?;
             let t: String = table.get("type")?;

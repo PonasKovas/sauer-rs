@@ -12,6 +12,7 @@ use std::{fmt::Debug, sync::Arc};
 
 mod base;
 mod builder;
+pub mod command;
 mod handle_client;
 pub mod items;
 mod packet_log;
@@ -19,6 +20,7 @@ mod peer;
 pub mod players;
 pub mod plugin;
 mod run;
+pub mod ui;
 pub mod utils;
 mod welcome;
 
@@ -53,6 +55,7 @@ pub struct Server {
     pub master_mode: RwLock<MasterMode>,
     /// Tracks each player's current map vote (cn → map name). Cleared on map change.
     pub map_votes: RwLock<HashMap<u32, CubeString>>,
+    pub commands: RwLock<Vec<command::CommandInfo>>,
 }
 
 impl Server {
@@ -75,7 +78,22 @@ impl Server {
             game_mode: RwLock::new(GameMode::Ffa),
             master_mode: RwLock::new(MasterMode::Open),
             map_votes: RwLock::new(HashMap::new()),
+            commands: RwLock::new(vec![
+                command::CommandInfo {
+                    name: "#help".to_string(),
+                    desc: "list all server commands".to_string(),
+                    usage: "".to_string(),
+                }
+            ]),
         }
+    }
+
+    pub fn register_command(&self, name: &str, desc: &str, usage: &str) {
+        self.commands.write().unwrap().push(command::CommandInfo {
+            name: name.to_string(),
+            desc: desc.to_string(),
+            usage: usage.to_string(),
+        });
     }
 
     // ── Server Query Responses ────────────────────────────────────────────────
