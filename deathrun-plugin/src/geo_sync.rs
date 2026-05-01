@@ -23,39 +23,41 @@ pub fn broadcast_geometry(
     });
 }
 
-/// Send a ClipboardServer + PasteServer packet pair to a single client.
-pub fn send_geometry(
+/// Send a ClipboardServer + PasteServer packet pair to multiple clients.
+pub fn send_geometry_to_clients(
     server: &Server,
-    target_cn: u32,
+    target_cns: &[u32],
     owner_cn: i32,
     sel: &sauer_proto::data::SelInfo,
     unpack_len: i32,
     data: &[u8],
 ) {
-    server.send_chan1(
-        target_cn,
-        &channel1::ClipboardServer {
-            client_num: owner_cn,
-            unpack_len,
-            data: data.to_vec(),
-        },
-    );
-    server.send_chan1(
-        target_cn,
-        &Client {
-            client_num: owner_cn,
-            packet: channel1::PasteServer { sel: sel.clone() },
-        },
-    );
+    for &target_cn in target_cns {
+        server.send_chan1(
+            target_cn,
+            &channel1::ClipboardServer {
+                client_num: owner_cn,
+                unpack_len,
+                data: data.to_vec(),
+            },
+        );
+        server.send_chan1(
+            target_cn,
+            &Client {
+                client_num: owner_cn,
+                packet: channel1::PasteServer { sel: sel.clone() },
+            },
+        );
+    }
 }
 
-/// Send all chunks of a world octree to a single client using the
+/// Send all chunks of a world octree to multiple clients using the
 /// clipboard-paste visual rebuild pattern.
 ///
 /// `chunks` must already be collected and (optionally) shuffled by the caller.
-pub async fn send_chunks_to_client(
+pub async fn send_chunks_to_clients(
     server: &Server,
-    target_cn: u32,
+    target_cns: &[u32],
     owner_cn: i32,
     chunks: Vec<([i32; 3], i32, sauer_map::Node)>,
     vslots: &[Option<ogz_rs::data::VSlot>],
@@ -112,7 +114,7 @@ pub async fn send_chunks_to_client(
             cys: 1,
             corner: 0,
         };
-        send_geometry(server, target_cn, owner_cn, &sel, unpack_len, &data);
+        send_geometry_to_clients(server, target_cns, owner_cn, &sel, unpack_len, &data);
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }

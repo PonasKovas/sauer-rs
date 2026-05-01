@@ -191,20 +191,6 @@ impl DeathrunPlay {
     }
 }
 
-fn broadcast_map_vars(server: &Server, author_cn: i32, variables: &[Variable]) {
-    for var in variables {
-        let (name, val) = match var {
-            Variable::Int { name, value } => (name.clone(), EditVarValue::Int(*value)),
-            Variable::Float { name, value } => (name.clone(), EditVarValue::Float(*value)),
-            Variable::String { name, value } => (name.clone(), EditVarValue::String(value.clone())),
-        };
-        server.broadcast_chan1(&Client {
-            client_num: author_cn,
-            packet: channel1::EditVar { name, val },
-        });
-    }
-}
-
 fn send_map_vars(server: &Server, target_cn: u32, author_cn: i32, variables: &[Variable]) {
     for var in variables {
         let (name, val) = match var {
@@ -219,6 +205,135 @@ fn send_map_vars(server: &Server, target_cn: u32, author_cn: i32, variables: &[V
                 packet: channel1::EditVar { name, val },
             },
         );
+    }
+}
+
+async fn send_map_state(
+    server: &Server,
+    target_cns: &[u32],
+    world_size: i32,
+    root: &sauer_map::Node,
+    entities: &[ogz_rs::data::Entity],
+    vslots: &[Option<ogz_rs::data::VSlot>],
+    variables: &[ogz_rs::data::Variable],
+    store_ids: &HashSet<usize>,
+    evil_cn: Option<u32>,
+) {
+    if target_cns.is_empty() {
+        return;
+    }
+
+    let author_cn = target_cns.first().copied().unwrap_or(0) as i32;
+
+    for &cn in target_cns {
+        server.send_chan1(
+            cn,
+            &Client {
+                client_num: cn as i32,
+                packet: channel1::NewMap {
+                    size: world_size.trailing_zeros() as i32,
+                },
+            },
+        );
+
+        server.send_chan1(
+            cn,
+            &Client {
+                client_num: author_cn,
+                packet: channel1::DelCube {
+                    sel: SelInfo {
+                        o: Vec3 { x: 0, y: 0, z: 0 },
+                        s: Vec3 { x: 2, y: 2, z: 2 },
+                        grid: world_size / 2,
+                        orient: Orient::Left,
+                        cx: 0,
+                        cxs: 2,
+                        cy: 0,
+                        cys: 2,
+                        corner: 0,
+                    },
+                },
+            },
+        );
+        send_map_vars(server, cn, author_cn, variables);
+
+        for i in 0..entities.len() {
+            server.send_chan1(
+                cn,
+                &Client {
+                    client_num: author_cn,
+                    packet: channel1::EditEnt {
+                        ent_id: i as i32,
+                        pos: Vec3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                        type_: EntityType::Empty,
+                        attrs: [0; 5],
+                    },
+                },
+            );
+        }
+    }
+
+    sleep(Duration::from_millis(500)).await;
+
+    let mut chunks = Vec::new();
+    crate::recreate::collect_chunks(root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
+
+    crate::geo_sync::send_chunks_to_clients(server, target_cns, author_cn, chunks, vslots, 20)
+        .await;
+
+    sleep(Duration::from_millis(500)).await;
+
+    for &cn in target_cns {
+        let is_evil = Some(cn) == evil_cn;
+
+        for (i, ent) in entities.iter().enumerate() {
+            if store_ids.contains(&i) {
+                continue;
+            }
+
+            let mut ent_type = ent.ent_type;
+            let mut attrs = ent.attrs;
+
+            if ent_type == EntityType::PlayerStart {
+                let team_attr = attrs[1];
+                if team_attr == 0 {
+                    ent_type = EntityType::Empty;
+                } else if team_attr == 2 {
+                    if is_evil {
+                        attrs[1] = 0;
+                    } else {
+                        ent_type = EntityType::Empty;
+                    }
+                } else if team_attr == 1 {
+                    if !is_evil {
+                        attrs[1] = 0;
+                    } else {
+                        ent_type = EntityType::Empty;
+                    }
+                }
+            }
+
+            server.send_chan1(
+                cn,
+                &Client {
+                    client_num: author_cn,
+                    packet: channel1::EditEnt {
+                        ent_id: i as i32,
+                        pos: Vec3 {
+                            x: ent.position[0],
+                            y: ent.position[1],
+                            z: ent.position[2],
+                        },
+                        type_: ent_type,
+                        attrs: attrs.map(|x| x as i32),
+                    },
+                },
+            );
+        }
     }
 }
 
@@ -264,77 +379,6 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             )
         };
 
-        server.set_master_mode(MasterMode::Locked);
-        for cn in server.client_cns() {
-            server.set_spectator(cn, true);
-        }
-
-        server.broadcast_chan1(&channel1::NewMap {
-            size: world_size.trailing_zeros() as i32,
-        });
-        let author_cn = server.client_cns().first().copied().unwrap_or(0) as i32;
-        server.broadcast_chan1(&Client {
-            client_num: author_cn,
-            packet: channel1::DelCube {
-                sel: SelInfo {
-                    o: Vec3 { x: 0, y: 0, z: 0 },
-                    s: Vec3 { x: 2, y: 2, z: 2 },
-                    grid: world_size / 2,
-                    orient: Orient::Left,
-                    cx: 0,
-                    cxs: 2,
-                    cy: 0,
-                    cys: 2,
-                    corner: 0,
-                },
-            },
-        });
-        broadcast_map_vars(&server, author_cn, &variables);
-
-        for i in 0..entities.len() {
-            server.broadcast_chan1(&Client {
-                client_num: author_cn,
-                packet: channel1::EditEnt {
-                    ent_id: i as i32,
-                    pos: Vec3 {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                    },
-                    type_: EntityType::Empty,
-                    attrs: [0; 5],
-                },
-            });
-        }
-
-        sleep(Duration::from_millis(500)).await;
-
-        let mut chunks = Vec::new();
-        crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
-        //chunks.shuffle(&mut rand::thread_rng());
-        crate::geo_sync::broadcast_chunks(&server, author_cn, chunks, &vslots, 20).await;
-
-        sleep(Duration::from_millis(500)).await;
-
-        for (i, ent) in entities.into_iter().enumerate() {
-            if store_ids.contains(&i) {
-                continue;
-            }
-            server.broadcast_chan1(&Client {
-                client_num: author_cn,
-                packet: channel1::EditEnt {
-                    ent_id: i as i32,
-                    pos: Vec3 {
-                        x: ent.position[0],
-                        y: ent.position[1],
-                        z: ent.position[2],
-                    },
-                    type_: ent.ent_type,
-                    attrs: ent.attrs.map(|x| x as i32),
-                },
-            });
-        }
-
         let cns = server.client_cns();
         if cns.is_empty() {
             let mut lock = maps.write().unwrap();
@@ -352,13 +396,36 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
         {
             let mut lock = maps.write().unwrap();
             lock.evil_cn = evil_cn;
+        }
+
+        server.set_master_mode(MasterMode::Locked);
+
+        for &cn in &cns {
+            let team = if Some(cn) == evil_cn { "evil" } else { "good" };
+            server.set_team(cn, team.lossy_cubestring(), SetTeamReason::Forced);
+            server.set_spectator(cn, true);
+        }
+
+        send_map_state(
+            &server,
+            &cns,
+            world_size,
+            &root,
+            &entities,
+            &vslots,
+            &variables,
+            &store_ids,
+            evil_cn,
+        )
+        .await;
+
+        {
+            let mut lock = maps.write().unwrap();
             lock.round_state = RoundState::Playing;
             lock.round_start_time = Some(Instant::now());
         }
 
         for &cn in &cns {
-            let team = if Some(cn) == evil_cn { "evil" } else { "good" };
-            server.set_team(cn, team.lossy_cubestring(), SetTeamReason::Forced);
             server.set_spectator(cn, false); // Moves them into Dead state safely
             server.send_chan1(
                 cn,
@@ -523,7 +590,7 @@ fn declare_win(
 }
 
 fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>) -> bool {
-    let (world_size, root, entities, vslots, variables, store_ids) = {
+    let (world_size, root, entities, vslots, variables, store_ids, evil_cn) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -547,94 +614,23 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             loaded.state.meta.vslots.clone(),
             variables,
             store_ids,
+            lock.evil_cn,
         )
     };
 
     tokio::spawn(async move {
-        server.send_chan1(
-            target_cn,
-            &Client {
-                client_num: target_cn as i32,
-                packet: channel1::NewMap {
-                    size: world_size.trailing_zeros() as i32,
-                },
-            },
-        );
-
-        server.send_chan1(
-            target_cn,
-            &Client {
-                client_num: target_cn as i32,
-                packet: channel1::DelCube {
-                    sel: SelInfo {
-                        o: Vec3 { x: 0, y: 0, z: 0 },
-                        s: Vec3 { x: 2, y: 2, z: 2 },
-                        grid: world_size / 2,
-                        orient: Orient::Left,
-                        cx: 0,
-                        cxs: 2,
-                        cy: 0,
-                        cys: 2,
-                        corner: 0,
-                    },
-                },
-            },
-        );
-        let author_cn = server.client_cns().first().copied().unwrap_or(target_cn) as i32;
-        send_map_vars(&server, target_cn, author_cn, &variables);
-
-        for i in 0..entities.len() {
-            server.send_chan1(
-                target_cn,
-                &Client {
-                    client_num: target_cn as i32,
-                    packet: channel1::EditEnt {
-                        ent_id: i as i32,
-                        pos: Vec3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
-                        type_: EntityType::Empty,
-                        attrs: [0; 5],
-                    },
-                },
-            );
-        }
-
-        sleep(Duration::from_millis(500)).await;
-
-        let mut chunks = Vec::new();
-        crate::recreate::collect_chunks(&root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
-        //chunks.shuffle(&mut rand::thread_rng());
-
-        let author_cn = server.client_cns().first().copied().unwrap_or(0) as i32;
-        crate::geo_sync::send_chunks_to_client(&server, target_cn, author_cn, chunks, &vslots, 20)
-            .await;
-
-        sleep(Duration::from_millis(500)).await;
-
-        for (i, ent) in entities.into_iter().enumerate() {
-            if store_ids.contains(&i) {
-                continue;
-            }
-            server.send_chan1(
-                target_cn,
-                &Client {
-                    client_num: target_cn as i32,
-                    packet: channel1::EditEnt {
-                        ent_id: i as i32,
-                        pos: Vec3 {
-                            x: ent.position[0],
-                            y: ent.position[1],
-                            z: ent.position[2],
-                        },
-                        type_: ent.ent_type,
-                        attrs: ent.attrs.map(|x| x as i32),
-                    },
-                },
-            );
-        }
+        send_map_state(
+            &server,
+            &[target_cn],
+            world_size,
+            &root,
+            &entities,
+            &vslots,
+            &variables,
+            &store_ids,
+            evil_cn,
+        )
+        .await;
     });
 
     true
