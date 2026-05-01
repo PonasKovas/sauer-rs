@@ -1,0 +1,12 @@
+[package]
+name = "telegram-plugin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cube-string.workspace = true
+sauer-proto.workspace = true
+sauer-server.workspace = true
+tokio.workspace = true
+teloxide.workspace = true
+tracing.workspace = true

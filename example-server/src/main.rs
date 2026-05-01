@@ -4,6 +4,7 @@ use deathrun_plugin::{DeathrunEdit, DeathrunPlay};
 use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
 use sauer_server::ServerBuilder;
+use telegram_plugin::TelegramBridge;
 use std::path::PathBuf;
 use tracing::error;
 
@@ -42,12 +43,19 @@ async fn main() {
         }
     };
 
+    let telegram_plugin = TelegramBridge::new(
+        config.telegram.enabled,
+        config.telegram.token.clone(),
+        config.telegram.chat_id,
+    );
+
     let server = ServerBuilder::new()
         .bind_addr(config.bind_addr)
         .max_peers(config.max_peers)
         .plugin(config.base)
         .plugin(DeathrunEdit::new())
         .plugin(DeathrunPlay::new(Default::default()))
+        .plugin(telegram_plugin)
         .plugin(lua_plugin);
 
     if let Err(e) = server.run().await {

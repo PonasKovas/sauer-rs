@@ -10,3 +10,8 @@ master_mode = "Locked"
 
 [deathrun_play]
 afk_timeout_secs = 10
+
+[telegram]
+enabled = false
+token = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+chat_id = -1000000000000

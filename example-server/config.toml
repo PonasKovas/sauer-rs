@@ -7,4 +7,9 @@ server_desc = "sauer-rs"
 server_auth = ""
 map = "complex"
 mode = "CoopEdit"
-master_mode = "Locked
+master_mode = "Locked"
+
+[telegram]
+enabled = false
+token = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+chat_id = -1000000000000

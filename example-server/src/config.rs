@@ -14,6 +14,28 @@ pub struct Config {
     pub plugin_dir: PathBuf,
     #[serde(default)]
     pub base: BaseConfig,
+    #[serde(default)]
+    pub telegram: TelegramConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default)]
+    pub chat_id: i64,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: String::new(),
+            chat_id: 0,
+        }
+    }
 }
 
 /// Initial server settings (map, mode, description, etc.).

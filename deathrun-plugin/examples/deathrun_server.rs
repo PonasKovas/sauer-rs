@@ -7,6 +7,7 @@ use deathrun_plugin::{
 use sauer_plugin_lua::{LuaPlugin, LuaPluginOptions};
 use sauer_proto::data::MasterMode;
 use sauer_server::{Server, ServerBuilder, plugin::Plugin};
+use telegram_plugin::TelegramBridge;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -42,6 +43,28 @@ struct Config {
     pub base: BaseConfig,
     #[serde(default)]
     pub deathrun_play: PlayConfig,
+    #[serde(default)]
+    pub telegram: TelegramConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TelegramConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default)]
+    pub chat_id: i64,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: String::new(),
+            chat_id: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +202,12 @@ async fn main() {
         }
     };
 
+    let telegram_plugin = TelegramBridge::new(
+        config.telegram.enabled,
+        config.telegram.token.clone(),
+        config.telegram.chat_id,
+    );
+
     match args.mode {
         ServerMode::Edit => {
             let server = ServerBuilder::new()
@@ -186,6 +215,7 @@ async fn main() {
                 .max_peers(config.max_peers)
                 .plugin(config.base)
                 .plugin(DeathrunEdit::new())
+                .plugin(telegram_plugin)
                 .plugin(lua_plugin);
 
             if let Err(e) = server.run().await {
@@ -207,6 +237,7 @@ async fn main() {
                 .max_peers(config.max_peers)
                 .plugin(config.base)
                 .plugin(play)
+                .plugin(telegram_plugin)
                 .plugin(lua_plugin);
 
             if let Err(e) = server.run().await {
