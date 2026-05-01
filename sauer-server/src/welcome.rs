@@ -74,9 +74,9 @@ impl Server {
                                 client_num: other as i32,
                                 state: pd.client_state,
                                 frags: pd.frags,
-                                flags: 0, // TODO
+                                flags: pd.flags,
                                 deaths: pd.deaths,
-                                quad_millis: 0, // TODO
+                                quad_millis: pd.quad_millis,
                                 player_state,
                             })
                         })

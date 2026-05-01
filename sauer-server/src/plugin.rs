@@ -1,10 +1,30 @@
 use crate::Server;
 use bytes::Bytes;
 use cube_string::CubeString;
+use std::net::SocketAddr;
 use sauer_proto::{
     channel0, channel1,
     data::{GameMode, PlayerState},
+    extinfo::UdpRequest,
 };
+
+pub struct UdpContext {
+    pub(crate) server: Arc<Server>,
+    pub(crate) addr: SocketAddr,
+    pub(crate) cancelled: bool,
+}
+
+impl UdpContext {
+    pub fn server(&self) -> &Arc<Server> {
+        &self.server
+    }
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+    }
+}
 use std::sync::Arc;
 
 pub struct Context {
@@ -50,6 +70,15 @@ pub trait Plugin: Send + Sync + 'static {
     }
     /// On server start
     fn start(&self, server: &Arc<Server>) -> impl Future<Output = ()> + Send + Sync {
+        async move {}
+    }
+
+    /// On UDP request (standard server info ping or extinfo)
+    fn udp_request(
+        &self,
+        ctx: &mut UdpContext,
+        request: &UdpRequest,
+    ) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
 
@@ -249,6 +278,14 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
     async fn start(&self, server: &Arc<Server>) {
         self.0.start(server).await;
         self.1.start(server).await;
+    }
+
+    async fn udp_request(&self, ctx: &mut UdpContext, request: &UdpRequest) {
+        self.0.udp_request(ctx, request).await;
+        if ctx.cancelled {
+            return;
+        }
+        self.1.udp_request(ctx, request).await;
     }
     async fn connected(&self, ctx: &mut Context) {
         self.0.connected(ctx).await;

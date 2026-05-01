@@ -168,6 +168,146 @@ impl<P: Plugin> Plugin for Base<P> {
         );
     }
 
+    async fn udp_request(&self, ctx: &mut crate::plugin::UdpContext, request: &sauer_proto::extinfo::UdpRequest) {
+        use sauer_proto::extinfo::{UdpRequest, UdpResponse, ExtInfoRequest, ExtInfoResponse};
+
+        let server = ctx.server();
+        match request {
+            UdpRequest::ServerInfo { ping_id } => {
+                let gamemode = *server.game_mode.read().unwrap() as i32;
+                let mastermode = *server.master_mode.read().unwrap() as i32;
+                let has_password = *server.has_password.read().unwrap();
+                let mm = if has_password { 4 } else { mastermode };
+                let map_name = server.map_name.read().unwrap().clone();
+                let server_desc = server.server_desc.read().unwrap().clone();
+
+                let resp = UdpResponse::ServerInfo {
+                    ping_id: *ping_id,
+                    num_clients: server.client_count() as i32,
+                    protocol_version: sauer_proto::PROTOCOL_VERSION,
+                    game_mode: gamemode,
+                    remaining_time: 0, // TODO
+                    max_clients: 128, 
+                    master_mode: mm,
+                    is_paused: false, // TODO
+                    game_speed: 100, // TODO
+                    map_name,
+                    server_desc,
+                };
+                server.send_udp(ctx.addr(), &resp);
+            }
+            UdpRequest::ExtInfo(ext_req) => {
+                match ext_req {
+                    ExtInfoRequest::Uptime => {
+                        server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::Uptime {
+                            seconds: server.start_time.elapsed().as_secs() as i32,
+                        }));
+                    }
+                    ExtInfoRequest::PlayerStats { client_number } => {
+                        if let Some(cn) = client_number {
+                            if let Some(p) = server.players.try_get(*cn as u32) {
+                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                    client_number: Some(*cn),
+                                    ok: true,
+                                }));
+                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds {
+                                    ids: vec![*cn],
+                                }));
+                                
+                                let state = p.state.clone().unwrap_or_else(|| crate::players::state::make_spawn_state(server.game_mode.read().unwrap().is_insta(), 0));
+                                let ip = server.peer_addr(*cn as u32).map(|a| match a.ip() {
+                                    std::net::IpAddr::V4(v4) => {
+                                        let octets = v4.octets();
+                                        [octets[0], octets[1], octets[2]]
+                                    }
+                                    _ => [0, 0, 0]
+                                });
+
+                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
+                                    client_num: *cn,
+                                    ping: p.ping,
+                                    name: p.name.clone(),
+                                    team: p.team.clone(),
+                                    frags: p.frags,
+                                    flags: p.flags,
+                                    deaths: p.deaths,
+                                    teamkills: p.teamkills,
+                                    damage: 0, // TODO
+                                    health: state.health,
+                                    armour: state.armour,
+                                    gunselect: state.gun_select,
+                                    privilege: p.privilege,
+                                    state: p.client_state,
+                                    ip,
+                                }));
+                            } else {
+                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                    client_number: Some(*cn),
+                                    ok: false,
+                                }));
+                            }
+                        } else {
+                            server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                client_number: None,
+                                ok: true,
+                            }));
+                            
+                            let mut ids = Vec::new();
+                            for e in server.players.map.iter() {
+                                ids.push(*e.key() as i32);
+                            }
+                            server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids }));
+                            
+                            for e in server.players.map.iter() {
+                                let cn = *e.key();
+                                let p = e.value();
+                                let state = p.state.clone().unwrap_or_else(|| crate::players::state::make_spawn_state(server.game_mode.read().unwrap().is_insta(), 0));
+                                let ip = server.peer_addr(cn).map(|a| match a.ip() {
+                                    std::net::IpAddr::V4(v4) => {
+                                        let octets = v4.octets();
+                                        [octets[0], octets[1], octets[2]]
+                                    }
+                                    _ => [0, 0, 0]
+                                });
+                                
+                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
+                                    client_num: cn as i32,
+                                    ping: p.ping,
+                                    name: p.name.clone(),
+                                    team: p.team.clone(),
+                                    frags: p.frags,
+                                    flags: p.flags,
+                                    deaths: p.deaths,
+                                    teamkills: p.teamkills,
+                                    damage: 0, // TODO
+                                    health: state.health,
+                                    armour: state.armour,
+                                    gunselect: state.gun_select,
+                                    privilege: p.privilege,
+                                    state: p.client_state,
+                                    ip,
+                                }));
+                            }
+                        }
+                    }
+                    ExtInfoRequest::TeamScore => {
+                        let game_mode = *server.game_mode.read().unwrap() as i32;
+                        let scores = if server.game_mode.read().unwrap().has_teams() {
+                            Some(Vec::new()) // TODO: actual team scores
+                        } else {
+                            None
+                        };
+                        server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::TeamScore {
+                            game_mode,
+                            remaining_time: 0, // TODO
+                            scores,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
     async fn disconnected(&self, ctx: &mut Context) {
         let cn = ctx.cn();
         let server = ctx.server();
@@ -443,6 +583,9 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn client_ping(&self, ctx: &mut Context, packet: &channel1::ClientPing) {
+        if let Some(mut p) = ctx.server().players.try_get_mut(ctx.cn()) {
+            p.ping = packet.ping;
+        }
         ctx.server().broadcast_except_chan1(
             ctx.cn(),
             &Client {

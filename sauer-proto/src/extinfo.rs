@@ -24,33 +24,97 @@ pub enum ExtInfoRequest {
     TeamScore,
 }
 
-impl ExtInfoRequest {
+#[derive(Debug, Clone, PartialEq)]
+pub enum UdpRequest {
+    ServerInfo { ping_id: i32 },
+    ExtInfo(ExtInfoRequest),
+}
+
+impl UdpRequest {
+    pub fn parse(buf: &[u8]) -> Result<Self, ParseError> {
+        let mut r = buf;
+        if r.is_empty() {
+            return Err(ParseError::UnexpectedEof { expected: 1 });
+        }
+        let ping_id = i32::sauer_read(&mut r)?;
+        if ping_id == 0 && !r.is_empty() {
+            Ok(Self::ExtInfo(ExtInfoRequest::from_reader(&mut r)?))
+        } else {
+            Ok(Self::ServerInfo { ping_id })
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UdpResponse {
+    ServerInfo {
+        ping_id: i32,
+        num_clients: i32,
+        protocol_version: i32,
+        game_mode: i32,
+        remaining_time: i32,
+        max_clients: i32,
+        master_mode: i32,
+        is_paused: bool,
+        game_speed: i32,
+        map_name: CubeString,
+        server_desc: CubeString,
+    },
+    ExtInfo(ExtInfoResponse),
+}
+
+impl UdpResponse {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Vec::new();
-        w.push(0);
-
         match self {
-            Self::Uptime => {
-                EXT_UPTIME.sauer_write(&mut w);
+            Self::ServerInfo {
+                ping_id,
+                num_clients,
+                protocol_version,
+                game_mode,
+                remaining_time,
+                max_clients,
+                master_mode,
+                is_paused,
+                game_speed,
+                map_name,
+                server_desc,
+            } => {
+                ping_id.sauer_write(&mut w);
+                num_clients.sauer_write(&mut w);
+
+                let attrs = if *is_paused || *game_speed != 100 {
+                    7
+                } else {
+                    5
+                };
+                attrs.sauer_write(&mut w);
+
+                protocol_version.sauer_write(&mut w);
+                game_mode.sauer_write(&mut w);
+                remaining_time.sauer_write(&mut w);
+                max_clients.sauer_write(&mut w);
+                master_mode.sauer_write(&mut w);
+
+                if attrs == 7 {
+                    (if *is_paused { 1i32 } else { 0i32 }).sauer_write(&mut w);
+                    game_speed.sauer_write(&mut w);
+                }
+
+                map_name.sauer_write(&mut w);
+                server_desc.sauer_write(&mut w);
             }
-            Self::PlayerStats { client_number } => {
-                EXT_PLAYERSTATS.sauer_write(&mut w);
-                client_number.unwrap_or(-1).sauer_write(&mut w);
-            }
-            Self::TeamScore => {
-                EXT_TEAMSCORE.sauer_write(&mut w);
+            Self::ExtInfo(ext_resp) => {
+                0i32.sauer_write(&mut w);
+                ext_resp.write_to(&mut w);
             }
         }
-
         w
     }
-    pub fn from_bytes(mut buf: &[u8]) -> Result<Self, ParseError> {
-        let r = &mut buf;
+}
 
-        if i32::sauer_read(r)? != 0 {
-            return Err(ParseError::InvalidExtInfo);
-        }
-
+impl ExtInfoRequest {
+    pub(crate) fn from_reader(r: &mut &[u8]) -> Result<Self, ParseError> {
         let msg_type = i32::sauer_read(r)?;
 
         Ok(match msg_type {
@@ -110,14 +174,11 @@ pub struct ScoreData {
     pub score: i32,
 }
 impl ExtInfoResponse {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut w = Vec::new();
-        w.push(0);
-
+    pub(crate) fn write_to(&self, mut w: &mut Vec<u8>) {
         match self {
             Self::Uptime { seconds } => {
-                EXT_UPTIME.sauer_write(&mut w);
-                EXT_ACK.sauer_write(&mut w);
+                EXT_UPTIME.sauer_write(w);
+                EXT_ACK.sauer_write(w);
                 EXT_VERSION.sauer_write(&mut w);
                 seconds.sauer_write(&mut w);
             }
@@ -175,29 +236,27 @@ impl ExtInfoResponse {
                 remaining_time,
                 scores,
             } => {
-                EXT_TEAMSCORE.sauer_write(&mut w);
-                EXT_ACK.sauer_write(&mut w);
-                EXT_VERSION.sauer_write(&mut w);
+                EXT_TEAMSCORE.sauer_write(w);
+                EXT_ACK.sauer_write(w);
+                EXT_VERSION.sauer_write(w);
                 if scores.is_some() {
                     EXT_NO_ERROR
                 } else {
                     EXT_ERROR
                 }
-                .sauer_write(&mut w);
-                game_mode.sauer_write(&mut w);
-                remaining_time.sauer_write(&mut w);
+                .sauer_write(w);
+                game_mode.sauer_write(w);
+                remaining_time.sauer_write(w);
 
                 if let Some(scores) = scores {
                     for score in scores {
-                        score.team_name.sauer_write(&mut w);
-                        score.score.sauer_write(&mut w);
+                        score.team_name.sauer_write(w);
+                        score.score.sauer_write(w);
                     }
-                    (-1).sauer_write(&mut w);
+                    (-1).sauer_write(w);
                 }
             }
         }
-
-        w
     }
 
     pub fn from_bytes(mut buf: &[u8]) -> Result<Self, ParseError> {

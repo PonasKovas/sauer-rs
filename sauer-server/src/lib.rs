@@ -7,8 +7,8 @@ use sauer_proto::{
     data::{GameMode, MasterMode},
     route::{Chan0, Chan1, Chan2, S2C},
 };
-use std::fmt::Debug;
 use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
+use std::{fmt::Debug, sync::Arc};
 
 mod base;
 mod builder;
@@ -25,9 +25,11 @@ mod welcome;
 pub use builder::ServerBuilder;
 pub use items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime};
 pub use players::{ClipboardData, PlayerData, Players};
-pub use plugin::{Context, Plugin};
+pub use plugin::{Context, Plugin, UdpContext};
 
 pub struct Server {
+    pub start_time: std::time::Instant,
+    pub extinfo_socket: std::sync::OnceLock<Arc<tokio::net::UdpSocket>>,
     pub(crate) clients: DashMap<u32, Peer>,
     /// Extension point for external plugins to store their own state.
     pub extra: anymap::Map<dyn anymap::any::Any + Send + Sync>,
@@ -53,6 +55,8 @@ pub struct Server {
 impl Server {
     pub fn new() -> Self {
         Self {
+            start_time: std::time::Instant::now(),
+            extinfo_socket: std::sync::OnceLock::new(),
             clients: DashMap::new(),
             extra: anymap::Map::new(),
             players: Players::new(),
@@ -65,6 +69,15 @@ impl Server {
             game_mode: RwLock::new(GameMode::Ffa),
             master_mode: RwLock::new(MasterMode::Open),
             map_votes: RwLock::new(HashMap::new()),
+        }
+    }
+
+    // ── UDP Responses ─────────────────────────────────────────────────────────
+
+    pub fn send_udp(&self, to: std::net::SocketAddr, response: &sauer_proto::extinfo::UdpResponse) {
+        if let Some(sock) = self.extinfo_socket.get() {
+            let data = response.to_bytes();
+            let _ = sock.try_send_to(&data, to);
         }
     }
 

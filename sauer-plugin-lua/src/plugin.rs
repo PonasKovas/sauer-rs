@@ -7,7 +7,8 @@ use bytes::Bytes;
 use cube_string::CubeString;
 use sauer_proto::data::PlayerState;
 use sauer_proto::{channel0, channel1, data::GameMode};
-use sauer_server::{Context, Plugin, Server};
+use sauer_server::{Context, UdpContext, Plugin, Server};
+use sauer_proto::extinfo::{UdpRequest, ExtInfoRequest};
 use std::sync::Arc;
 use tracing::error;
 
@@ -227,6 +228,46 @@ impl Plugin for LuaPlugin {
                 let data = self.lua.create_string(packet.as_ref())?;
                 let event = scope.create_userdata_ref_mut(&mut event)?;
                 callback.callback.call::<()>((ctx.cn(), data, event))
+            });
+
+            if let Err(e) = r {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+
+            if event.cancelled {
+                ctx.cancel();
+                break;
+            }
+        }
+    }
+
+    async fn udp_request(&self, ctx: &mut UdpContext, request: &UdpRequest) {
+        let mut event = EventUD::new();
+
+        for callback in &self.callbacks.udp_request {
+            let r = self.lua.scope(|scope| {
+                let req_table = self.lua.create_table()?;
+                match request {
+                    UdpRequest::ServerInfo { ping_id } => {
+                        req_table.set("type", "ServerInfo")?;
+                        req_table.set("ping_id", *ping_id)?;
+                    }
+                    UdpRequest::ExtInfo(ExtInfoRequest::Uptime) => {
+                        req_table.set("type", "Uptime")?;
+                    }
+                    UdpRequest::ExtInfo(ExtInfoRequest::PlayerStats { client_number }) => {
+                        req_table.set("type", "PlayerStats")?;
+                        if let Some(cn) = client_number {
+                            req_table.set("client_number", *cn)?;
+                        }
+                    }
+                    UdpRequest::ExtInfo(ExtInfoRequest::TeamScore) => {
+                        req_table.set("type", "TeamScore")?;
+                    }
+                }
+
+                let event = scope.create_userdata_ref_mut(&mut event)?;
+                callback.callback.call::<()>((ctx.addr().to_string(), req_table, event))
             });
 
             if let Err(e) = r {

@@ -36,8 +36,44 @@ pub(crate) async fn run<P: Plugin>(
     let mut server = Server::new();
     plugin.init(&mut server).await;
 
+    let mut extinfo_addr = bind_addr;
+    extinfo_addr.set_port(bind_addr.port() + 1);
+    let extinfo_socket = tokio::net::UdpSocket::bind(extinfo_addr).await?;
+    let extinfo_socket = Arc::new(extinfo_socket);
+    server.extinfo_socket.set(Arc::clone(&extinfo_socket)).unwrap();
+
     let server = Arc::new(server);
     plugin.start(&server).await;
+
+    // spawn UDP reader task for server browser pings & ExtInfo
+    let ext_plugin = Arc::clone(&plugin);
+    let ext_server = Arc::clone(&server);
+    tokio::spawn(async move {
+        let mut buf = [0u8; 1024];
+        loop {
+            match extinfo_socket.recv_from(&mut buf).await {
+                Ok((len, addr)) => {
+                    let data = &buf[..len];
+                    match sauer_proto::extinfo::UdpRequest::parse(data) {
+                        Ok(req) => {
+                            let mut ctx = crate::plugin::UdpContext {
+                                server: Arc::clone(&ext_server),
+                                addr,
+                                cancelled: false,
+                            };
+                            ext_plugin.udp_request(&mut ctx, &req).await;
+                        }
+                        Err(e) => {
+                            tracing::debug!(target: "sauer_server", "Failed to parse UDP packet from {}: {:?}", addr, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(target: "sauer_server", "UDP recv error: {}", e);
+                }
+            }
+        }
+    });
 
     let mut next_cn = 0u32;
 

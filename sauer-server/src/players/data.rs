@@ -19,8 +19,11 @@ pub struct PlayerData {
     /// `None` until `welcome()` is called (sentinel for "has been welcomed").
     pub state: Option<PlayerState>,
     pub position: Vec3<f32>,
+    pub ping: i32,
     pub frags: i32,
+    pub flags: i32,
     pub deaths: i32,
+    pub teamkills: i32,
     /// Compressed clipboard geometry, set when N_CLIPBOARD is received.
     pub clipboard: Option<ClipboardData>,
     /// Remaining quad damage milliseconds. Decremented each server tick.
@@ -43,8 +46,11 @@ impl PlayerData {
                 y: 0.0,
                 z: 0.0,
             },
+            ping: 0,
             frags: 0,
+            flags: 0,
             deaths: 0,
+            teamkills: 0,
             clipboard: None,
             quad_millis: 0,
             privilege: Privilege::None,
