@@ -679,7 +679,8 @@ impl Plugin for DeathrunPlay {
             let is_first = server.client_count() == 1;
             let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
             let is_loading = lock.round_state == RoundState::MapLoading;
-            let is_waiting = lock.round_state == RoundState::NotStarted && server.client_count() > 1;
+            let is_waiting =
+                lock.round_state == RoundState::NotStarted && server.client_count() > 1;
             let map_name = lock.current_map.clone();
             (is_first, is_solo_round, is_loading, is_waiting, map_name)
         };

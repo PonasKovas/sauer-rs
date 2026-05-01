@@ -40,7 +40,10 @@ pub(crate) async fn run<P: Plugin>(
     extinfo_addr.set_port(bind_addr.port() + 1);
     let extinfo_socket = tokio::net::UdpSocket::bind(extinfo_addr).await?;
     let extinfo_socket = Arc::new(extinfo_socket);
-    server.extinfo_socket.set(Arc::clone(&extinfo_socket)).unwrap();
+    server
+        .extinfo_socket
+        .set(Arc::clone(&extinfo_socket))
+        .unwrap();
 
     let server = Arc::new(server);
     plugin.start(&server).await;
@@ -49,9 +52,9 @@ pub(crate) async fn run<P: Plugin>(
     let master_server = Arc::clone(&server);
     let server_port = bind_addr.port();
     tokio::spawn(async move {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use sauer_proto::masterserver::{MasterClientRequest, MasterServerResponse};
-        
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
         loop {
             if !*master_server.update_master.read().unwrap() {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -60,7 +63,7 @@ pub(crate) async fn run<P: Plugin>(
 
             let host = master_server.master_name.read().unwrap().clone();
             let port = master_server.master_port;
-            
+
             match tokio::net::TcpStream::connect((host.as_str(), port)).await {
                 Ok(mut stream) => {
                     let req = MasterClientRequest::RegServ(server_port);
@@ -69,11 +72,11 @@ pub(crate) async fn run<P: Plugin>(
                     } else {
                         let mut reader = BufReader::new(stream);
                         let mut line = String::new();
-                        
+
                         // We connected and sent regserv. Now we read responses or just keep connection alive.
                         // Sauerbraten sends `regserv` once per hour on the same connection, or reconnects if dropped.
                         let mut last_reg = tokio::time::Instant::now();
-                        
+
                         loop {
                             if !*master_server.update_master.read().unwrap() {
                                 break; // disconnect
@@ -82,7 +85,12 @@ pub(crate) async fn run<P: Plugin>(
                             // Send regserv every hour
                             if last_reg.elapsed() >= std::time::Duration::from_secs(60 * 60) {
                                 let req = MasterClientRequest::RegServ(server_port);
-                                if reader.get_mut().write_all(req.to_string().as_bytes()).await.is_err() {
+                                if reader
+                                    .get_mut()
+                                    .write_all(req.to_string().as_bytes())
+                                    .await
+                                    .is_err()
+                                {
                                     break;
                                 }
                                 last_reg = tokio::time::Instant::now();
@@ -90,8 +98,9 @@ pub(crate) async fn run<P: Plugin>(
 
                             // Wait for data or timeout
                             let read_fut = reader.read_line(&mut line);
-                            let timeout_fut = tokio::time::sleep(std::time::Duration::from_secs(10));
-                            
+                            let timeout_fut =
+                                tokio::time::sleep(std::time::Duration::from_secs(10));
+
                             tokio::select! {
                                 res = read_fut => {
                                     match res {
@@ -130,7 +139,7 @@ pub(crate) async fn run<P: Plugin>(
                     tracing::error!(target: "sauer_server", "Failed to connect to master server {}:{}: {}", host, port, e);
                 }
             }
-            
+
             // If disconnected or failed, wait before retrying
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }

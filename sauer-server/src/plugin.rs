@@ -1,12 +1,12 @@
 use crate::Server;
 use bytes::Bytes;
 use cube_string::CubeString;
-use std::net::SocketAddr;
 use sauer_proto::{
     channel0, channel1,
     data::{GameMode, PlayerState},
     server_query::ServerQueryRequest,
 };
+use std::net::SocketAddr;
 
 pub struct ServerQueryContext {
     pub(crate) server: Arc<Server>,

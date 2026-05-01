@@ -292,7 +292,11 @@ pub fn check_and_rebuild_traps(
                 trap.button_pos,
                 trap.button_size,
             );
-            let (ul, d) = sauer_map::clipboard::generate_clipboard(&btn_node, trap.button_size, &map.meta.vslots);
+            let (ul, d) = sauer_map::clipboard::generate_clipboard(
+                &btn_node,
+                trap.button_size,
+                &map.meta.vslots,
+            );
             clip_unpack_len = ul;
             clip_data = d;
 

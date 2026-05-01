@@ -1,6 +1,6 @@
-pub use sauer_server::ui::*;
 use cube_string::CubeString;
 use sauer_server::Server;
+pub use sauer_server::ui::*;
 
 fn b() -> cube_string::CubeStringBuilder {
     CubeString::builder()
@@ -75,7 +75,7 @@ pub fn broadcast_round_over(server: &Server, winner: &str, top_times: &[(String,
                     .push_str(" - ")
                     .color(THEME.hi)
                     .push_str(&format!("{:.2}s", time))
-                    .build()
+                    .build(),
             );
         }
     }
@@ -133,12 +133,12 @@ pub fn send_welcome_edit(server: &Server, cn: u32) {
                 "#settrap",
                 "reset and enter edit mode for a trap (just make edits now)",
             ),
-        tip("#edittrap", "enter edit mode for a trap without resetting"),
-        tip("#endtrap", "finish editing the trap"),
-        tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
-        tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
-        tip("#help", "list all server commands"),
-        section("Saving"),
+            tip("#edittrap", "enter edit mode for a trap without resetting"),
+            tip("#endtrap", "finish editing the trap"),
+            tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
+            tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
+            tip("#help", "list all server commands"),
+            section("Saving"),
             tip(
                 "/savemap",
                 "like a normal map. It must be edited on deathrun server for the traps to work.",

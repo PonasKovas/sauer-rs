@@ -78,13 +78,11 @@ impl Server {
             game_mode: RwLock::new(GameMode::Ffa),
             master_mode: RwLock::new(MasterMode::Open),
             map_votes: RwLock::new(HashMap::new()),
-            commands: RwLock::new(vec![
-                command::CommandInfo {
-                    name: "#help".to_string(),
-                    desc: "list all server commands".to_string(),
-                    usage: "".to_string(),
-                }
-            ]),
+            commands: RwLock::new(vec![command::CommandInfo {
+                name: "#help".to_string(),
+                desc: "list all server commands".to_string(),
+                usage: "".to_string(),
+            }]),
         }
     }
 

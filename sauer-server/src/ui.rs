@@ -1,6 +1,6 @@
+use crate::Server;
 use cube_string::{Color, CubeString};
 use sauer_proto::channel1::ServMsg;
-use crate::Server;
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 // Tweak these colors to taste.

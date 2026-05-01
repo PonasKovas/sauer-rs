@@ -57,29 +57,42 @@ impl ServerQueryResponse {
         let mut w = Vec::new();
         match self {
             Self::ServerInfo {
-                ping_id, num_clients, protocol_version, game_mode, remaining_time, max_clients,
-                master_mode, is_paused, game_speed, map_name, server_desc
+                ping_id,
+                num_clients,
+                protocol_version,
+                game_mode,
+                remaining_time,
+                max_clients,
+                master_mode,
+                is_paused,
+                game_speed,
+                map_name,
+                server_desc,
             } => {
                 ping_id.sauer_write(&mut w);
                 num_clients.sauer_write(&mut w);
-                
-                let attrs = if *is_paused || *game_speed != 100 { 7 } else { 5 };
+
+                let attrs = if *is_paused || *game_speed != 100 {
+                    7
+                } else {
+                    5
+                };
                 attrs.sauer_write(&mut w);
-                
+
                 protocol_version.sauer_write(&mut w);
                 game_mode.sauer_write(&mut w);
                 remaining_time.sauer_write(&mut w);
                 max_clients.sauer_write(&mut w);
                 master_mode.sauer_write(&mut w);
-                
+
                 if attrs == 7 {
                     (if *is_paused { 1i32 } else { 0i32 }).sauer_write(&mut w);
                     game_speed.sauer_write(&mut w);
                 }
-                
+
                 map_name.sauer_write(&mut w);
                 server_desc.sauer_write(&mut w);
-            },
+            }
             Self::ExtInfo(ext_resp) => {
                 0i32.sauer_write(&mut w);
                 ext_resp.write_to(&mut w);

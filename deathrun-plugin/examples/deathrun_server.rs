@@ -7,7 +7,6 @@ use deathrun_plugin::{
 use sauer_plugin_lua::{LuaPlugin, LuaPluginOptions};
 use sauer_proto::data::MasterMode;
 use sauer_server::{Server, ServerBuilder, plugin::Plugin};
-use telegram_plugin::TelegramBridge;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -15,6 +14,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
 };
+use telegram_plugin::TelegramBridge;
 use tokio::fs;
 use tracing::{error, info, warn};
 

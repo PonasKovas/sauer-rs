@@ -6,9 +6,9 @@ use crate::{
 use bytes::Bytes;
 use cube_string::CubeString;
 use sauer_proto::data::PlayerState;
+use sauer_proto::server_query::{ExtInfoRequest, ServerQueryRequest};
 use sauer_proto::{channel0, channel1, data::GameMode};
-use sauer_server::{Context, ServerQueryContext, Plugin, Server};
-use sauer_proto::server_query::{ServerQueryRequest, ExtInfoRequest};
+use sauer_server::{Context, Plugin, Server, ServerQueryContext};
 use std::sync::Arc;
 use tracing::error;
 
@@ -267,7 +267,9 @@ impl Plugin for LuaPlugin {
                 }
 
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.addr().to_string(), req_table, event))
+                callback
+                    .callback
+                    .call::<()>((ctx.addr().to_string(), req_table, event))
             });
 
             if let Err(e) = r {

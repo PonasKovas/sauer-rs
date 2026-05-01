@@ -1,12 +1,15 @@
 use crate::extra::LuaExtraRegistry;
 use crate::userdata::task_handle::TaskHandle;
+use cube_string::CubeString;
 use mlua::{
     FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value,
 };
-use sauer_proto::{channel1, server_query::{ServerQueryResponse, ExtInfoResponse, ScoreData}};
-use std::net::SocketAddr;
-use cube_string::CubeString;
+use sauer_proto::{
+    channel1,
+    server_query::{ExtInfoResponse, ScoreData, ServerQueryResponse},
+};
 use sauer_server::Server;
+use std::net::SocketAddr;
 use std::{sync::Arc, time::Duration};
 use tokio::time::{Instant, sleep_until};
 
@@ -84,90 +87,105 @@ impl UserData for LuaServer {
                 .unwrap_or_default())
         });
 
-        methods.add_method("register_command", |_lua, this, (name, desc, usage): (String, String, Option<String>)| {
-            this.inner.register_command(&name, &desc, &usage.unwrap_or_default());
-            Ok(())
-        });
+        methods.add_method(
+            "register_command",
+            |_lua, this, (name, desc, usage): (String, String, Option<String>)| {
+                this.inner
+                    .register_command(&name, &desc, &usage.unwrap_or_default());
+                Ok(())
+            },
+        );
 
-        methods.add_method("send_server_query", |lua, this, (addr_str, table): (String, Table)| {
-            let addr: SocketAddr = addr_str.parse().map_err(|e| mlua::Error::RuntimeError(format!("invalid socket addr: {e}")))?;
-            let t: String = table.get("type")?;
-            
-            let response = match t.as_str() {
-                "ServerInfo" => ServerQueryResponse::ServerInfo {
-                    ping_id: table.get("ping_id")?,
-                    num_clients: table.get("num_clients")?,
-                    protocol_version: table.get("protocol_version")?,
-                    game_mode: table.get("game_mode")?,
-                    remaining_time: table.get("remaining_time")?,
-                    max_clients: table.get("max_clients")?,
-                    master_mode: table.get("master_mode")?,
-                    is_paused: table.get("is_paused")?,
-                    game_speed: table.get("game_speed")?,
-                    map_name: table.get("map_name")?,
-                    server_desc: table.get("server_desc")?,
-                },
-                "Uptime" => ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
-                    seconds: table.get("seconds")?,
-                }),
-                "PlayerStats" => ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                    client_number: table.get("client_number")?,
-                    ok: table.get("ok")?,
-                }),
-                "PlayerStatsIds" => {
-                    let ids: Vec<i32> = table.get("ids")?;
-                    ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids })
-                },
-                "PlayerStatsStats" => {
-                    let ip_table: Option<Vec<u8>> = table.get("ip")?;
-                    let ip = ip_table.and_then(|v| {
-                        if v.len() == 3 {
-                            Some([v[0], v[1], v[2]])
-                        } else {
-                            None
-                        }
-                    });
+        methods.add_method(
+            "send_server_query",
+            |lua, this, (addr_str, table): (String, Table)| {
+                let addr: SocketAddr = addr_str
+                    .parse()
+                    .map_err(|e| mlua::Error::RuntimeError(format!("invalid socket addr: {e}")))?;
+                let t: String = table.get("type")?;
 
-                    ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
-                        client_num: table.get("client_num")?,
-                        ping: table.get("ping")?,
-                        name: table.get("name")?,
-                        team: table.get("team")?,
-                        frags: table.get("frags")?,
-                        flags: table.get("flags")?,
-                        deaths: table.get("deaths")?,
-                        teamkills: table.get("teamkills")?,
-                        damage: table.get("damage")?,
-                        health: table.get("health")?,
-                        armour: table.get("armour")?,
-                        gunselect: table.get("gunselect")?,
-                        privilege: table.get("privilege")?,
-                        state: table.get("state")?,
-                        ip,
-                    })
-                },
-                "TeamScore" => {
-                    let scores_table: Option<Vec<Table>> = table.get("scores")?;
-                    let scores = scores_table.map(|v| {
-                        v.into_iter().filter_map(|t| {
-                            let team_name = t.get("team_name").ok()?;
-                            let score = t.get("score").ok()?;
-                            Some(ScoreData { team_name, score })
-                        }).collect()
-                    });
-
-                    ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
+                let response = match t.as_str() {
+                    "ServerInfo" => ServerQueryResponse::ServerInfo {
+                        ping_id: table.get("ping_id")?,
+                        num_clients: table.get("num_clients")?,
+                        protocol_version: table.get("protocol_version")?,
                         game_mode: table.get("game_mode")?,
                         remaining_time: table.get("remaining_time")?,
-                        scores,
-                    })
-                },
-                _ => return Err(mlua::Error::RuntimeError(format!("unknown ServerQuery response type: {t}"))),
-            };
+                        max_clients: table.get("max_clients")?,
+                        master_mode: table.get("master_mode")?,
+                        is_paused: table.get("is_paused")?,
+                        game_speed: table.get("game_speed")?,
+                        map_name: table.get("map_name")?,
+                        server_desc: table.get("server_desc")?,
+                    },
+                    "Uptime" => ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
+                        seconds: table.get("seconds")?,
+                    }),
+                    "PlayerStats" => ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                        client_number: table.get("client_number")?,
+                        ok: table.get("ok")?,
+                    }),
+                    "PlayerStatsIds" => {
+                        let ids: Vec<i32> = table.get("ids")?;
+                        ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids })
+                    }
+                    "PlayerStatsStats" => {
+                        let ip_table: Option<Vec<u8>> = table.get("ip")?;
+                        let ip = ip_table.and_then(|v| {
+                            if v.len() == 3 {
+                                Some([v[0], v[1], v[2]])
+                            } else {
+                                None
+                            }
+                        });
 
-            this.inner.send_server_query(addr, &response);
-            Ok(())
-        });
+                        ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
+                            client_num: table.get("client_num")?,
+                            ping: table.get("ping")?,
+                            name: table.get("name")?,
+                            team: table.get("team")?,
+                            frags: table.get("frags")?,
+                            flags: table.get("flags")?,
+                            deaths: table.get("deaths")?,
+                            teamkills: table.get("teamkills")?,
+                            damage: table.get("damage")?,
+                            health: table.get("health")?,
+                            armour: table.get("armour")?,
+                            gunselect: table.get("gunselect")?,
+                            privilege: table.get("privilege")?,
+                            state: table.get("state")?,
+                            ip,
+                        })
+                    }
+                    "TeamScore" => {
+                        let scores_table: Option<Vec<Table>> = table.get("scores")?;
+                        let scores = scores_table.map(|v| {
+                            v.into_iter()
+                                .filter_map(|t| {
+                                    let team_name = t.get("team_name").ok()?;
+                                    let score = t.get("score").ok()?;
+                                    Some(ScoreData { team_name, score })
+                                })
+                                .collect()
+                        });
+
+                        ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
+                            game_mode: table.get("game_mode")?,
+                            remaining_time: table.get("remaining_time")?,
+                            scores,
+                        })
+                    }
+                    _ => {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "unknown ServerQuery response type: {t}"
+                        )));
+                    }
+                };
+
+                this.inner.send_server_query(addr, &response);
+                Ok(())
+            },
+        );
 
         // Spawn a background tokio task that calls `func()` every
         // `interval_ms` milliseconds.  Returns a `TaskHandle` with a

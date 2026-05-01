@@ -52,9 +52,9 @@ mod session;
 mod writer;
 
 pub mod data;
+pub mod masterserver;
 pub mod route;
 pub mod server_query;
-pub mod masterserver;
 
 pub use error::ParseError;
 pub use messages::{

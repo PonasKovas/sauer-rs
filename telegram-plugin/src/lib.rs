@@ -29,7 +29,7 @@ impl TelegramBridge {
             .expect("TELEGRAM_CHAT_ID environment variable must be set")
             .parse::<i64>()
             .expect("TELEGRAM_CHAT_ID must be a valid integer");
-        
+
         Self::new(true, token, chat_id)
     }
 }
@@ -63,7 +63,7 @@ impl Plugin for TelegramBridge {
 
                                 // Construct output string and convert to CubeString character encoding format
                                 let out = format!("[TG] {}: {}", sender, text).lossy_cubestring();
-                                
+
                                 // Broadcast using ServMsg
                                 server.broadcast_chan1(&ServMsg { text: out });
                             }

@@ -104,9 +104,16 @@ pub async fn visual_rebuild_map<F>(
 
         for var in variables {
             let (name, val) = match var {
-                ogz_rs::data::Variable::Int { name, value } => (name.clone(), sauer_proto::data::EditVarValue::Int(*value)),
-                ogz_rs::data::Variable::Float { name, value } => (name.clone(), sauer_proto::data::EditVarValue::Float(*value)),
-                ogz_rs::data::Variable::String { name, value } => (name.clone(), sauer_proto::data::EditVarValue::String(value.clone())),
+                ogz_rs::data::Variable::Int { name, value } => {
+                    (name.clone(), sauer_proto::data::EditVarValue::Int(*value))
+                }
+                ogz_rs::data::Variable::Float { name, value } => {
+                    (name.clone(), sauer_proto::data::EditVarValue::Float(*value))
+                }
+                ogz_rs::data::Variable::String { name, value } => (
+                    name.clone(),
+                    sauer_proto::data::EditVarValue::String(value.clone()),
+                ),
             };
             server.send_chan1(
                 cn,
@@ -124,7 +131,11 @@ pub async fn visual_rebuild_map<F>(
                     client_num: author_cn,
                     packet: channel1::EditEnt {
                         ent_id: i as i32,
-                        pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                        pos: Vec3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
                         type_: sauer_proto::data::EntityType::Empty,
                         attrs: [0; 5],
                     },
@@ -138,12 +149,20 @@ pub async fn visual_rebuild_map<F>(
     let mut chunks = Vec::new();
     let chunk_size_limit = world_size / chunk_divisions;
     collect_chunks(root, [0, 0, 0], world_size, chunk_size_limit, &mut chunks);
-    
+
     // Optional random shuffle to make it look cool, like in original recreate
     use rand::seq::SliceRandom;
     chunks.shuffle(&mut rand::thread_rng());
 
-    crate::geo_sync::send_chunks_to_clients(server, target_cns, author_cn, chunks, vslots, chunk_delay_ms).await;
+    crate::geo_sync::send_chunks_to_clients(
+        server,
+        target_cns,
+        author_cn,
+        chunks,
+        vslots,
+        chunk_delay_ms,
+    )
+    .await;
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
@@ -190,7 +209,13 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
             ogz_rs::data::MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],
         };
-        (state.world.size, state.world.root.clone(), state.world.entities.clone(), state.meta.vslots.clone(), vars)
+        (
+            state.world.size,
+            state.world.root.clone(),
+            state.world.entities.clone(),
+            state.meta.vslots.clone(),
+            vars,
+        )
     };
 
     tokio::spawn(async move {
@@ -212,7 +237,8 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
             delay_ms,
             false,
             |_, _, ent| Some(ent.clone()),
-        ).await;
+        )
+        .await;
 
         server.broadcast_chan1(&channel1::ServMsg {
             text: "Map morphing reconstruction complete!".lossy_cubestring(),

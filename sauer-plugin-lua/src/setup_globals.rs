@@ -1,4 +1,4 @@
-use mlua::{Function, Lua, Table, Value, Variadic, IntoLua};
+use mlua::{Function, IntoLua, Lua, Table, Value, Variadic};
 use tracing::{Level, event};
 
 /// Set up per-plugin logging functions (`print`, `trace`, `debug`, `info`,
@@ -20,24 +20,32 @@ pub(crate) fn setup_plugin_env(lua: &Lua, env: &Table, name: &str) -> Result<(),
     env.set("PROTOCOL_VERSION", sauer_proto::PROTOCOL_VERSION)?;
 
     let ui_table = lua.create_table()?;
-    ui_table.set("header", lua.create_function(|lua, text: String| {
-        sauer_server::ui::header(&text).into_lua(lua)
-    })?)?;
-    ui_table.set("body", lua.create_function(|lua, text: String| {
-        sauer_server::ui::body(&text).into_lua(lua)
-    })?)?;
-    ui_table.set("tip", lua.create_function(|lua, (cmd, desc): (String, String)| {
-        sauer_server::ui::tip(&cmd, &desc).into_lua(lua)
-    })?)?;
-    ui_table.set("warn_msg", lua.create_function(|lua, text: String| {
-        sauer_server::ui::warn_msg(&text).into_lua(lua)
-    })?)?;
-    ui_table.set("section", lua.create_function(|lua, text: String| {
-        sauer_server::ui::section(&text).into_lua(lua)
-    })?)?;
-    ui_table.set("sep", lua.create_function(|lua, ()| {
-        sauer_server::ui::sep().into_lua(lua)
-    })?)?;
+    ui_table.set(
+        "header",
+        lua.create_function(|lua, text: String| sauer_server::ui::header(&text).into_lua(lua))?,
+    )?;
+    ui_table.set(
+        "body",
+        lua.create_function(|lua, text: String| sauer_server::ui::body(&text).into_lua(lua))?,
+    )?;
+    ui_table.set(
+        "tip",
+        lua.create_function(|lua, (cmd, desc): (String, String)| {
+            sauer_server::ui::tip(&cmd, &desc).into_lua(lua)
+        })?,
+    )?;
+    ui_table.set(
+        "warn_msg",
+        lua.create_function(|lua, text: String| sauer_server::ui::warn_msg(&text).into_lua(lua))?,
+    )?;
+    ui_table.set(
+        "section",
+        lua.create_function(|lua, text: String| sauer_server::ui::section(&text).into_lua(lua))?,
+    )?;
+    ui_table.set(
+        "sep",
+        lua.create_function(|lua, ()| sauer_server::ui::sep().into_lua(lua))?,
+    )?;
     env.set("ui", ui_table)?;
 
     Ok(())

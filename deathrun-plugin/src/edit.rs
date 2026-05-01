@@ -53,21 +53,29 @@ impl DeathrunEdit {
 }
 
 impl Plugin for DeathrunEdit {
-async fn init(&self, server: &mut Server) {
-    *server.map_name.write().unwrap() = "".lossy_cubestring();
-    *server.game_mode.write().unwrap() = GameMode::CoopEdit;
-    let mut state = DeathrunState::default();
-    state.map = Some(MapState::default_empty());
-    server.extra.insert(RwLock::new(state));
+    async fn init(&self, server: &mut Server) {
+        *server.map_name.write().unwrap() = "".lossy_cubestring();
+        *server.game_mode.write().unwrap() = GameMode::CoopEdit;
+        let mut state = DeathrunState::default();
+        state.map = Some(MapState::default_empty());
+        server.extra.insert(RwLock::new(state));
 
-    server.register_command("#newtrap", "create a trap at the aimed surface", "");
-    server.register_command("#deltrap", "remove the trap at the aimed surface", "");
-    server.register_command("#settrap", "reset and enter edit mode for a trap", "");
-    server.register_command("#edittrap", "enter edit mode for a trap without resetting", "");
-    server.register_command("#endtrap", "finish editing the trap", "");
-    server.register_command("#traptime", "extend duration (default 2 000ms)", "<ms>");
-    server.register_command("#traptimeout", "set trap timeout (default 20 000ms)", "<ms>");
-}
+        server.register_command("#newtrap", "create a trap at the aimed surface", "");
+        server.register_command("#deltrap", "remove the trap at the aimed surface", "");
+        server.register_command("#settrap", "reset and enter edit mode for a trap", "");
+        server.register_command(
+            "#edittrap",
+            "enter edit mode for a trap without resetting",
+            "",
+        );
+        server.register_command("#endtrap", "finish editing the trap", "");
+        server.register_command("#traptime", "extend duration (default 2 000ms)", "<ms>");
+        server.register_command(
+            "#traptimeout",
+            "set trap timeout (default 20 000ms)",
+            "<ms>",
+        );
+    }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
         self.player_dirs.insert(packet.client_num, packet.dir);
@@ -247,9 +255,13 @@ async fn init(&self, server: &mut Server) {
                 Some(m) => m,
             };
 
-            let hit = match sauer_map::raycast::raycast_with_filter(&map.world, origin, ray, 2048.0, |c| {
-                !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
-            }) {
+            let hit = match sauer_map::raycast::raycast_with_filter(
+                &map.world,
+                origin,
+                ray,
+                2048.0,
+                |c| !c.is_empty() || c.material.volume == sauer_core::Volume::Glass,
+            ) {
                 None => return,
                 Some(h) => h,
             };

@@ -4,8 +4,8 @@ use deathrun_plugin::{DeathrunEdit, DeathrunPlay};
 use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
 use sauer_server::ServerBuilder;
-use telegram_plugin::TelegramBridge;
 use std::path::PathBuf;
+use telegram_plugin::TelegramBridge;
 use tracing::error;
 
 mod config;

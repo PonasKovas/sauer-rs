@@ -168,8 +168,14 @@ impl<P: Plugin> Plugin for Base<P> {
         );
     }
 
-    async fn server_query(&self, ctx: &mut crate::plugin::ServerQueryContext, request: &sauer_proto::server_query::ServerQueryRequest) {
-        use sauer_proto::server_query::{ServerQueryRequest, ServerQueryResponse, ExtInfoRequest, ExtInfoResponse};
+    async fn server_query(
+        &self,
+        ctx: &mut crate::plugin::ServerQueryContext,
+        request: &sauer_proto::server_query::ServerQueryRequest,
+    ) {
+        use sauer_proto::server_query::{
+            ExtInfoRequest, ExtInfoResponse, ServerQueryRequest, ServerQueryResponse,
+        };
 
         let server = ctx.server();
         match request {
@@ -187,10 +193,10 @@ impl<P: Plugin> Plugin for Base<P> {
                     protocol_version: sauer_proto::PROTOCOL_VERSION,
                     game_mode: gamemode,
                     remaining_time: 0, // TODO
-                    max_clients: 128, 
+                    max_clients: 128,
                     master_mode: mm,
                     is_paused: false, // TODO
-                    game_speed: 100, // TODO
+                    game_speed: 100,  // TODO
                     map_name,
                     server_desc,
                 };
@@ -199,94 +205,134 @@ impl<P: Plugin> Plugin for Base<P> {
             ServerQueryRequest::ExtInfo(ext_req) => {
                 match ext_req {
                     ExtInfoRequest::Uptime => {
-                        server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
-                            seconds: server.start_time.elapsed().as_secs() as i32,
-                        }));
+                        server.send_server_query(
+                            ctx.addr(),
+                            &ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
+                                seconds: server.start_time.elapsed().as_secs() as i32,
+                            }),
+                        );
                     }
                     ExtInfoRequest::PlayerStats { client_number } => {
                         if let Some(cn) = client_number {
                             if let Some(p) = server.players.try_get(*cn as u32) {
-                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                                    client_number: Some(*cn),
-                                    ok: true,
-                                }));
-                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds {
-                                    ids: vec![*cn],
-                                }));
-                                
-                                let state = p.state.clone().unwrap_or_else(|| crate::players::state::make_spawn_state(server.game_mode.read().unwrap().is_insta(), 0));
+                                server.send_server_query(
+                                    ctx.addr(),
+                                    &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                        client_number: Some(*cn),
+                                        ok: true,
+                                    }),
+                                );
+                                server.send_server_query(
+                                    ctx.addr(),
+                                    &ServerQueryResponse::ExtInfo(
+                                        ExtInfoResponse::PlayerStatsIds { ids: vec![*cn] },
+                                    ),
+                                );
+
+                                let state = p.state.clone().unwrap_or_else(|| {
+                                    crate::players::state::make_spawn_state(
+                                        server.game_mode.read().unwrap().is_insta(),
+                                        0,
+                                    )
+                                });
                                 let ip = server.peer_addr(*cn as u32).map(|a| match a.ip() {
                                     std::net::IpAddr::V4(v4) => {
                                         let octets = v4.octets();
                                         [octets[0], octets[1], octets[2]]
                                     }
-                                    _ => [0, 0, 0]
+                                    _ => [0, 0, 0],
                                 });
 
-                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
-                                    client_num: *cn,
-                                    ping: p.ping,
-                                    name: p.name.clone(),
-                                    team: p.team.clone(),
-                                    frags: p.frags,
-                                    flags: p.flags,
-                                    deaths: p.deaths,
-                                    teamkills: p.teamkills,
-                                    damage: 0, // TODO
-                                    health: state.health,
-                                    armour: state.armour,
-                                    gunselect: state.gun_select,
-                                    privilege: p.privilege,
-                                    state: p.client_state,
-                                    ip,
-                                }));
+                                server.send_server_query(
+                                    ctx.addr(),
+                                    &ServerQueryResponse::ExtInfo(
+                                        ExtInfoResponse::PlayerStatsStats {
+                                            client_num: *cn,
+                                            ping: p.ping,
+                                            name: p.name.clone(),
+                                            team: p.team.clone(),
+                                            frags: p.frags,
+                                            flags: p.flags,
+                                            deaths: p.deaths,
+                                            teamkills: p.teamkills,
+                                            damage: 0, // TODO
+                                            health: state.health,
+                                            armour: state.armour,
+                                            gunselect: state.gun_select,
+                                            privilege: p.privilege,
+                                            state: p.client_state,
+                                            ip,
+                                        },
+                                    ),
+                                );
                             } else {
-                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                                    client_number: Some(*cn),
-                                    ok: false,
-                                }));
+                                server.send_server_query(
+                                    ctx.addr(),
+                                    &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                        client_number: Some(*cn),
+                                        ok: false,
+                                    }),
+                                );
                             }
                         } else {
-                            server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                                client_number: None,
-                                ok: true,
-                            }));
-                            
+                            server.send_server_query(
+                                ctx.addr(),
+                                &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                    client_number: None,
+                                    ok: true,
+                                }),
+                            );
+
                             let mut ids = Vec::new();
                             for e in server.players.map.iter() {
                                 ids.push(*e.key() as i32);
                             }
-                            server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids }));
-                            
+                            server.send_server_query(
+                                ctx.addr(),
+                                &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds {
+                                    ids,
+                                }),
+                            );
+
                             for e in server.players.map.iter() {
                                 let cn = *e.key();
                                 let p = e.value();
-                                let state = p.state.clone().unwrap_or_else(|| crate::players::state::make_spawn_state(server.game_mode.read().unwrap().is_insta(), 0));
+                                let state = p.state.clone().unwrap_or_else(|| {
+                                    crate::players::state::make_spawn_state(
+                                        server.game_mode.read().unwrap().is_insta(),
+                                        0,
+                                    )
+                                });
                                 let ip = server.peer_addr(cn).map(|a| match a.ip() {
                                     std::net::IpAddr::V4(v4) => {
                                         let octets = v4.octets();
                                         [octets[0], octets[1], octets[2]]
                                     }
-                                    _ => [0, 0, 0]
+                                    _ => [0, 0, 0],
                                 });
-                                
-                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
-                                    client_num: cn as i32,
-                                    ping: p.ping,
-                                    name: p.name.clone(),
-                                    team: p.team.clone(),
-                                    frags: p.frags,
-                                    flags: p.flags,
-                                    deaths: p.deaths,
-                                    teamkills: p.teamkills,
-                                    damage: 0, // TODO
-                                    health: state.health,
-                                    armour: state.armour,
-                                    gunselect: state.gun_select,
-                                    privilege: p.privilege,
-                                    state: p.client_state,
-                                    ip,
-                                }));
+
+                                server.send_server_query(
+                                    ctx.addr(),
+                                    &ServerQueryResponse::ExtInfo(
+                                        ExtInfoResponse::PlayerStatsStats {
+                                            client_num: cn as i32,
+                                            ping: p.ping,
+                                            name: p.name.clone(),
+                                            team: p.team.clone(),
+                                            frags: p.frags,
+                                            flags: p.flags,
+                                            deaths: p.deaths,
+                                            teamkills: p.teamkills,
+                                            damage: 0, // TODO
+                                            health: state.health,
+                                            armour: state.armour,
+                                            gunselect: state.gun_select,
+                                            privilege: p.privilege,
+                                            state: p.client_state,
+                                            ip,
+                                        },
+                                    ),
+                                );
                             }
                         }
                     }
@@ -297,11 +343,14 @@ impl<P: Plugin> Plugin for Base<P> {
                         } else {
                             None
                         };
-                        server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
-                            game_mode,
-                            remaining_time: 0, // TODO
-                            scores,
-                        }));
+                        server.send_server_query(
+                            ctx.addr(),
+                            &ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
+                                game_mode,
+                                remaining_time: 0, // TODO
+                                scores,
+                            }),
+                        );
                     }
                 }
             }
@@ -469,7 +518,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 continue;
             }
             let mut damage = hit.rays * gun_damage_per_ray(packet.gun);
-            
+
             ctx.cancelled = false;
             if let Some(plugin) = self.plugin.upgrade() {
                 plugin.on_damage(ctx, target_cn, cn, &mut damage).await;
@@ -506,7 +555,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 continue;
             }
             let mut damage = explosion_damage(packet.gun, hit.dist, target_cn == cn);
-            
+
             ctx.cancelled = false;
             if let Some(plugin) = self.plugin.upgrade() {
                 plugin.on_damage(ctx, target_cn, cn, &mut damage).await;
@@ -543,7 +592,7 @@ impl<P: Plugin> Plugin for Base<P> {
         if bytes.first() == Some(&b'#') {
             let args = parse_command_args(bytes);
             let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
-            
+
             if cmd == "#help" {
                 let mut cmds = ctx.server().commands.read().unwrap().clone();
                 cmds.sort_by(|a, b| a.name.cmp(&b.name));

@@ -258,7 +258,10 @@ pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
     let timeout = state.traps[trap_idx].timeout;
     let mut msg = format!("Trap time set to {}ms.", time);
     if timeout > 0 && time > timeout {
-        msg.push_str(&format!(" Warning: this is greater than the timeout ({}ms).", timeout));
+        msg.push_str(&format!(
+            " Warning: this is greater than the timeout ({}ms).",
+            timeout
+        ));
     }
     server.send_chan1(
         cn,
@@ -299,7 +302,10 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
     let time = state.traps[trap_idx].time;
     let mut msg = format!("Trap timeout set to {}ms.", timeout);
     if timeout > 0 && timeout < time {
-        msg.push_str(&format!(" Warning: this is less than the trap time ({}ms).", time));
+        msg.push_str(&format!(
+            " Warning: this is less than the trap time ({}ms).",
+            time
+        ));
     }
     server.send_chan1(
         cn,
