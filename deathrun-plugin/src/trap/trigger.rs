@@ -40,6 +40,14 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
     let button_size = trap.button_size;
     let button_orient = trap.button_orient;
     let trap_time = trap.time;
+    let trap_timeout = trap.timeout;
+
+    let is_edit_mode = *server.game_mode.read().unwrap() == sauer_proto::data::GameMode::CoopEdit;
+    let effective_timeout = if is_edit_mode || trap_timeout == 0 {
+        trap_time
+    } else {
+        trap_timeout.max(trap_time)
+    };
 
     drop(state);
 
@@ -152,6 +160,22 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             &final_restore_ents,
             &[],
         );
+
+        let remaining_timeout = effective_timeout.saturating_sub(trap_time);
+        if remaining_timeout > 0 {
+            // If the button was inside the trap's recording bounds, the restore operation
+            // just reverted its color to READY. We must force it back to ACTIVE for the 
+            // duration of the timeout cooldown.
+            set_button_color(
+                &server_clone,
+                actor_cn,
+                button_pos,
+                button_size,
+                button_orient,
+                BUTTON_COLOR_ACTIVE,
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(remaining_timeout as u64)).await;
+        }
 
         set_button_color(
             &server_clone,

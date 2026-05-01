@@ -255,10 +255,15 @@ pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
     };
 
     state.traps[trap_idx].time = time;
+    let timeout = state.traps[trap_idx].timeout;
+    let mut msg = format!("Trap time set to {}ms.", time);
+    if timeout > 0 && time > timeout {
+        msg.push_str(&format!(" Warning: this is greater than the timeout ({}ms).", timeout));
+    }
     server.send_chan1(
         cn,
         &ServMsg {
-            text: format!("Trap time set to {}ms.", time).lossy_cubestring(),
+            text: msg.lossy_cubestring(),
         },
     );
     drop(state);
@@ -291,10 +296,15 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
     };
 
     state.traps[trap_idx].timeout = timeout;
+    let time = state.traps[trap_idx].time;
+    let mut msg = format!("Trap timeout set to {}ms.", timeout);
+    if timeout > 0 && timeout < time {
+        msg.push_str(&format!(" Warning: this is less than the trap time ({}ms).", time));
+    }
     server.send_chan1(
         cn,
         &ServMsg {
-            text: format!("Trap timeout set to {}ms.", timeout).lossy_cubestring(),
+            text: msg.lossy_cubestring(),
         },
     );
     drop(state);
