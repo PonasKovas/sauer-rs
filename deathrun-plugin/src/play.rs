@@ -191,152 +191,6 @@ impl DeathrunPlay {
     }
 }
 
-fn send_map_vars(server: &Server, target_cn: u32, author_cn: i32, variables: &[Variable]) {
-    for var in variables {
-        let (name, val) = match var {
-            Variable::Int { name, value } => (name.clone(), EditVarValue::Int(*value)),
-            Variable::Float { name, value } => (name.clone(), EditVarValue::Float(*value)),
-            Variable::String { name, value } => (name.clone(), EditVarValue::String(value.clone())),
-        };
-        server.send_chan1(
-            target_cn,
-            &Client {
-                client_num: author_cn,
-                packet: channel1::EditVar { name, val },
-            },
-        );
-    }
-}
-
-async fn send_map_state(
-    server: &Server,
-    target_cns: &[u32],
-    world_size: i32,
-    root: &sauer_map::Node,
-    entities: &[ogz_rs::data::Entity],
-    vslots: &[Option<ogz_rs::data::VSlot>],
-    variables: &[ogz_rs::data::Variable],
-    store_ids: &HashSet<usize>,
-    evil_cn: Option<u32>,
-) {
-    if target_cns.is_empty() {
-        return;
-    }
-
-    let author_cn = target_cns.first().copied().unwrap_or(0) as i32;
-
-    for &cn in target_cns {
-        server.send_chan1(
-            cn,
-            &Client {
-                client_num: cn as i32,
-                packet: channel1::NewMap {
-                    size: world_size.trailing_zeros() as i32,
-                },
-            },
-        );
-
-        server.send_chan1(
-            cn,
-            &Client {
-                client_num: author_cn,
-                packet: channel1::DelCube {
-                    sel: SelInfo {
-                        o: Vec3 { x: 0, y: 0, z: 0 },
-                        s: Vec3 { x: 2, y: 2, z: 2 },
-                        grid: world_size / 2,
-                        orient: Orient::Left,
-                        cx: 0,
-                        cxs: 2,
-                        cy: 0,
-                        cys: 2,
-                        corner: 0,
-                    },
-                },
-            },
-        );
-        send_map_vars(server, cn, author_cn, variables);
-
-        for i in 0..entities.len() {
-            server.send_chan1(
-                cn,
-                &Client {
-                    client_num: author_cn,
-                    packet: channel1::EditEnt {
-                        ent_id: i as i32,
-                        pos: Vec3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
-                        type_: EntityType::Empty,
-                        attrs: [0; 5],
-                    },
-                },
-            );
-        }
-    }
-
-    sleep(Duration::from_millis(500)).await;
-
-    let mut chunks = Vec::new();
-    crate::recreate::collect_chunks(root, [0, 0, 0], world_size, world_size / 4, &mut chunks);
-
-    crate::geo_sync::send_chunks_to_clients(server, target_cns, author_cn, chunks, vslots, 20)
-        .await;
-
-    sleep(Duration::from_millis(500)).await;
-
-    for &cn in target_cns {
-        let is_evil = Some(cn) == evil_cn;
-
-        for (i, ent) in entities.iter().enumerate() {
-            if store_ids.contains(&i) {
-                continue;
-            }
-
-            let mut ent_type = ent.ent_type;
-            let mut attrs = ent.attrs;
-
-            if ent_type == EntityType::PlayerStart {
-                let team_attr = attrs[1];
-                if team_attr == 0 {
-                    ent_type = EntityType::Empty;
-                } else if team_attr == 2 {
-                    if is_evil {
-                        attrs[1] = 0;
-                    } else {
-                        ent_type = EntityType::Empty;
-                    }
-                } else if team_attr == 1 {
-                    if !is_evil {
-                        attrs[1] = 0;
-                    } else {
-                        ent_type = EntityType::Empty;
-                    }
-                }
-            }
-
-            server.send_chan1(
-                cn,
-                &Client {
-                    client_num: author_cn,
-                    packet: channel1::EditEnt {
-                        ent_id: i as i32,
-                        pos: Vec3 {
-                            x: ent.position[0],
-                            y: ent.position[1],
-                            z: ent.position[2],
-                        },
-                        type_: ent_type,
-                        attrs: attrs.map(|x| x as i32),
-                    },
-                },
-            );
-        }
-    }
-}
-
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
     tokio::spawn(async move {
         let (world_size, root, entities, vslots, variables, store_ids) = {
@@ -406,16 +260,54 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
             server.set_spectator(cn, true);
         }
 
-        send_map_state(
+        let author_cn = cns.first().copied().unwrap_or(0) as i32;
+        crate::recreate::visual_rebuild_map(
             &server,
             &cns,
+            author_cn,
             world_size,
             &root,
-            &entities,
             &vslots,
             &variables,
-            &store_ids,
-            evil_cn,
+            &entities,
+            4,
+            20,
+            true,
+            |cn, i, ent| {
+                let is_evil = Some(cn) == evil_cn;
+                if store_ids.contains(&i) {
+                    return None;
+                }
+
+                let mut ent_type = ent.ent_type;
+                let mut attrs = ent.attrs;
+
+                if ent_type == EntityType::PlayerStart {
+                    let team_attr = attrs[1];
+                    if team_attr == 0 {
+                        return None;
+                    } else if team_attr == 2 {
+                        if is_evil {
+                            attrs[1] = 0;
+                        } else {
+                            return None;
+                        }
+                    } else if team_attr == 1 {
+                        if !is_evil {
+                            attrs[1] = 0;
+                        } else {
+                            return None;
+                        }
+                    }
+                }
+
+                Some(ogz_rs::data::Entity {
+                    position: ent.position,
+                    attrs,
+                    ent_type,
+                    extra_data: vec![],
+                })
+            },
         )
         .await;
 
@@ -619,16 +511,54 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
     };
 
     tokio::spawn(async move {
-        send_map_state(
+        let author_cn = target_cn as i32;
+        crate::recreate::visual_rebuild_map(
             &server,
             &[target_cn],
+            author_cn,
             world_size,
             &root,
-            &entities,
             &vslots,
             &variables,
-            &store_ids,
-            evil_cn,
+            &entities,
+            4,
+            20,
+            true,
+            |cn, i, ent| {
+                let is_evil = Some(cn) == evil_cn;
+                if store_ids.contains(&i) {
+                    return None;
+                }
+
+                let mut ent_type = ent.ent_type;
+                let mut attrs = ent.attrs;
+
+                if ent_type == EntityType::PlayerStart {
+                    let team_attr = attrs[1];
+                    if team_attr == 0 {
+                        return None;
+                    } else if team_attr == 2 {
+                        if is_evil {
+                            attrs[1] = 0;
+                        } else {
+                            return None;
+                        }
+                    } else if team_attr == 1 {
+                        if !is_evil {
+                            attrs[1] = 0;
+                        } else {
+                            return None;
+                        }
+                    }
+                }
+
+                Some(ogz_rs::data::Entity {
+                    position: ent.position,
+                    attrs,
+                    ent_type,
+                    extra_data: vec![],
+                })
+            },
         )
         .await;
     });
@@ -751,6 +681,7 @@ impl Plugin for DeathrunPlay {
 
         if is_playing && is_good && not_finished {
             let mut reached_flag = false;
+            let mut flag_pos = None;
             if let Some(map_state) = crate::map_state::get_server_state(server)
                 .read()
                 .unwrap()
@@ -770,6 +701,7 @@ impl Plugin for DeathrunPlay {
                         let dist_sq = (px - fx).powi(2) + (py - fy).powi(2) + (pz - fz).powi(2);
                         if dist_sq < 24.0 * 24.0 {
                             reached_flag = true;
+                            flag_pos = Some(ent.position);
                             break;
                         }
                     }
@@ -778,9 +710,13 @@ impl Plugin for DeathrunPlay {
 
             if reached_flag {
                 let time_taken = round_start.map(|t| t.elapsed()).unwrap_or(Duration::ZERO);
+                let mut first_finish = false;
                 {
                     let mut lock = maps.write().unwrap();
                     if !lock.finished_players.iter().any(|(f_cn, _)| *f_cn == cn) {
+                        if lock.finished_players.is_empty() {
+                            first_finish = true;
+                        }
                         lock.finished_players.push((cn, time_taken));
                     } else {
                         reached_flag = false;
@@ -801,6 +737,51 @@ impl Plugin for DeathrunPlay {
                             name, secs
                         )),
                     );
+
+                    if first_finish {
+                        if let Some(pos) = flag_pos {
+                            let mut state =
+                                crate::map_state::get_server_state(server).write().unwrap();
+                            let mut ent_id = None;
+                            if let Some(map) = state.map.as_mut() {
+                                let new_ent = ogz_rs::data::Entity {
+                                    position: pos,
+                                    attrs: [0, 1000, 0, -1, 0],
+                                    ent_type: ogz_rs::data::EntityType::Particles,
+                                    extra_data: vec![],
+                                };
+                                let id = map
+                                    .world
+                                    .entities
+                                    .iter()
+                                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                                    .unwrap_or_else(|| {
+                                        let i = map.world.entities.len();
+                                        map.world.entities.push(new_ent.clone());
+                                        i
+                                    });
+                                map.world.entities[id] = new_ent;
+                                ent_id = Some(id);
+                            }
+                            drop(state);
+
+                            if let Some(id) = ent_id {
+                                server.broadcast_chan1(&sauer_proto::Client {
+                                    client_num: cn as i32,
+                                    packet: sauer_proto::channel1::EditEnt {
+                                        ent_id: id as i32,
+                                        pos: sauer_proto::data::Vec3 {
+                                            x: pos[0],
+                                            y: pos[1],
+                                            z: pos[2],
+                                        },
+                                        type_: sauer_proto::data::EntityType::Particles,
+                                        attrs: [0, 1000, 0, -1, 0],
+                                    },
+                                });
+                            }
+                        }
+                    }
 
                     check_win_conditions(server, maps, None);
                 }

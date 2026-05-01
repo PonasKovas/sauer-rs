@@ -53,6 +53,32 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
     let server_clone = std::sync::Arc::clone(server);
     tokio::spawn(async move {
+        let ent_id = {
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            let mut id = None;
+            if let Some(map) = state.map.as_mut() {
+                let blank = ogz_rs::data::Entity {
+                    position: [0.0, 0.0, -10000.0],
+                    attrs: [0; 5],
+                    ent_type: ogz_rs::data::EntityType::Empty,
+                    extra_data: vec![],
+                };
+                let i = map
+                    .world
+                    .entities
+                    .iter()
+                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                    .unwrap_or_else(|| {
+                        let idx = map.world.entities.len();
+                        map.world.entities.push(blank.clone());
+                        idx
+                    });
+                map.world.entities[i] = blank;
+                id = Some(i);
+            }
+            id
+        };
+
         // Snapshot restore data from current (pre-trigger) map state.
         // This ensures the restore reflects any environment changes made after the trap was defined.
         let (restore_unpack_len, restore_compressed, restore_cells, restore_entities_mod) = {
@@ -150,31 +176,129 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             final_restore_ents.push((id, empty_ent.clone()));
         }
 
-        apply_and_broadcast(
-            &server_clone,
-            actor_cn,
-            &region_sel,
-            restore_unpack_len,
-            &restore_compressed,
-            &restore_cells,
-            &final_restore_ents,
-            &[],
-        );
+        let start = tokio::time::Instant::now();
+        let total_dur = std::time::Duration::from_millis(effective_timeout as u64);
+        let revert_dur = std::time::Duration::from_millis(trap_time as u64);
+        let mut reverted = false;
+        let mut last_progress = -1;
 
-        let remaining_timeout = effective_timeout.saturating_sub(trap_time);
-        if remaining_timeout > 0 {
-            // If the button was inside the trap's recording bounds, the restore operation
-            // just reverted its color to READY. We must force it back to ACTIVE for the 
-            // duration of the timeout cooldown.
-            set_button_color(
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
+
+        loop {
+            let elapsed = start.elapsed();
+            if elapsed >= total_dur {
+                break;
+            }
+
+            if !reverted && elapsed >= revert_dur {
+                apply_and_broadcast(
+                    &server_clone,
+                    actor_cn,
+                    &region_sel,
+                    restore_unpack_len,
+                    &restore_compressed,
+                    &restore_cells,
+                    &final_restore_ents,
+                    &[],
+                );
+                if effective_timeout > trap_time {
+                    // Force button color back to ACTIVE for the duration of the timeout cooldown.
+                    set_button_color(
+                        &server_clone,
+                        actor_cn,
+                        button_pos,
+                        button_size,
+                        button_orient,
+                        BUTTON_COLOR_ACTIVE,
+                    );
+                }
+                reverted = true;
+            }
+
+            if let Some(id) = ent_id {
+                let remaining = total_dur.saturating_sub(elapsed).as_millis() as i32;
+                let progress = (remaining * 100 / effective_timeout as i32).clamp(0, 100);
+
+                if progress != last_progress {
+                    last_progress = progress;
+
+                    // Color from red to green
+                    let r = (progress * 15 / 100).clamp(0, 15);
+                    let g = ((100 - progress) * 15 / 100).clamp(0, 15);
+                    let color = (r << 8) | (g << 4);
+
+                    let is_play_mode = *server_clone.game_mode.read().unwrap()
+                        != sauer_proto::data::GameMode::CoopEdit;
+                    let target_cns = if is_play_mode {
+                        let maps = server_clone
+                            .extra
+                            .get::<std::sync::Arc<std::sync::RwLock<crate::play::PlayMaps>>>()
+                            .unwrap();
+                        let lock = maps.read().unwrap();
+                        lock.evil_cn.into_iter().collect()
+                    } else {
+                        server_clone.client_cns()
+                    };
+
+                    for cn in target_cns {
+                        server_clone.send_chan1(
+                            cn,
+                            &sauer_proto::Client {
+                                client_num: actor_cn as i32,
+                                packet: sauer_proto::channel1::EditEnt {
+                                    ent_id: id as i32,
+                                    pos: sauer_proto::data::Vec3 {
+                                        x: button_pos[0] as f32 + button_size as f32 / 2.0,
+                                        y: button_pos[1] as f32 + button_size as f32 / 2.0,
+                                        z: button_pos[2] as f32 + button_size as f32 / 2.0,
+                                    },
+                                    type_: sauer_proto::data::EntityType::Particles,
+                                    attrs: [5, progress as i32, color as i32, 0, 0],
+                                },
+                            },
+                        );
+                    }
+                }
+            }
+            interval.tick().await;
+        }
+
+        if !reverted {
+            apply_and_broadcast(
                 &server_clone,
                 actor_cn,
-                button_pos,
-                button_size,
-                button_orient,
-                BUTTON_COLOR_ACTIVE,
+                &region_sel,
+                restore_unpack_len,
+                &restore_compressed,
+                &restore_cells,
+                &final_restore_ents,
+                &[],
             );
-            tokio::time::sleep(std::time::Duration::from_millis(remaining_timeout as u64)).await;
+        }
+
+        if let Some(id) = ent_id {
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            if let Some(map) = state.map.as_mut() {
+                if let Some(ent) = map.world.entities.get_mut(id) {
+                    ent.ent_type = ogz_rs::data::EntityType::Empty;
+                    ent.attrs = [0; 5];
+                }
+            }
+            drop(state);
+
+            server_clone.broadcast_chan1(&sauer_proto::Client {
+                client_num: actor_cn as i32,
+                packet: sauer_proto::channel1::EditEnt {
+                    ent_id: id as i32,
+                    pos: sauer_proto::data::Vec3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    type_: sauer_proto::data::EntityType::Empty,
+                    attrs: [0; 5],
+                },
+            });
         }
 
         set_button_color(
