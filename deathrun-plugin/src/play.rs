@@ -674,18 +674,20 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
-        let (is_first, is_solo_round, map_name) = {
+        let (is_first, is_solo_round, is_loading, is_waiting, map_name) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
             let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
+            let is_loading = lock.round_state == RoundState::MapLoading;
+            let is_waiting = lock.round_state == RoundState::NotStarted && server.client_count() > 1;
             let map_name = lock.current_map.clone();
-            (is_first, is_solo_round, map_name)
+            (is_first, is_solo_round, is_loading, is_waiting, map_name)
         };
 
         ui::send_welcome_play(server, cn, map_name.as_deref(), is_solo_round || is_first);
 
-        if is_first || is_solo_round {
-            // First player, or a second player joined a solo round: restart so evil gets assigned.
+        if is_first || is_solo_round || is_loading || is_waiting {
+            // Restart or start if needed to ensure all players are included and roles assigned correctly.
             start_round_sequence(Arc::clone(server), Arc::clone(&maps));
         } else {
             let is_playing = maps.read().unwrap().round_state != RoundState::NotStarted;
