@@ -250,6 +250,9 @@ pub fn check_and_rebuild_traps(
     }
 
     for trap in to_rebuild {
+        let mut clip_unpack_len = 0;
+        let mut clip_data = Vec::new();
+
         if let Some(map) = state.map.as_mut() {
             let sel = sauer_map::Selection {
                 o: Vec3 {
@@ -278,6 +281,21 @@ pub fn check_and_rebuild_traps(
                 },
             );
 
+            let (adj_sel, _) =
+                get_selections(trap.button_pos, trap.button_size, trap.button_orient);
+            apply_internal_vslots(map, &adj_sel);
+
+            let btn_node = sauer_map::octree::extract_node_at(
+                &map.world.root,
+                [0, 0, 0],
+                map.world.size,
+                trap.button_pos,
+                trap.button_size,
+            );
+            let (ul, d) = sauer_map::clipboard::generate_clipboard(&btn_node, trap.button_size, &map.meta.vslots);
+            clip_unpack_len = ul;
+            clip_data = d;
+
             for corner in 0..4 {
                 let mut csel = sel.clone();
                 csel.corner = corner;
@@ -286,24 +304,9 @@ pub fn check_and_rebuild_traps(
                 }
             }
 
-            let (adj_sel, _) =
-                get_selections(trap.button_pos, trap.button_size, trap.button_orient);
-            apply_internal_vslots(map, &adj_sel);
-
             map.invalidate_cache();
         }
-        let (clip_unpack_len, clip_data) = if let Some(map) = state.map.as_ref() {
-            let btn_node = sauer_map::octree::extract_node_at(
-                &map.world.root,
-                [0, 0, 0],
-                map.world.size,
-                trap.button_pos,
-                trap.button_size,
-            );
-            sauer_map::clipboard::generate_clipboard(&btn_node, trap.button_size, &map.meta.vslots)
-        } else {
-            (0, Vec::new())
-        };
+
         send_atomic_rebuild(
             &server,
             cn,
