@@ -45,6 +45,97 @@ pub(crate) async fn run<P: Plugin>(
     let server = Arc::new(server);
     plugin.start(&server).await;
 
+    // spawn master server task
+    let master_server = Arc::clone(&server);
+    let server_port = bind_addr.port();
+    tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use sauer_proto::masterserver::{MasterClientRequest, MasterServerResponse};
+        
+        loop {
+            if !*master_server.update_master.read().unwrap() {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
+
+            let host = master_server.master_name.read().unwrap().clone();
+            let port = master_server.master_port;
+            
+            match tokio::net::TcpStream::connect((host.as_str(), port)).await {
+                Ok(mut stream) => {
+                    let req = MasterClientRequest::RegServ(server_port);
+                    if let Err(e) = stream.write_all(req.to_string().as_bytes()).await {
+                        tracing::error!(target: "sauer_server", "Failed to write to master server: {}", e);
+                    } else {
+                        let mut reader = BufReader::new(stream);
+                        let mut line = String::new();
+                        
+                        // We connected and sent regserv. Now we read responses or just keep connection alive.
+                        // Sauerbraten sends `regserv` once per hour on the same connection, or reconnects if dropped.
+                        let mut last_reg = tokio::time::Instant::now();
+                        
+                        loop {
+                            if !*master_server.update_master.read().unwrap() {
+                                break; // disconnect
+                            }
+
+                            // Send regserv every hour
+                            if last_reg.elapsed() >= std::time::Duration::from_secs(60 * 60) {
+                                let req = MasterClientRequest::RegServ(server_port);
+                                if reader.get_mut().write_all(req.to_string().as_bytes()).await.is_err() {
+                                    break;
+                                }
+                                last_reg = tokio::time::Instant::now();
+                            }
+
+                            // Wait for data or timeout
+                            let read_fut = reader.read_line(&mut line);
+                            let timeout_fut = tokio::time::sleep(std::time::Duration::from_secs(10));
+                            
+                            tokio::select! {
+                                res = read_fut => {
+                                    match res {
+                                        Ok(0) => break, // EOF
+                                        Ok(_) => {
+                                            match MasterServerResponse::parse(&line) {
+                                                Some(MasterServerResponse::SuccReg) => {
+                                                    tracing::info!(target: "sauer_server", "Master server registration succeeded");
+                                                }
+                                                Some(MasterServerResponse::FailReg(reason)) => {
+                                                    tracing::error!(target: "sauer_server", "Master server registration failed: {}", reason);
+                                                }
+                                                Some(other) => {
+                                                    tracing::debug!(target: "sauer_server", "Master server: {:?}", other);
+                                                }
+                                                None => {
+                                                    tracing::debug!(target: "sauer_server", "Unknown master server message: {}", line.trim());
+                                                }
+                                            }
+                                            line.clear();
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(target: "sauer_server", "Error reading from master server: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                                _ = timeout_fut => {
+                                    // Just a wake-up to check update_master and hour timeout
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(target: "sauer_server", "Failed to connect to master server {}:{}: {}", host, port, e);
+                }
+            }
+            
+            // If disconnected or failed, wait before retrying
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    });
+
     // spawn UDP reader task for server browser pings & ExtInfo
     let ext_plugin = Arc::clone(&plugin);
     let ext_server = Arc::clone(&server);
