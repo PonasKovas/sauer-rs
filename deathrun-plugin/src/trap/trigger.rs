@@ -60,7 +60,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 let blank = ogz_rs::data::Entity {
                     position: [0.0, 0.0, -10000.0],
                     attrs: [0; 5],
-                    ent_type: ogz_rs::data::EntityType::Empty,
+                    ent_type: ogz_rs::data::EntityType::Particles, // Secured immediately
                     extra_data: vec![],
                 };
                 let i = map
@@ -79,8 +79,66 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             id
         };
 
+        // Calculate progress bar position to be exactly 0.5 units off the face
+        let mut px = button_pos[0] as f32 + button_size as f32 / 2.0;
+        let mut py = button_pos[1] as f32 + button_size as f32 / 2.0;
+        let mut pz = button_pos[2] as f32 + button_size as f32 / 2.0;
+
+        let d = (button_orient >> 1) as usize;
+        let dc = button_orient & 1;
+        let offset = if dc == 0 {
+            -0.5
+        } else {
+            button_size as f32 + 0.5
+        };
+
+        if d == 0 {
+            px = button_pos[0] as f32 + offset;
+        } else if d == 1 {
+            py = button_pos[1] as f32 + offset;
+        } else if d == 2 {
+            pz = button_pos[2] as f32 + offset;
+        }
+
+        let target_cns = {
+            let is_play_mode =
+                *server_clone.game_mode.read().unwrap() != sauer_proto::data::GameMode::CoopEdit;
+            if is_play_mode {
+                let maps = server_clone
+                    .extra
+                    .get::<std::sync::Arc<std::sync::RwLock<crate::play::PlayMaps>>>()
+                    .unwrap();
+                let lock = maps.read().unwrap();
+                lock.evil_cn.into_iter().collect::<Vec<_>>()
+            } else {
+                server_clone.client_cns()
+            }
+        };
+
+        // Send initial 100% progress BEFORE applying trigger (beats client PasteServer freeze)
+        if let Some(id) = ent_id {
+            let color = (0 << 8) | (15 << 4); // Full green
+            for &cn in &target_cns {
+                server_clone.send_chan1(
+                    cn,
+                    &sauer_proto::Client {
+                        client_num: actor_cn as i32,
+                        packet: sauer_proto::channel1::EditEnt {
+                            ent_id: id as i32,
+                            pos: sauer_proto::data::Vec3 {
+                                x: px,
+                                y: py,
+                                z: pz,
+                            },
+                            type_: sauer_proto::data::EntityType::Particles,
+                            attrs: [5, 100, color as i32, 0, 0],
+                        },
+                    },
+                );
+            }
+        }
+
         // Snapshot restore data from current (pre-trigger) map state.
-        // This ensures the restore reflects any environment changes made after the trap was defined.
         let (restore_unpack_len, restore_compressed, restore_cells, restore_entities_mod) = {
             let state = get_server_state(&server_clone).read().unwrap();
             let map = match state.map.as_ref() {
@@ -153,6 +211,17 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             &trigger_entities_add,
         );
 
+        let empty_ent = ogz_rs::data::Entity {
+            position: [0.0; 3],
+            attrs: [0; 5],
+            ent_type: ogz_rs::data::EntityType::Empty,
+            extra_data: vec![],
+        };
+        let mut final_restore_ents = restore_entities_mod.clone();
+        for id in &assigned_ids {
+            final_restore_ents.push((*id, empty_ent.clone()));
+        }
+
         set_button_color(
             &server_clone,
             actor_cn,
@@ -162,29 +231,24 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             BUTTON_COLOR_ACTIVE,
         );
 
-        tokio::time::sleep(std::time::Duration::from_millis(trap_time as u64)).await;
-
-        // --- 2. RESTORE PRE-TRIGGER STATE ---
-        let empty_ent = ogz_rs::data::Entity {
-            position: [0.0; 3],
-            attrs: [0; 5],
-            ent_type: ogz_rs::data::EntityType::Empty,
-            extra_data: vec![],
-        };
-        let mut final_restore_ents = restore_entities_mod;
-        for id in assigned_ids {
-            final_restore_ents.push((id, empty_ent.clone()));
-        }
-
         let start = tokio::time::Instant::now();
         let total_dur = std::time::Duration::from_millis(effective_timeout as u64);
         let revert_dur = std::time::Duration::from_millis(trap_time as u64);
         let mut reverted = false;
-        let mut last_progress = -1;
+        let mut last_progress = 100;
 
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
 
         loop {
+            // Check if map was reloaded or round reset logic deleted the trap.
+            let is_valid = {
+                let state = get_server_state(&server_clone).read().unwrap();
+                state.traps.get(trap_idx).map(|t| t.is_active) == Some(true)
+            };
+            if !is_valid {
+                return; // Abort immediately, map changed!
+            }
+
             let elapsed = start.elapsed();
             if elapsed >= total_dur {
                 break;
@@ -222,25 +286,11 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 if progress != last_progress {
                     last_progress = progress;
 
-                    // Color from red to green
-                    let r = (progress * 15 / 100).clamp(0, 15);
-                    let g = ((100 - progress) * 15 / 100).clamp(0, 15);
+                    let g = (progress * 15 / 100).clamp(0, 15);
+                    let r = ((100 - progress) * 15 / 100).clamp(0, 15);
                     let color = (r << 8) | (g << 4);
 
-                    let is_play_mode = *server_clone.game_mode.read().unwrap()
-                        != sauer_proto::data::GameMode::CoopEdit;
-                    let target_cns = if is_play_mode {
-                        let maps = server_clone
-                            .extra
-                            .get::<std::sync::Arc<std::sync::RwLock<crate::play::PlayMaps>>>()
-                            .unwrap();
-                        let lock = maps.read().unwrap();
-                        lock.evil_cn.into_iter().collect()
-                    } else {
-                        server_clone.client_cns()
-                    };
-
-                    for cn in target_cns {
+                    for &cn in &target_cns {
                         server_clone.send_chan1(
                             cn,
                             &sauer_proto::Client {
@@ -248,9 +298,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                                 packet: sauer_proto::channel1::EditEnt {
                                     ent_id: id as i32,
                                     pos: sauer_proto::data::Vec3 {
-                                        x: button_pos[0] as f32 + button_size as f32 / 2.0,
-                                        y: button_pos[1] as f32 + button_size as f32 / 2.0,
-                                        z: button_pos[2] as f32 + button_size as f32 / 2.0,
+                                        x: px,
+                                        y: py,
+                                        z: pz,
                                     },
                                     type_: sauer_proto::data::EntityType::Particles,
                                     attrs: [5, progress as i32, color as i32, 0, 0],
@@ -286,19 +336,24 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             }
             drop(state);
 
-            server_clone.broadcast_chan1(&sauer_proto::Client {
-                client_num: actor_cn as i32,
-                packet: sauer_proto::channel1::EditEnt {
-                    ent_id: id as i32,
-                    pos: sauer_proto::data::Vec3 {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
+            for &cn in &target_cns {
+                server_clone.send_chan1(
+                    cn,
+                    &sauer_proto::Client {
+                        client_num: actor_cn as i32,
+                        packet: sauer_proto::channel1::EditEnt {
+                            ent_id: id as i32,
+                            pos: sauer_proto::data::Vec3 {
+                                x: 0.0,
+                                y: 0.0,
+                                z: 0.0,
+                            },
+                            type_: sauer_proto::data::EntityType::Empty,
+                            attrs: [0; 5],
+                        },
                     },
-                    type_: sauer_proto::data::EntityType::Empty,
-                    attrs: [0; 5],
-                },
-            });
+                );
+            }
         }
 
         set_button_color(
