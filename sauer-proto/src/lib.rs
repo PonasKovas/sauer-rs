@@ -52,8 +52,8 @@ mod session;
 mod writer;
 
 pub mod data;
-pub mod extinfo;
 pub mod route;
+pub mod server_query;
 
 pub use error::ParseError;
 pub use messages::{

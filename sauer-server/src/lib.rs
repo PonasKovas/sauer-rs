@@ -25,7 +25,7 @@ mod welcome;
 pub use builder::ServerBuilder;
 pub use items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime};
 pub use players::{ClipboardData, PlayerData, Players};
-pub use plugin::{Context, Plugin, UdpContext};
+pub use plugin::{Context, Plugin, ServerQueryContext};
 
 pub struct Server {
     pub start_time: std::time::Instant,
@@ -72,9 +72,13 @@ impl Server {
         }
     }
 
-    // ── UDP Responses ─────────────────────────────────────────────────────────
+    // ── Server Query Responses ────────────────────────────────────────────────
 
-    pub fn send_udp(&self, to: std::net::SocketAddr, response: &sauer_proto::extinfo::UdpResponse) {
+    pub fn send_server_query(
+        &self,
+        to: std::net::SocketAddr,
+        response: &sauer_proto::server_query::ServerQueryResponse,
+    ) {
         if let Some(sock) = self.extinfo_socket.get() {
             let data = response.to_bytes();
             let _ = sock.try_send_to(&data, to);

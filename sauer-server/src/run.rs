@@ -54,22 +54,22 @@ pub(crate) async fn run<P: Plugin>(
             match extinfo_socket.recv_from(&mut buf).await {
                 Ok((len, addr)) => {
                     let data = &buf[..len];
-                    match sauer_proto::extinfo::UdpRequest::parse(data) {
+                    match sauer_proto::server_query::ServerQueryRequest::parse(data) {
                         Ok(req) => {
-                            let mut ctx = crate::plugin::UdpContext {
+                            let mut ctx = crate::plugin::ServerQueryContext {
                                 server: Arc::clone(&ext_server),
                                 addr,
                                 cancelled: false,
                             };
-                            ext_plugin.udp_request(&mut ctx, &req).await;
+                            ext_plugin.server_query(&mut ctx, &req).await;
                         }
                         Err(e) => {
-                            tracing::debug!(target: "sauer_server", "Failed to parse UDP packet from {}: {:?}", addr, e);
+                            tracing::debug!(target: "sauer_server", "Failed to parse ServerQuery UDP packet from {}: {:?}", addr, e);
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::error!(target: "sauer_server", "UDP recv error: {}", e);
+                    tracing::error!(target: "sauer_server", "ServerQuery UDP recv error: {}", e);
                 }
             }
         }

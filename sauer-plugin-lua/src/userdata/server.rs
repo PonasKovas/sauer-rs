@@ -3,7 +3,7 @@ use crate::userdata::task_handle::TaskHandle;
 use mlua::{
     FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value,
 };
-use sauer_proto::{channel1, extinfo::{UdpResponse, ExtInfoResponse, ScoreData}};
+use sauer_proto::{channel1, server_query::{ServerQueryResponse, ExtInfoResponse, ScoreData}};
 use std::net::SocketAddr;
 use cube_string::CubeString;
 use sauer_server::Server;
@@ -84,12 +84,12 @@ impl UserData for LuaServer {
                 .unwrap_or_default())
         });
 
-        methods.add_method("send_udp", |lua, this, (addr_str, table): (String, Table)| {
+        methods.add_method("send_server_query", |lua, this, (addr_str, table): (String, Table)| {
             let addr: SocketAddr = addr_str.parse().map_err(|e| mlua::Error::RuntimeError(format!("invalid socket addr: {e}")))?;
             let t: String = table.get("type")?;
             
             let response = match t.as_str() {
-                "ServerInfo" => UdpResponse::ServerInfo {
+                "ServerInfo" => ServerQueryResponse::ServerInfo {
                     ping_id: table.get("ping_id")?,
                     num_clients: table.get("num_clients")?,
                     protocol_version: table.get("protocol_version")?,
@@ -102,16 +102,16 @@ impl UserData for LuaServer {
                     map_name: table.get("map_name")?,
                     server_desc: table.get("server_desc")?,
                 },
-                "Uptime" => UdpResponse::ExtInfo(ExtInfoResponse::Uptime {
+                "Uptime" => ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
                     seconds: table.get("seconds")?,
                 }),
-                "PlayerStats" => UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                "PlayerStats" => ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
                     client_number: table.get("client_number")?,
                     ok: table.get("ok")?,
                 }),
                 "PlayerStatsIds" => {
                     let ids: Vec<i32> = table.get("ids")?;
-                    UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids })
+                    ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids })
                 },
                 "PlayerStatsStats" => {
                     let ip_table: Option<Vec<u8>> = table.get("ip")?;
@@ -123,7 +123,7 @@ impl UserData for LuaServer {
                         }
                     });
 
-                    UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
+                    ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
                         client_num: table.get("client_num")?,
                         ping: table.get("ping")?,
                         name: table.get("name")?,
@@ -151,16 +151,16 @@ impl UserData for LuaServer {
                         }).collect()
                     });
 
-                    UdpResponse::ExtInfo(ExtInfoResponse::TeamScore {
+                    ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
                         game_mode: table.get("game_mode")?,
                         remaining_time: table.get("remaining_time")?,
                         scores,
                     })
                 },
-                _ => return Err(mlua::Error::RuntimeError(format!("unknown UDP response type: {t}"))),
+                _ => return Err(mlua::Error::RuntimeError(format!("unknown ServerQuery response type: {t}"))),
             };
 
-            this.inner.send_udp(addr, &response);
+            this.inner.send_server_query(addr, &response);
             Ok(())
         });
 

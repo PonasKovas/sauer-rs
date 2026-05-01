@@ -5,16 +5,16 @@ use std::net::SocketAddr;
 use sauer_proto::{
     channel0, channel1,
     data::{GameMode, PlayerState},
-    extinfo::UdpRequest,
+    server_query::ServerQueryRequest,
 };
 
-pub struct UdpContext {
+pub struct ServerQueryContext {
     pub(crate) server: Arc<Server>,
     pub(crate) addr: SocketAddr,
     pub(crate) cancelled: bool,
 }
 
-impl UdpContext {
+impl ServerQueryContext {
     pub fn server(&self) -> &Arc<Server> {
         &self.server
     }
@@ -74,10 +74,10 @@ pub trait Plugin: Send + Sync + 'static {
     }
 
     /// On UDP request (standard server info ping or extinfo)
-    fn udp_request(
+    fn server_query(
         &self,
-        ctx: &mut UdpContext,
-        request: &UdpRequest,
+        ctx: &mut ServerQueryContext,
+        request: &ServerQueryRequest,
     ) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
@@ -280,12 +280,12 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         self.1.start(server).await;
     }
 
-    async fn udp_request(&self, ctx: &mut UdpContext, request: &UdpRequest) {
-        self.0.udp_request(ctx, request).await;
+    async fn server_query(&self, ctx: &mut ServerQueryContext, request: &ServerQueryRequest) {
+        self.0.server_query(ctx, request).await;
         if ctx.cancelled {
             return;
         }
-        self.1.udp_request(ctx, request).await;
+        self.1.server_query(ctx, request).await;
     }
     async fn connected(&self, ctx: &mut Context) {
         self.0.connected(ctx).await;

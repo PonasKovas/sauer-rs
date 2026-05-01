@@ -7,8 +7,8 @@ use bytes::Bytes;
 use cube_string::CubeString;
 use sauer_proto::data::PlayerState;
 use sauer_proto::{channel0, channel1, data::GameMode};
-use sauer_server::{Context, UdpContext, Plugin, Server};
-use sauer_proto::extinfo::{UdpRequest, ExtInfoRequest};
+use sauer_server::{Context, ServerQueryContext, Plugin, Server};
+use sauer_proto::server_query::{ServerQueryRequest, ExtInfoRequest};
 use std::sync::Arc;
 use tracing::error;
 
@@ -241,27 +241,27 @@ impl Plugin for LuaPlugin {
         }
     }
 
-    async fn udp_request(&self, ctx: &mut UdpContext, request: &UdpRequest) {
+    async fn server_query(&self, ctx: &mut ServerQueryContext, request: &ServerQueryRequest) {
         let mut event = EventUD::new();
 
-        for callback in &self.callbacks.udp_request {
+        for callback in &self.callbacks.server_query {
             let r = self.lua.scope(|scope| {
                 let req_table = self.lua.create_table()?;
                 match request {
-                    UdpRequest::ServerInfo { ping_id } => {
+                    ServerQueryRequest::ServerInfo { ping_id } => {
                         req_table.set("type", "ServerInfo")?;
                         req_table.set("ping_id", *ping_id)?;
                     }
-                    UdpRequest::ExtInfo(ExtInfoRequest::Uptime) => {
+                    ServerQueryRequest::ExtInfo(ExtInfoRequest::Uptime) => {
                         req_table.set("type", "Uptime")?;
                     }
-                    UdpRequest::ExtInfo(ExtInfoRequest::PlayerStats { client_number }) => {
+                    ServerQueryRequest::ExtInfo(ExtInfoRequest::PlayerStats { client_number }) => {
                         req_table.set("type", "PlayerStats")?;
                         if let Some(cn) = client_number {
                             req_table.set("client_number", *cn)?;
                         }
                     }
-                    UdpRequest::ExtInfo(ExtInfoRequest::TeamScore) => {
+                    ServerQueryRequest::ExtInfo(ExtInfoRequest::TeamScore) => {
                         req_table.set("type", "TeamScore")?;
                     }
                 }

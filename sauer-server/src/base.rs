@@ -168,12 +168,12 @@ impl<P: Plugin> Plugin for Base<P> {
         );
     }
 
-    async fn udp_request(&self, ctx: &mut crate::plugin::UdpContext, request: &sauer_proto::extinfo::UdpRequest) {
-        use sauer_proto::extinfo::{UdpRequest, UdpResponse, ExtInfoRequest, ExtInfoResponse};
+    async fn server_query(&self, ctx: &mut crate::plugin::ServerQueryContext, request: &sauer_proto::server_query::ServerQueryRequest) {
+        use sauer_proto::server_query::{ServerQueryRequest, ServerQueryResponse, ExtInfoRequest, ExtInfoResponse};
 
         let server = ctx.server();
         match request {
-            UdpRequest::ServerInfo { ping_id } => {
+            ServerQueryRequest::ServerInfo { ping_id } => {
                 let gamemode = *server.game_mode.read().unwrap() as i32;
                 let mastermode = *server.master_mode.read().unwrap() as i32;
                 let has_password = *server.has_password.read().unwrap();
@@ -181,7 +181,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 let map_name = server.map_name.read().unwrap().clone();
                 let server_desc = server.server_desc.read().unwrap().clone();
 
-                let resp = UdpResponse::ServerInfo {
+                let resp = ServerQueryResponse::ServerInfo {
                     ping_id: *ping_id,
                     num_clients: server.client_count() as i32,
                     protocol_version: sauer_proto::PROTOCOL_VERSION,
@@ -194,23 +194,23 @@ impl<P: Plugin> Plugin for Base<P> {
                     map_name,
                     server_desc,
                 };
-                server.send_udp(ctx.addr(), &resp);
+                server.send_server_query(ctx.addr(), &resp);
             }
-            UdpRequest::ExtInfo(ext_req) => {
+            ServerQueryRequest::ExtInfo(ext_req) => {
                 match ext_req {
                     ExtInfoRequest::Uptime => {
-                        server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::Uptime {
+                        server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
                             seconds: server.start_time.elapsed().as_secs() as i32,
                         }));
                     }
                     ExtInfoRequest::PlayerStats { client_number } => {
                         if let Some(cn) = client_number {
                             if let Some(p) = server.players.try_get(*cn as u32) {
-                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
                                     client_number: Some(*cn),
                                     ok: true,
                                 }));
-                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds {
+                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds {
                                     ids: vec![*cn],
                                 }));
                                 
@@ -223,7 +223,7 @@ impl<P: Plugin> Plugin for Base<P> {
                                     _ => [0, 0, 0]
                                 });
 
-                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
+                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
                                     client_num: *cn,
                                     ping: p.ping,
                                     name: p.name.clone(),
@@ -241,13 +241,13 @@ impl<P: Plugin> Plugin for Base<P> {
                                     ip,
                                 }));
                             } else {
-                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
                                     client_number: Some(*cn),
                                     ok: false,
                                 }));
                             }
                         } else {
-                            server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                            server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
                                 client_number: None,
                                 ok: true,
                             }));
@@ -256,7 +256,7 @@ impl<P: Plugin> Plugin for Base<P> {
                             for e in server.players.map.iter() {
                                 ids.push(*e.key() as i32);
                             }
-                            server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids }));
+                            server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids }));
                             
                             for e in server.players.map.iter() {
                                 let cn = *e.key();
@@ -270,7 +270,7 @@ impl<P: Plugin> Plugin for Base<P> {
                                     _ => [0, 0, 0]
                                 });
                                 
-                                server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
+                                server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
                                     client_num: cn as i32,
                                     ping: p.ping,
                                     name: p.name.clone(),
@@ -297,7 +297,7 @@ impl<P: Plugin> Plugin for Base<P> {
                         } else {
                             None
                         };
-                        server.send_udp(ctx.addr(), &UdpResponse::ExtInfo(ExtInfoResponse::TeamScore {
+                        server.send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
                             game_mode,
                             remaining_time: 0, // TODO
                             scores,

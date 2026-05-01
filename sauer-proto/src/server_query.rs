@@ -1,4 +1,4 @@
-//! ExtInfo protocol
+//! Server Query protocol (Server Info & ExtInfo)
 //!
 //! This is separate from the rest of the protocol and operates simply by sending messages to the UDP socket which is usually
 //! on port `NORMAL_PORT+1`.
@@ -11,26 +11,15 @@ use crate::{
 use constants::*;
 use cube_string::CubeString;
 
-mod constants;
-
-/// ExtInfo requests that the client may send to a server
-#[derive(Debug, Clone, PartialEq)]
-pub enum ExtInfoRequest {
-    /// Requests the server's uptime in seconds
-    Uptime,
-    /// Requests the stats for all or a specific player
-    PlayerStats { client_number: Option<i32> },
-    /// Requests the team scores
-    TeamScore,
-}
+pub mod constants;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum UdpRequest {
+pub enum ServerQueryRequest {
     ServerInfo { ping_id: i32 },
     ExtInfo(ExtInfoRequest),
 }
 
-impl UdpRequest {
+impl ServerQueryRequest {
     pub fn parse(buf: &[u8]) -> Result<Self, ParseError> {
         let mut r = buf;
         if r.is_empty() {
@@ -46,7 +35,7 @@ impl UdpRequest {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum UdpResponse {
+pub enum ServerQueryResponse {
     ServerInfo {
         ping_id: i32,
         num_clients: i32,
@@ -63,47 +52,34 @@ pub enum UdpResponse {
     ExtInfo(ExtInfoResponse),
 }
 
-impl UdpResponse {
+impl ServerQueryResponse {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Vec::new();
         match self {
             Self::ServerInfo {
-                ping_id,
-                num_clients,
-                protocol_version,
-                game_mode,
-                remaining_time,
-                max_clients,
-                master_mode,
-                is_paused,
-                game_speed,
-                map_name,
-                server_desc,
+                ping_id, num_clients, protocol_version, game_mode, remaining_time, max_clients,
+                master_mode, is_paused, game_speed, map_name, server_desc
             } => {
                 ping_id.sauer_write(&mut w);
                 num_clients.sauer_write(&mut w);
-
-                let attrs = if *is_paused || *game_speed != 100 {
-                    7
-                } else {
-                    5
-                };
+                
+                let attrs = if *is_paused || *game_speed != 100 { 7 } else { 5 };
                 attrs.sauer_write(&mut w);
-
+                
                 protocol_version.sauer_write(&mut w);
                 game_mode.sauer_write(&mut w);
                 remaining_time.sauer_write(&mut w);
                 max_clients.sauer_write(&mut w);
                 master_mode.sauer_write(&mut w);
-
+                
                 if attrs == 7 {
                     (if *is_paused { 1i32 } else { 0i32 }).sauer_write(&mut w);
                     game_speed.sauer_write(&mut w);
                 }
-
+                
                 map_name.sauer_write(&mut w);
                 server_desc.sauer_write(&mut w);
-            }
+            },
             Self::ExtInfo(ext_resp) => {
                 0i32.sauer_write(&mut w);
                 ext_resp.write_to(&mut w);
@@ -111,6 +87,17 @@ impl UdpResponse {
         }
         w
     }
+}
+
+/// ExtInfo requests that the client may send to a server
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExtInfoRequest {
+    /// Requests the server's uptime in seconds
+    Uptime,
+    /// Requests the stats for all or a specific player
+    PlayerStats { client_number: Option<i32> },
+    /// Requests the team scores
+    TeamScore,
 }
 
 impl ExtInfoRequest {
@@ -173,26 +160,27 @@ pub struct ScoreData {
     pub team_name: CubeString,
     pub score: i32,
 }
+
 impl ExtInfoResponse {
-    pub(crate) fn write_to(&self, mut w: &mut Vec<u8>) {
+    pub(crate) fn write_to(&self, w: &mut Vec<u8>) {
         match self {
             Self::Uptime { seconds } => {
                 EXT_UPTIME.sauer_write(w);
                 EXT_ACK.sauer_write(w);
-                EXT_VERSION.sauer_write(&mut w);
-                seconds.sauer_write(&mut w);
+                EXT_VERSION.sauer_write(w);
+                seconds.sauer_write(w);
             }
             Self::PlayerStats { client_number, ok } => {
-                EXT_PLAYERSTATS.sauer_write(&mut w);
-                client_number.unwrap_or(-1).sauer_write(&mut w);
-                EXT_ACK.sauer_write(&mut w);
-                EXT_VERSION.sauer_write(&mut w);
-                if *ok { EXT_NO_ERROR } else { EXT_ERROR }.sauer_write(&mut w);
+                EXT_PLAYERSTATS.sauer_write(w);
+                client_number.unwrap_or(-1).sauer_write(w);
+                EXT_ACK.sauer_write(w);
+                EXT_VERSION.sauer_write(w);
+                if *ok { EXT_NO_ERROR } else { EXT_ERROR }.sauer_write(w);
             }
             Self::PlayerStatsIds { ids } => {
-                EXT_PLAYERSTATS_RESP_IDS.sauer_write(&mut w);
+                EXT_PLAYERSTATS_RESP_IDS.sauer_write(w);
                 for id in ids {
-                    id.sauer_write(&mut w);
+                    id.sauer_write(w);
                 }
             }
             Self::PlayerStatsStats {
@@ -212,21 +200,21 @@ impl ExtInfoResponse {
                 state,
                 ip,
             } => {
-                EXT_PLAYERSTATS_RESP_STATS.sauer_write(&mut w);
-                client_num.sauer_write(&mut w);
-                ping.sauer_write(&mut w);
-                name.sauer_write(&mut w);
-                team.sauer_write(&mut w);
-                frags.sauer_write(&mut w);
-                flags.sauer_write(&mut w);
-                deaths.sauer_write(&mut w);
-                teamkills.sauer_write(&mut w);
-                damage.sauer_write(&mut w);
-                health.sauer_write(&mut w);
-                armour.sauer_write(&mut w);
-                (*gunselect as i32).sauer_write(&mut w);
-                (*privilege as i32).sauer_write(&mut w);
-                (*state as i32).sauer_write(&mut w);
+                EXT_PLAYERSTATS_RESP_STATS.sauer_write(w);
+                client_num.sauer_write(w);
+                ping.sauer_write(w);
+                name.sauer_write(w);
+                team.sauer_write(w);
+                frags.sauer_write(w);
+                flags.sauer_write(w);
+                deaths.sauer_write(w);
+                teamkills.sauer_write(w);
+                damage.sauer_write(w);
+                health.sauer_write(w);
+                armour.sauer_write(w);
+                (*gunselect as i32).sauer_write(w);
+                (*privilege as i32).sauer_write(w);
+                (*state as i32).sauer_write(w);
                 if let Some(ip) = ip {
                     w.extend_from_slice(ip);
                 }

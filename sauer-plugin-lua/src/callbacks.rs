@@ -11,7 +11,7 @@ pub(crate) struct Callbacks {
     pub on_chat: Vec<LuaCallback>,
     pub on_command: Vec<LuaCallback>,
     pub map: Vec<LuaCallback>,
-    pub udp_request: Vec<LuaCallback>,
+    pub server_query: Vec<LuaCallback>,
 
     // Channel 0
     pub pos: Vec<LuaCallback>,
@@ -122,7 +122,7 @@ pub(crate) fn add_callbacks_from_env(
     add_callback!(on_chat);
     add_callback!(on_command);
     add_callback!(map);
-    add_callback!(udp_request);
+    add_callback!(server_query);
 
     add_callback!(pos);
     add_callback!(teleport);
