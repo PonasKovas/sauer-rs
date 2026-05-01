@@ -4,11 +4,11 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::io::{Read, Write};
 use thiserror::Error;
 
-const SENTINEL_Z: f32 = -134217728.0; // minimum possible value due to DMF quantization in packets
+const SENTINEL_COORD: f32 = -10000.0;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
-    #[error("payload too large: {0} bytes (max 65533)")]
+    #[error("payload too large: {0} bytes")]
     TooLarge(usize),
     #[error("serialise error: {0}")]
     Serialise(String),
@@ -35,13 +35,15 @@ fn decompress<T: DeserializeOwned>(compressed: &[u8]) -> Result<T, StoreError> {
     bitcode::deserialize(&raw).map_err(|e| StoreError::Corrupt(e.to_string()))
 }
 
-fn pack(compressed: &[u8]) -> Result<Vec<[u16; 5]>, StoreError> {
+fn pack(compressed: &[u8], version: u8) -> Result<Vec<[i16; 5]>, StoreError> {
     if compressed.len() > 65533 {
         return Err(StoreError::TooLarge(compressed.len()));
     }
-    let mut stream = Vec::with_capacity(2 + compressed.len());
+    let mut stream = Vec::with_capacity(3 + compressed.len());
+    stream.push(version);
     stream.extend_from_slice(&(compressed.len() as u16).to_le_bytes());
     stream.extend_from_slice(compressed);
+    
     let rem = stream.len() % 10;
     if rem != 0 {
         stream.resize(stream.len() + (10 - rem), 0);
@@ -50,106 +52,84 @@ fn pack(compressed: &[u8]) -> Result<Vec<[u16; 5]>, StoreError> {
         .chunks_exact(10)
         .map(|c| {
             [
-                u16::from_le_bytes([c[0], c[1]]),
-                u16::from_le_bytes([c[2], c[3]]),
-                u16::from_le_bytes([c[4], c[5]]),
-                u16::from_le_bytes([c[6], c[7]]),
-                u16::from_le_bytes([c[8], c[9]]),
+                i16::from_le_bytes([c[0], c[1]]),
+                i16::from_le_bytes([c[2], c[3]]),
+                i16::from_le_bytes([c[4], c[5]]),
+                i16::from_le_bytes([c[6], c[7]]),
+                i16::from_le_bytes([c[8], c[9]]),
             ]
         })
         .collect())
 }
 
-fn unpack(entities: &[&Entity]) -> Result<Vec<u8>, StoreError> {
+fn unpack(entities: &[&Entity]) -> Result<(u8, Vec<u8>), StoreError> {
     let mut stream: Vec<u8> = Vec::with_capacity(entities.len() * 10);
     for ent in entities {
         for &a in &ent.attrs {
             stream.extend_from_slice(&(a as u16).to_le_bytes());
         }
     }
-    if stream.len() < 2 {
-        return Err(StoreError::Corrupt(
-            "stream too short for length header".into(),
-        ));
+    if stream.len() < 3 {
+        return Err(StoreError::Corrupt("stream too short".into()));
     }
-    let len = u16::from_le_bytes([stream[0], stream[1]]) as usize;
-    if stream.len() < 2 + len {
-        return Err(StoreError::Corrupt(format!(
-            "truncated: need {} bytes, have {}",
-            2 + len,
-            stream.len()
-        )));
+    let version = stream[0];
+    let len = u16::from_le_bytes([stream[1], stream[2]]) as usize;
+    if stream.len() < 3 + len {
+        return Err(StoreError::Corrupt("truncated data".into()));
     }
-    Ok(stream[2..2 + len].to_vec())
+    Ok((version, stream[3..3 + len].to_vec()))
 }
 
-pub fn entity_version(ent: &Entity, domain_id: u8) -> Option<u8> {
-    if !matches!(ent.ent_type, EntityType::Particles) {
-        return None;
-    }
-    if (ent.position[1] - -(100.0 + domain_id as f32)).abs() > 1e-3 {
-        return None;
-    }
-    let x = ent.position[0];
-    if x > -100.0 || x < -355.0 {
-        return None;
-    }
-    let v = -x - 100.0;
-    if v >= 0.0 && v <= 255.0 && (v - v.round()).abs() < 1e-3 {
-        Some(v.round() as u8)
-    } else {
-        None
-    }
+fn is_store_entity(ent: &Entity) -> bool {
+    matches!(ent.ent_type, EntityType::Particles) && 
+    ent.position[0] < -9000.0 && ent.position[1] < -9000.0 && ent.position[2] < -9000.0
 }
 
-fn build_entity(attrs: [u16; 5], version: u8, domain_id: u8) -> Entity {
+fn build_entity(attrs: [i16; 5]) -> Entity {
     Entity {
-        position: [
-            -(100.0 + version as f32),
-            -(100.0 + domain_id as f32),
-            SENTINEL_Z,
-        ],
-        attrs: attrs.map(|v| v as i16),
+        position: [SENTINEL_COORD, SENTINEL_COORD, SENTINEL_COORD],
+        attrs,
         ent_type: EntityType::Particles,
         extra_data: vec![],
     }
 }
 
-pub fn get_store_entity_ids(world: &sauer_map::World, domain_id: u8) -> Vec<usize> {
+pub fn get_store_entity_ids(world: &sauer_map::World, _domain_id: u8) -> Vec<usize> {
     world
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| entity_version(e, domain_id).map(|_| i))
+        .filter_map(|(i, e)| if is_store_entity(e) { Some(i) } else { None })
         .collect()
 }
 
 pub fn read<T: DeserializeOwned>(
     world: &sauer_map::World,
     version: u8,
-    domain_id: u8,
+    _domain_id: u8,
 ) -> Result<Option<T>, StoreError> {
-    let store_ents: Vec<(usize, &Entity)> = world
+    let mut store_ents: Vec<(usize, &Entity)> = world
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| entity_version(e, domain_id).map(|v| (i, v, e)))
-        .map(|(i, _v, e)| (i, e))
+        .filter(|(_, e)| is_store_entity(e))
         .collect();
     if store_ents.is_empty() {
         return Ok(None);
     }
-    for (_, ent) in &store_ents {
-        let found = entity_version(ent, domain_id).unwrap();
-        if found != version {
-            return Err(StoreError::VersionMismatch {
-                expected: version,
-                found,
-            });
-        }
-    }
+    
+    // Sort entities by index to ensure we unpack chunks in the order they were written
+    store_ents.sort_by_key(|&(i, _)| i);
+    
     let refs: Vec<&Entity> = store_ents.iter().map(|(_, e)| *e).collect();
-    let compressed = unpack(&refs)?;
+    let (found_version, compressed) = unpack(&refs)?;
+    
+    if found_version != version {
+        return Err(StoreError::VersionMismatch {
+            expected: version,
+            found: found_version,
+        });
+    }
     Ok(Some(decompress(&compressed)?))
 }
 
@@ -157,15 +137,15 @@ pub fn write<T: Serialize>(
     world: &mut sauer_map::World,
     data: &T,
     version: u8,
-    domain_id: u8,
+    _domain_id: u8,
 ) -> Result<Vec<(usize, Entity)>, StoreError> {
     let compressed = compress(data)?;
-    let chunks = pack(&compressed)?;
+    let chunks = pack(&compressed, version)?;
     let old_ids: Vec<usize> = world
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| entity_version(e, domain_id).map(|_| i))
+        .filter_map(|(i, e)| if is_store_entity(e) { Some(i) } else { None })
         .collect();
     let n_old = old_ids.len();
     let n_new = chunks.len();
@@ -183,7 +163,7 @@ pub fn write<T: Serialize>(
         changed.push((id, world.entities[id].clone()));
     }
 
-    // Build the full set of target slots: keep existing domain slots, then
+    // Build the full set of target slots: keep existing slots, then
     // fill from empty slots, then push new entities as a last resort.
     let mut slots: Vec<usize> = old_ids[..n_old.min(n_new)].to_vec();
     if n_new > n_old {
@@ -211,12 +191,11 @@ pub fn write<T: Serialize>(
         }
     }
 
-    // Sort so chunk index matches entity-list order, which is what unpack
-    // assumes when reading.
+    // Sort so chunk index matches entity-list order
     slots.sort_unstable();
 
     for (i, &slot) in slots.iter().enumerate() {
-        world.entities[slot] = build_entity(chunks[i], version, domain_id);
+        world.entities[slot] = build_entity(chunks[i]);
         changed.push((slot, world.entities[slot].clone()));
     }
 
