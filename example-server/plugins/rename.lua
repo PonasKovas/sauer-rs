@@ -6,7 +6,7 @@
 -- every ServInfo it receives) are blocked so BasePlugin never sees them a
 -- second time.
 
-local tasks = {}  -- [cn] = TaskHandle
+local tasks = {}  -- [id] = TaskHandle
 
 -- ── colour helpers ────────────────────────────────────────────────────────────
 
@@ -26,10 +26,10 @@ end
 
 -- ── callbacks ─────────────────────────────────────────────────────────────────
 
-function connect(cn, packet, event)
+function connect(id, packet, event)
     -- Duplicate Connect (client responded to one of our looping ServInfo
     -- packets): block it so BasePlugin doesn't welcome the player again.
-    if tasks[cn] then
+    if tasks[id] then
         event:cancel()
         return
     end
@@ -40,7 +40,7 @@ function connect(cn, packet, event)
     local TOTAL_WIDTH = 20
     local TEXT_WIDTH  = 8
 
-    tasks[cn] = server:set_interval(100, function()
+    tasks[id] = server:set_interval(100, function()
         local pos  = triangle(i, TOTAL_WIDTH - TEXT_WIDTH - 1)
         local desc = string.rep(" ", pos)
                   .. random_colour() .. "sauer"
@@ -49,7 +49,8 @@ function connect(cn, packet, event)
                   .. string.rep(" ", TOTAL_WIDTH - TEXT_WIDTH - pos)
         i = i + 1
 
-        server:send_serv_info(cn, {
+        local cn = server:get_cn(id) or 0
+        server:send_serv_info(id, {
             client_num   = cn,
             protocol     = PROTOCOL_VERSION,
             session_id   = 0,
@@ -60,9 +61,9 @@ function connect(cn, packet, event)
     end)
 end
 
-function disconnected(cn, event)
-    if tasks[cn] then
-        tasks[cn]:cancel()
-        tasks[cn] = nil
+function disconnected(id, event)
+    if tasks[id] then
+        tasks[id]:cancel()
+        tasks[id] = nil
     end
 end

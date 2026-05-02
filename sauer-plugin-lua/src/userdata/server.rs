@@ -73,17 +73,21 @@ impl UserData for LuaServer {
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("disconnect", |_lua, this, cn: u32| {
-            this.inner.disconnect(cn);
+        methods.add_method("disconnect", |_lua, this, id: u64| {
+            this.inner.disconnect(id);
             Ok(())
         });
 
-        methods.add_method("peer_address", |_lua, this, cn: u32| {
+        methods.add_method("peer_address", |_lua, this, id: u64| {
             Ok(this
                 .inner
-                .peer_addr(cn)
+                .peer_addr(id)
                 .map(|a| a.to_string())
                 .unwrap_or_default())
+        });
+
+        methods.add_method("get_cn", |_lua, this, id: u64| {
+            Ok(this.inner.get_cn(id))
         });
 
         methods.add_method(
@@ -228,12 +232,12 @@ impl UserData for LuaServer {
 
         // ── Local macros to cut boilerplate ─────────────────────────────────
 
-        /// Send a Chan1 packet to one client by CN.
+        /// Send a Chan1 packet to one client by ID.
         macro_rules! add_send {
             ($name:literal, $ty:ty) => {
-                methods.add_method($name, |lua, this, (cn, table): (u32, Table)| {
+                methods.add_method($name, |lua, this, (id, table): (u64, Table)| {
                     let packet = <$ty>::from_lua(Value::Table(table), lua)?;
-                    this.inner.send_chan1(cn, &packet);
+                    this.inner.send_chan1(id, &packet);
                     Ok(())
                 });
             };

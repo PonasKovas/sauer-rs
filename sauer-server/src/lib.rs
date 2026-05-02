@@ -114,12 +114,24 @@ impl Server {
 
     pub fn assign_cn(&self, id: u64) -> Option<u8> {
         let mut cns = self.cns.write().unwrap();
-        for (cn, slot) in cns.iter_mut().enumerate() {
-            if slot.is_none() {
-                *slot = Some(id);
+
+        // 1. Check if already assigned
+        for (cn, slot) in cns.iter().enumerate() {
+            if slot == &Some(id) {
+                tracing::debug!("id {} already has cn {}", id, cn);
                 return Some(cn as u8);
             }
         }
+
+        // 2. Assign new
+        for (cn, slot) in cns.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(id);
+                tracing::info!("assigned id {} to cn {}", id, cn);
+                return Some(cn as u8);
+            }
+        }
+        tracing::error!("failed to assign cn for id {}", id);
         None
     }
 

@@ -23,7 +23,7 @@ macro_rules! make_callback_impl {
                     let packet = scope.create_userdata_ref(packet)?;
                     let event = scope.create_userdata_ref_mut(&mut event)?;
 
-                    callback.callback.call::<()>((ctx.cn(), packet, event))
+                    callback.callback.call::<()>((ctx.id(), packet, event))
                 });
 
                 if let Err(e) = r {
@@ -71,7 +71,7 @@ impl Plugin for LuaPlugin {
         for callback in &self.callbacks.connected {
             let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), event))
+                callback.callback.call::<()>((ctx.id(), event))
             });
 
             if let Err(e) = r {
@@ -91,7 +91,7 @@ impl Plugin for LuaPlugin {
         for callback in &self.callbacks.disconnected {
             let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), event))
+                callback.callback.call::<()>((ctx.id(), event))
             });
 
             if let Err(e) = r {
@@ -111,7 +111,7 @@ impl Plugin for LuaPlugin {
         for callback in &self.callbacks.on_client_welcomed {
             let r = self.lua.scope(|scope| {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), event))
+                callback.callback.call::<()>((ctx.id(), event))
             });
 
             if let Err(e) = r {
@@ -133,7 +133,7 @@ impl Plugin for LuaPlugin {
                 let event = scope.create_userdata_ref_mut(&mut event)?;
                 callback
                     .callback
-                    .call::<()>((ctx.cn(), map_name.clone(), mode, event))
+                    .call::<()>((ctx.id(), map_name.clone(), mode, event))
             });
 
             if let Err(e) = r {
@@ -157,7 +157,7 @@ impl Plugin for LuaPlugin {
                 let event_ref = scope.create_userdata_ref_mut(&mut event)?;
                 callback
                     .callback
-                    .call::<()>((ctx.cn(), state_ref, event_ref))
+                    .call::<()>((ctx.id(), state_ref, event_ref))
             });
 
             if let Err(e) = r {
@@ -182,7 +182,7 @@ impl Plugin for LuaPlugin {
             let r = self.lua.scope(|scope| {
                 let text_lua = self.lua.create_string(text.as_bytes())?;
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), text_lua, event))
+                callback.callback.call::<()>((ctx.id(), text_lua, event))
             });
 
             if let Err(e) = r {
@@ -206,7 +206,7 @@ impl Plugin for LuaPlugin {
                     args_table.raw_set(i + 1, self.lua.create_string(arg.as_bytes())?)?;
                 }
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), args_table, event))
+                callback.callback.call::<()>((ctx.id(), args_table, event))
             });
 
             if let Err(e) = r {
@@ -227,7 +227,7 @@ impl Plugin for LuaPlugin {
             let r = self.lua.scope(|scope| {
                 let data = self.lua.create_string(packet.as_ref())?;
                 let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.cn(), data, event))
+                callback.callback.call::<()>((ctx.id(), data, event))
             });
 
             if let Err(e) = r {

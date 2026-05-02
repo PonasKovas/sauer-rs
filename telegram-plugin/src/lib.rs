@@ -88,7 +88,7 @@ impl Plugin for TelegramBridge {
         }
 
         // Retrieve the UTF-8 representations of the CubeStrings
-        let sender_name = ctx.server().players.get(ctx.cn()).name.to_utf8();
+        let sender_name = ctx.server().players.get(ctx.id()).name.to_utf8();
         let msg = text.to_utf8();
         let text_to_send = format!("{}: {}", sender_name, msg);
 

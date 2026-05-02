@@ -1,6 +1,5 @@
 use crate::config::Config;
 use clap::Parser;
-use deathrun_plugin::{DeathrunEdit, DeathrunPlay};
 use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
 use sauer_server::ServerBuilder;
@@ -53,8 +52,6 @@ async fn main() {
         .bind_addr(config.bind_addr)
         .max_peers(config.max_peers)
         .plugin(config.base)
-        .plugin(DeathrunEdit::new())
-        .plugin(DeathrunPlay::new(Default::default()))
         .plugin(telegram_plugin)
         .plugin(lua_plugin);
 

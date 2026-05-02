@@ -165,7 +165,11 @@ impl<P: Plugin> Plugin for Base<P> {
             }
         };
 
-        let session_id = init_player(&server.players, id);
+        // Initialize player ONLY if not already initialized
+        if server.players.try_get(id).is_none() {
+            init_player(&server.players, id);
+        }
+        let session_id = server.players.get(id).session_id;
 
         server.send_chan1(
             id,

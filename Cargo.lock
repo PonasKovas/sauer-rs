@@ -488,7 +488,6 @@ dependencies = [
  "anyhow",
  "clap",
  "cube-string",
- "deathrun-plugin",
  "sauer-plugin-lua",
  "sauer-proto",
  "sauer-server",
