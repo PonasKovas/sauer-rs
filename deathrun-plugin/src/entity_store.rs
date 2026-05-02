@@ -43,7 +43,7 @@ fn pack(compressed: &[u8], version: u8) -> Result<Vec<[i16; 5]>, StoreError> {
     stream.push(version);
     stream.extend_from_slice(&(compressed.len() as u16).to_le_bytes());
     stream.extend_from_slice(compressed);
-    
+
     let rem = stream.len() % 10;
     if rem != 0 {
         stream.resize(stream.len() + (10 - rem), 0);
@@ -84,16 +84,23 @@ fn is_store_entity(ent: &Entity, domain_id: u8) -> bool {
     if !matches!(ent.ent_type, EntityType::Particles) {
         return false;
     }
-    if (ent.position[0] - SENTINEL_COORD).abs() > 0.1 || (ent.position[1] - SENTINEL_COORD).abs() > 0.1 {
+    if (ent.position[0] - SENTINEL_COORD).abs() > 0.1
+        || (ent.position[1] - SENTINEL_COORD).abs() > 0.1
+    {
         return false;
     }
     let expected_z = SENTINEL_COORD - (domain_id as f32);
-    (ent.position[2] - expected_z).abs() < 0.1 || (domain_id == 1 && (ent.position[2] - SENTINEL_COORD).abs() < 0.1)
+    (ent.position[2] - expected_z).abs() < 0.1
+        || (domain_id == 1 && (ent.position[2] - SENTINEL_COORD).abs() < 0.1)
 }
 
 fn build_entity(attrs: [i16; 5], domain_id: u8) -> Entity {
     Entity {
-        position: [SENTINEL_COORD, SENTINEL_COORD, SENTINEL_COORD - (domain_id as f32)],
+        position: [
+            SENTINEL_COORD,
+            SENTINEL_COORD,
+            SENTINEL_COORD - (domain_id as f32),
+        ],
         attrs,
         ent_type: EntityType::Particles,
         extra_data: vec![],
@@ -105,7 +112,13 @@ pub fn get_store_entity_ids(world: &sauer_map::World, domain_id: u8) -> Vec<usiz
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| if is_store_entity(e, domain_id) { Some(i) } else { None })
+        .filter_map(|(i, e)| {
+            if is_store_entity(e, domain_id) {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -123,13 +136,13 @@ pub fn read<T: DeserializeOwned>(
     if store_ents.is_empty() {
         return Ok(None);
     }
-    
+
     // Sort entities by index to ensure we unpack chunks in the order they were written
     store_ents.sort_by_key(|&(i, _)| i);
-    
+
     let refs: Vec<&Entity> = store_ents.iter().map(|(_, e)| *e).collect();
     let (found_version, compressed) = unpack(&refs)?;
-    
+
     if found_version != version {
         return Err(StoreError::VersionMismatch {
             expected: version,
@@ -151,7 +164,13 @@ pub fn write<T: Serialize>(
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| if is_store_entity(e, domain_id) { Some(i) } else { None })
+        .filter_map(|(i, e)| {
+            if is_store_entity(e, domain_id) {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect();
     let n_old = old_ids.len();
     let n_new = chunks.len();

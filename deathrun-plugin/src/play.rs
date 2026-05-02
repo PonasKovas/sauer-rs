@@ -2,15 +2,12 @@ use crate::map_state::{DeathrunState, MapState, Trap, get_server_state};
 use crate::trap::{StoredTrap, TRAP_DOMAIN, TRAP_STORE_VERSION};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
-use ogz_rs::data::{MapConfig, Variable};
+use ogz_rs::data::MapConfig;
 use rand::seq::SliceRandom;
 use sauer_proto::data::PlayerState;
 use sauer_proto::{
     Client, channel0, channel1,
-    data::{
-        ClientState, EditVarValue, EntityType, GameMode, MasterMode, Orient, SelInfo,
-        SetTeamReason, Vec3,
-    },
+    data::{ClientState, EntityType, GameMode, MasterMode, SetTeamReason},
 };
 use sauer_server::{
     Server,
@@ -143,7 +140,8 @@ impl PlayMaps {
                     &Vec::<crate::trap::ActiveTrap>::new(),
                     crate::trap::ACTIVE_TRAP_STORE_VERSION,
                     crate::trap::ACTIVE_TRAP_DOMAIN,
-                ).unwrap_or_default();
+                )
+                .unwrap_or_default();
             }
             _ => {}
         }
@@ -263,7 +261,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             let mut store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
                 .into_iter()
                 .collect::<HashSet<_>>();
-            store_ids.extend(crate::entity_store::get_store_entity_ids(&map.world, crate::trap::ACTIVE_TRAP_DOMAIN));
+            store_ids.extend(crate::entity_store::get_store_entity_ids(
+                &map.world,
+                crate::trap::ACTIVE_TRAP_DOMAIN,
+            ));
             let variables = match &map.meta.config {
                 MapConfig::Modern { variables } => variables.clone(),
                 _ => vec![],
@@ -324,7 +325,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
                     return None;
                 }
 
-                let mut ent_type = ent.ent_type;
+                let ent_type = ent.ent_type;
                 let mut attrs = ent.attrs;
 
                 if ent_type == EntityType::PlayerStart {
@@ -548,7 +549,12 @@ fn declare_win(
     });
 }
 
-fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>, welcome: bool) -> bool {
+fn send_map_to_client(
+    server: Arc<Server>,
+    target_cn: u32,
+    maps: &Arc<RwLock<PlayMaps>>,
+    welcome: bool,
+) -> bool {
     let (world_size, root, entities, vslots, variables, store_ids, evil_cn) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
@@ -559,10 +565,14 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             Some(m) => m,
             None => return false,
         };
-        let mut store_ids = crate::entity_store::get_store_entity_ids(&loaded.state.world, TRAP_DOMAIN)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        store_ids.extend(crate::entity_store::get_store_entity_ids(&loaded.state.world, crate::trap::ACTIVE_TRAP_DOMAIN));
+        let mut store_ids =
+            crate::entity_store::get_store_entity_ids(&loaded.state.world, TRAP_DOMAIN)
+                .into_iter()
+                .collect::<HashSet<_>>();
+        store_ids.extend(crate::entity_store::get_store_entity_ids(
+            &loaded.state.world,
+            crate::trap::ACTIVE_TRAP_DOMAIN,
+        ));
         let variables = match &loaded.state.meta.config {
             MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],
@@ -599,7 +609,7 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
                     return None;
                 }
 
-                let mut ent_type = ent.ent_type;
+                let ent_type = ent.ent_type;
                 let mut attrs = ent.attrs;
 
                 if ent_type == EntityType::PlayerStart {

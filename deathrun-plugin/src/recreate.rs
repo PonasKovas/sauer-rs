@@ -3,11 +3,10 @@ use cube_string::IntoCubeStringLossy;
 use rand::seq::SliceRandom;
 use sauer_proto::{
     Client, channel1,
-    data::{Orient, SelInfo, Vec3},
+    data::{SelInfo, Vec3},
 };
 use sauer_server::Server;
 use std::sync::Arc;
-use tokio::time::{Duration, sleep};
 
 pub(crate) fn collect_chunks(
     node: &sauer_map::Node,
@@ -126,9 +125,15 @@ pub async fn visual_rebuild_map<F>(
 
             if send {
                 let val = match var {
-                    ogz_rs::data::Variable::Int { value, .. } => sauer_proto::data::EditVarValue::Int(*value),
-                    ogz_rs::data::Variable::Float { value, .. } => sauer_proto::data::EditVarValue::Float(*value),
-                    ogz_rs::data::Variable::String { value, .. } => sauer_proto::data::EditVarValue::String(value.clone()),
+                    ogz_rs::data::Variable::Int { value, .. } => {
+                        sauer_proto::data::EditVarValue::Int(*value)
+                    }
+                    ogz_rs::data::Variable::Float { value, .. } => {
+                        sauer_proto::data::EditVarValue::Float(*value)
+                    }
+                    ogz_rs::data::Variable::String { value, .. } => {
+                        sauer_proto::data::EditVarValue::String(value.clone())
+                    }
                 };
                 server.send_chan1(
                     cn,

@@ -147,8 +147,12 @@ async fn load_initial_maps(map_dir: &PathBuf, play: &DeathrunPlay) -> HashMap<St
     known_files
 }
 
-async fn sync_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>, mut known_files: HashMap<String, SystemTime>) {
-    use notify::{Watcher, RecursiveMode, Event};
+async fn sync_map_dir(
+    map_dir: PathBuf,
+    maps: Arc<RwLock<PlayMaps>>,
+    mut known_files: HashMap<String, SystemTime>,
+) {
+    use notify::{Event, RecursiveMode, Watcher};
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
@@ -157,9 +161,12 @@ async fn sync_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>, mut known_f
         if res.is_ok() {
             let _ = tx_clone.send(());
         }
-    }).expect("Failed to initialize map watcher");
+    })
+    .expect("Failed to initialize map watcher");
 
-    watcher.watch(&map_dir, RecursiveMode::NonRecursive).expect("Failed to watch map directory");
+    watcher
+        .watch(&map_dir, RecursiveMode::NonRecursive)
+        .expect("Failed to watch map directory");
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 
@@ -184,8 +191,12 @@ async fn sync_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>, mut known_f
                         let name_str = name.to_string();
                         current_files.insert(name_str.clone());
 
-                        let Ok(metadata) = entry.metadata().await else { continue; };
-                        let Ok(modified) = metadata.modified() else { continue; };
+                        let Ok(metadata) = entry.metadata().await else {
+                            continue;
+                        };
+                        let Ok(modified) = metadata.modified() else {
+                            continue;
+                        };
 
                         let needs_update = match known_files.get(&name_str) {
                             Some(&last_mod) => modified > last_mod,
@@ -194,13 +205,17 @@ async fn sync_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>, mut known_f
 
                         if needs_update {
                             match fs::read(&path).await {
-                                Ok(data) => match maps.write().unwrap().add_map(name_str.clone(), &data) {
-                                    Ok(()) => {
-                                        info!("Map dir: loaded/updated '{name_str}'");
-                                        known_files.insert(name_str, modified);
+                                Ok(data) => {
+                                    match maps.write().unwrap().add_map(name_str.clone(), &data) {
+                                        Ok(()) => {
+                                            info!("Map dir: loaded/updated '{name_str}'");
+                                            known_files.insert(name_str, modified);
+                                        }
+                                        Err(e) => {
+                                            error!("Map dir: failed to load '{name_str}': {e}")
+                                        }
                                     }
-                                    Err(e) => error!("Map dir: failed to load '{name_str}': {e}"),
-                                },
+                                }
                                 Err(e) => error!("Map dir: failed to read '{name_str}': {e}"),
                             }
                         }
@@ -210,7 +225,8 @@ async fn sync_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>, mut known_f
         }
 
         // Detect deletions
-        let removed: Vec<String> = known_files.keys()
+        let removed: Vec<String> = known_files
+            .keys()
             .filter(|name| !current_files.contains(*name))
             .cloned()
             .collect();

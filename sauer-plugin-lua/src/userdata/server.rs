@@ -1,6 +1,5 @@
 use crate::extra::LuaExtraRegistry;
 use crate::userdata::task_handle::TaskHandle;
-use cube_string::CubeString;
 use mlua::{
     FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value,
 };
@@ -98,7 +97,7 @@ impl UserData for LuaServer {
 
         methods.add_method(
             "send_server_query",
-            |lua, this, (addr_str, table): (String, Table)| {
+            |_lua, this, (addr_str, table): (String, Table)| {
                 let addr: SocketAddr = addr_str
                     .parse()
                     .map_err(|e| mlua::Error::RuntimeError(format!("invalid socket addr: {e}")))?;

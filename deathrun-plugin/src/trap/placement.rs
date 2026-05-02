@@ -191,8 +191,10 @@ pub fn rebuild_all_trap_buttons(
             corner: 0,
         };
         map.world.fill(&sel, true);
-        map.world.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
-        map.world.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
+        map.world
+            .set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
+        map.world
+            .set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
         map.world.set_material(
             &sel,
             ogz_rs::data::Material {

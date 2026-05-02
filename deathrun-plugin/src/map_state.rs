@@ -64,11 +64,11 @@ impl MapState {
         let ogz = OgzMap::parse(data)?;
         let world = World::from_ogz(&ogz);
         let mut state = Self { world, meta: ogz };
-        
+
         while state.world.size < 1024 {
             state.enlarge_empty();
         }
-        
+
         Ok(state)
     }
 

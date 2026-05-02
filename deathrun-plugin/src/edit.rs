@@ -8,7 +8,6 @@ use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
-use sauer_map::raycast::raycast;
 use sauer_proto::{
     Client, channel0,
     channel1::{self, EditMode},
@@ -469,7 +468,8 @@ impl Plugin for DeathrunEdit {
                             &Vec::<crate::trap::ActiveTrap>::new(),
                             crate::trap::ACTIVE_TRAP_STORE_VERSION,
                             crate::trap::ACTIVE_TRAP_DOMAIN,
-                        ).unwrap_or_default();
+                        )
+                        .unwrap_or_default();
                     }
                     _ => {}
                 }

@@ -225,7 +225,8 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     &active_traps,
                     crate::trap::ACTIVE_TRAP_STORE_VERSION,
                     crate::trap::ACTIVE_TRAP_DOMAIN,
-                ).unwrap_or_default();
+                )
+                .unwrap_or_default();
                 for (id, ent) in changed {
                     let ent_type = ent.ent_type;
                     server_clone.broadcast_chan1(&sauer_proto::Client {
@@ -434,7 +435,8 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                         &active_traps,
                         crate::trap::ACTIVE_TRAP_STORE_VERSION,
                         crate::trap::ACTIVE_TRAP_DOMAIN,
-                    ).unwrap_or_default();
+                    )
+                    .unwrap_or_default();
                     for (id, ent) in changed {
                         let ent_type = ent.ent_type;
                         server_clone.broadcast_chan1(&sauer_proto::Client {
