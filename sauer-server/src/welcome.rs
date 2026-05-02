@@ -5,16 +5,16 @@ use sauer_proto::{
 };
 
 impl Server {
-    /// Sends the full join handshake to `cn`: N_WELCOME, N_MAPCHANGE (+N_ITEMLIST), N_CURRENTMASTER,
+    /// Sends the full join handshake to `id`: N_WELCOME, N_MAPCHANGE (+N_ITEMLIST), N_CURRENTMASTER,
     /// N_INITCLIENT to existing players, N_RESUME, N_INITCLIENT for each existing player,
     /// their clipboards, and N_SPAWNSTATE broadcast.
     ///
     /// For `MasterMode::Private`, a plugin must perform auth and then call this manually.
-    pub fn welcome(&self, cn: u32) {
-        self.set_initial_team(cn);
-        self.set_initial_state(cn);
+    pub fn welcome(&self, id: u64) {
+        self.set_initial_team(id);
+        self.set_initial_state(id);
 
-        self.send_chan1(cn, &Welcome {});
+        self.send_chan1(id, &Welcome {});
 
         // Extract map/item state while holding both locks, then release before sending.
         let (map_name, mode, notgotitems, spawned_items) = {
@@ -37,20 +37,20 @@ impl Server {
 
         // Sauerbraten requires N_ITEMLIST in the same ENet packet as N_MAPCHANGE.
         if let Some(items) = spawned_items {
-            self.send_chan1(cn, (mapchange, ItemList { items }));
+            self.send_chan1(id, (mapchange, ItemList { items }));
         } else {
-            self.send_chan1(cn, mapchange);
+            self.send_chan1(id, mapchange);
         }
 
-        self.send_current_master(cn);
+        self.send_current_master(id);
 
         // Notify existing players of the new player.
-        {
-            let p = self.players.get(cn);
+        if let Some(my_cn) = self.get_cn(id) {
+            let p = self.players.get(id);
             self.broadcast_except_chan1(
-                cn,
+                id,
                 &InitClient {
-                    client_num: cn as i32,
+                    client_num: my_cn as i32,
                     name: p.name.clone(),
                     player_model: p.model,
                     team: p.team.clone(),
@@ -62,16 +62,17 @@ impl Server {
         {
             let p = &self.players;
             self.send_chan1(
-                cn,
+                id,
                 &Resume {
                     clients: self
-                        .client_cns()
+                        .client_ids()
                         .into_iter()
-                        .filter(|&other| other != cn)
+                        .filter(|&other| other != id)
                         .filter_map(|other| {
+                            let other_cn = self.get_cn(other)?;
                             let pd = p.get(other);
                             pd.state.clone().map(|player_state| ClientResumeState {
-                                client_num: other as i32,
+                                client_num: other_cn as i32,
                                 state: pd.client_state,
                                 frags: pd.frags,
                                 flags: pd.flags,
@@ -86,8 +87,9 @@ impl Server {
         }
 
         // Introduce all existing players to the new player and send their clipboards.
-        for other_cn in self.client_cns().into_iter().filter(|&other| other != cn) {
-            let pd = self.players.get(other_cn);
+        for other_id in self.client_ids().into_iter().filter(|&other| other != id) {
+            let Some(other_cn) = self.get_cn(other_id) else { continue; };
+            let pd = self.players.get(other_id);
             let name = pd.name.clone();
             let player_model = pd.model;
             let team = pd.team.clone();
@@ -99,7 +101,7 @@ impl Server {
             drop(pd);
 
             self.send_chan1(
-                cn,
+                id,
                 &InitClient {
                     client_num: other_cn as i32,
                     name,
@@ -108,19 +110,21 @@ impl Server {
                 },
             );
             if let Some(cb) = clipboard {
-                self.send_chan1(cn, &cb);
+                self.send_chan1(id, &cb);
             }
         }
 
-        let is_spectator = self.players.get(cn).client_state == ClientState::Spectator;
+        let is_spectator = self.players.get(id).client_state == ClientState::Spectator;
 
         if is_spectator {
-            self.broadcast_chan1(&sauer_proto::channel1::SpectatorServer {
-                client_num: cn as i32,
-                is_spectator: true,
-            });
+            if let Some(my_cn) = self.get_cn(id) {
+                self.broadcast_chan1(&sauer_proto::channel1::SpectatorServer {
+                    client_num: my_cn as i32,
+                    is_spectator: true,
+                });
+            }
         } else {
-            self.broadcast_spawn_state(cn);
+            self.broadcast_spawn_state(id);
         }
     }
 }

@@ -22,9 +22,11 @@ impl Server {
             .map
             .iter()
             .filter(|e| e.privilege != Privilege::None)
-            .map(|e| MasterClient {
-                client_num: *e.key() as i32,
-                privilege: e.privilege,
+            .filter_map(|e| {
+                self.get_cn(*e.key()).map(|cn| MasterClient {
+                    client_num: cn as i32,
+                    privilege: e.privilege,
+                })
             })
             .collect();
         CurrentMaster {
@@ -34,8 +36,8 @@ impl Server {
     }
 
     /// Sends the current master state to a single client (call during welcome).
-    pub fn send_current_master(&self, cn: u32) {
-        self.send_chan1(cn, &self.build_current_master());
+    pub fn send_current_master(&self, id: u64) {
+        self.send_chan1(id, &self.build_current_master());
     }
 
     /// Broadcasts the current master state to all connected clients.
@@ -44,15 +46,15 @@ impl Server {
     }
 
     /// Returns a player's current privilege level.
-    pub fn get_privilege(&self, cn: u32) -> Privilege {
+    pub fn get_privilege(&self, id: u64) -> Privilege {
         self.players
-            .try_get(cn)
+            .try_get(id)
             .map_or(Privilege::None, |p| p.privilege)
     }
 
     /// Sets a player's privilege level and broadcasts the updated master list to everyone.
-    pub fn set_privilege(&self, cn: u32, privilege: Privilege) {
-        if let Some(mut p) = self.players.try_get_mut(cn) {
+    pub fn set_privilege(&self, id: u64, privilege: Privilege) {
+        if let Some(mut p) = self.players.try_get_mut(id) {
             p.privilege = privilege;
         }
         self.broadcast_current_master();

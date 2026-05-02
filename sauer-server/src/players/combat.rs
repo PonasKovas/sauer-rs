@@ -46,13 +46,13 @@ pub fn explosion_damage(gun: Gun, dist: f32, is_self: bool) -> i32 {
 }
 
 impl Server {
-    /// Apply `damage` from `actor_cn` to `target_cn`. Handles armour absorption,
+    /// Apply `damage` from `actor_id` to `target_id`. Handles armour absorption,
     /// broadcasts N_DAMAGE and N_HITPUSH, and kills the target if health drops to 0.
     /// Returns true if the player died from this damage event.
     pub fn apply_damage(
         &self,
-        target_cn: u32,
-        actor_cn: u32,
+        target_id: u64,
+        actor_id: u64,
         gun: Gun,
         damage: i32,
         dir: Vec3<f32>,
@@ -61,10 +61,10 @@ impl Server {
         let damage = damage
             * self
                 .players
-                .try_get(actor_cn)
+                .try_get(actor_id)
                 .map_or(1, |p| if p.quad_millis > 0 { 4 } else { 1 });
 
-        let Some(mut p) = self.players.try_get_mut(target_cn) else {
+        let Some(mut p) = self.players.try_get_mut(target_id) else {
             return false;
         };
         if p.client_state != ClientState::Alive {
@@ -86,32 +86,34 @@ impl Server {
         }
         drop(p);
 
-        self.broadcast_chan1(&Damage {
-            target_cn: target_cn as i32,
-            actor_cn: actor_cn as i32,
-            damage,
-            armour,
-            health,
-        });
-        self.send_chan1(
-            target_cn,
-            &HitPush {
-                target_cn: target_cn as i32,
-                gun,
+        if let (Some(t_cn), Some(a_cn)) = (self.get_cn(target_id), self.get_cn(actor_id)) {
+            self.broadcast_chan1(&Damage {
+                target_cn: t_cn as i32,
+                actor_cn: a_cn as i32,
                 damage,
-                dir,
-            },
-        );
+                armour,
+                health,
+            });
+            self.send_chan1(
+                target_id,
+                &HitPush {
+                    target_cn: t_cn as i32,
+                    gun,
+                    damage,
+                    dir,
+                },
+            );
+        }
 
         if killed {
-            self.do_kill(target_cn, actor_cn);
+            self.do_kill(target_id, actor_id);
         }
         killed
     }
 
     /// Kill a player by suicide (frags -= 1). Returns true if successful.
-    pub fn kill_player(&self, cn: u32) -> bool {
-        let Some(mut p) = self.players.try_get_mut(cn) else {
+    pub fn kill_player(&self, id: u64) -> bool {
+        let Some(mut p) = self.players.try_get_mut(id) else {
             return false;
         };
         if p.client_state != ClientState::Alive {
@@ -119,14 +121,14 @@ impl Server {
         }
         p.client_state = ClientState::Dead;
         drop(p);
-        self.do_kill(cn, cn);
+        self.do_kill(id, id);
         true
     }
 
-    fn do_kill(&self, victim_cn: u32, actor_cn: u32) {
-        let actor_frags = if actor_cn != victim_cn {
+    fn do_kill(&self, victim_id: u64, actor_id: u64) {
+        let actor_frags = if actor_id != victim_id {
             self.players
-                .try_get_mut(actor_cn)
+                .try_get_mut(actor_id)
                 .map(|mut p| {
                     p.frags += 1;
                     p.frags
@@ -135,7 +137,7 @@ impl Server {
         } else {
             // suicide: costs a frag
             self.players
-                .try_get_mut(victim_cn)
+                .try_get_mut(victim_id)
                 .map(|mut p| {
                     p.frags -= 1;
                     p.frags
@@ -143,15 +145,17 @@ impl Server {
                 .unwrap_or(0)
         };
 
-        if let Some(mut p) = self.players.try_get_mut(victim_cn) {
+        if let Some(mut p) = self.players.try_get_mut(victim_id) {
             p.deaths += 1;
         }
 
-        self.broadcast_chan1(&Died {
-            victim_cn: victim_cn as i32,
-            actor_cn: actor_cn as i32,
-            actor_frags,
-            team_frags: 0,
-        });
+        if let (Some(v_cn), Some(a_cn)) = (self.get_cn(victim_id), self.get_cn(actor_id)) {
+            self.broadcast_chan1(&Died {
+                victim_cn: v_cn as i32,
+                actor_cn: a_cn as i32,
+                actor_frags,
+                team_frags: 0,
+            });
+        }
     }
 }

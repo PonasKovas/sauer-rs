@@ -88,28 +88,28 @@ pub fn warn_msg(text: &str) -> CubeString {
 
 // ─── Send helpers ─────────────────────────────────────────────────────────────
 
-pub fn send(server: &Server, cn: u32, text: CubeString) {
-    server.send_chan1(cn, &ServMsg { text });
+pub fn send(server: &Server, id: u64, text: CubeString) {
+    server.send_chan1(id, &ServMsg { text });
 }
 
 pub fn broadcast(server: &Server, text: CubeString) {
     server.broadcast_chan1(&ServMsg { text });
 }
 
-pub fn send_warn(server: &Server, cn: u32, text: &str) {
-    send(server, cn, warn_msg(text));
+pub fn send_warn(server: &Server, id: u64, text: &str) {
+    send(server, id, warn_msg(text));
 }
 
 pub fn broadcast_warn(server: &Server, text: &str) {
     broadcast(server, warn_msg(text));
 }
 
-pub fn send_banner(server: &Server, cn: u32, lines: &[CubeString]) {
-    send(server, cn, sep());
+pub fn send_banner(server: &Server, id: u64, lines: &[CubeString]) {
+    send(server, id, sep());
     for l in lines {
-        send(server, cn, l.clone());
+        send(server, id, l.clone());
     }
-    send(server, cn, sep());
+    send(server, id, sep());
 }
 
 pub fn broadcast_banner(server: &Server, lines: &[CubeString]) {

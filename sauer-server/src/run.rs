@@ -175,29 +175,29 @@ pub(crate) async fn run<P: Plugin>(
         }
     });
 
-    let mut next_cn = 0u32;
+    let mut next_id = 0u64;
 
     while let Some(peer) = host.accept().await {
         let (tx, rx) = peer.split();
 
-        let cn = next_cn;
-        next_cn = (next_cn + 1) % i32::MAX as u32;
+        let id = next_id;
+        next_id += 1;
 
-        server.clients.insert(cn, Peer::new(tx));
+        server.clients.insert(id, Peer::new(tx));
 
         let plugin = Arc::clone(&plugin);
         let server = Arc::clone(&server);
         tokio::spawn(async move {
             let mut ctx = Context {
                 server: Arc::clone(&server),
-                cn,
+                id,
                 cancelled: false,
             };
 
             plugin.connected(&mut ctx).await;
 
             if !ctx.cancelled {
-                if let Err(e) = handle_client(&server, &plugin, rx, cn).await {
+                if let Err(e) = handle_client(&server, &plugin, rx, id).await {
                     error!("handling peer: {e}");
                 }
             }
@@ -205,7 +205,7 @@ pub(crate) async fn run<P: Plugin>(
             ctx.cancelled = false;
             plugin.disconnected(&mut ctx).await;
 
-            server.clients.remove(&cn);
+            server.clients.remove(&id);
         });
     }
 

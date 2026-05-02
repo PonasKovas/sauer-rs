@@ -237,15 +237,15 @@ fn filters() -> &'static Filters {
 
 // ── Public logging fns ────────────────────────────────────────────────────────
 
-pub fn trace_in(cn: u32, name: &'static str, pkt: &dyn fmt::Debug) {
+pub fn trace_in(id: u64, name: &'static str, pkt: &dyn fmt::Debug) {
     if filters().incoming.allows(name) {
-        tracing::trace!(target: "sauer_packet", cn, direction = "in", packet = name, data = ?TruncatedDebug(pkt));
+        tracing::trace!(target: "sauer_packet", id, direction = "in", packet = name, data = ?TruncatedDebug(pkt));
     }
 }
 
-pub fn trace_out<T: PacketDescriptor + fmt::Debug>(cn: u32, pkt: &T) {
+pub fn trace_out<T: PacketDescriptor + fmt::Debug>(id: u64, pkt: &T) {
     log_out(pkt, |names, data| {
-        tracing::trace!(target: "sauer_packet", cn, direction = "out", packets = ?names, data = ?TruncatedDebug(data));
+        tracing::trace!(target: "sauer_packet", id, direction = "out", packets = ?names, data = ?TruncatedDebug(data));
     });
 }
 
@@ -255,9 +255,9 @@ pub fn trace_out_broadcast<T: PacketDescriptor + fmt::Debug>(pkt: &T) {
     });
 }
 
-pub fn trace_out_broadcast_except<T: PacketDescriptor + fmt::Debug>(except: u32, pkt: &T) {
+pub fn trace_out_broadcast_except<T: PacketDescriptor + fmt::Debug>(except: u64, pkt: &T) {
     log_out(pkt, |names, data| {
-        tracing::trace!(target: "sauer_packet", broadcast = true, except_cn = except, direction = "out", packets = ?names, data = ?TruncatedDebug(data));
+        tracing::trace!(target: "sauer_packet", broadcast = true, except_id = except, direction = "out", packets = ?names, data = ?TruncatedDebug(data));
     });
 }
 

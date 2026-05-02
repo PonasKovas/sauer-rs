@@ -15,12 +15,12 @@ pub(crate) async fn handle_client<P: Plugin>(
     server: &Arc<Server>,
     plugin: &Arc<P>,
     peer: PeerReceiver,
-    cn: u32,
+    id: u64,
 ) -> Result<()> {
     let mut rx = SauerReceiver::new(peer);
     let mut ctx = Context {
         server: Arc::clone(server),
-        cn,
+        id,
         cancelled: false,
     };
 
@@ -31,7 +31,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 
         match pkt {
             Packet::Chan0(pkt) => {
-                crate::packet_log::trace_in(cn, pkt.msg_type(), &pkt);
+                crate::packet_log::trace_in(id, pkt.msg_type(), &pkt);
                 match pkt {
                     Chan0Client::Position(p) => plugin.pos(&mut ctx, &p).await,
                     Chan0Client::Teleport(p) => plugin.teleport(&mut ctx, &p).await,
@@ -40,7 +40,7 @@ pub(crate) async fn handle_client<P: Plugin>(
             }
 
             Packet::Chan1(pkt) => {
-                crate::packet_log::trace_in(cn, pkt.msg_type(), &pkt);
+                crate::packet_log::trace_in(id, pkt.msg_type(), &pkt);
                 match pkt {
                     Chan1Client::Connect(p) => plugin.connect(&mut ctx, &p).await,
                     Chan1Client::AuthAnswer(p) => plugin.auth_answer(&mut ctx, &p).await,

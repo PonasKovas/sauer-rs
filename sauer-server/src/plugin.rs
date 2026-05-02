@@ -29,15 +29,15 @@ use std::sync::Arc;
 
 pub struct Context {
     pub(crate) server: Arc<Server>,
-    pub(crate) cn: u32,
+    pub(crate) id: u64,
     pub(crate) cancelled: bool,
 }
 impl Context {
     pub fn server(&self) -> &Arc<Server> {
         &self.server
     }
-    pub fn cn(&self) -> u32 {
-        self.cn
+    pub fn id(&self) -> u64 {
+        self.id
     }
     pub fn cancel(&mut self) {
         self.cancelled = true;
@@ -101,7 +101,7 @@ pub trait Plugin: Send + Sync + 'static {
     }
 
     /// Fired after a map change is committed (vote passed or master forced it).
-    /// `cn` is the client who cast the deciding vote.
+    /// `ctx.id()` is the client who cast the deciding vote.
     fn map_changed(
         &self,
         ctx: &mut Context,
@@ -115,8 +115,8 @@ pub trait Plugin: Send + Sync + 'static {
     fn on_player_died(
         &self,
         ctx: &mut Context,
-        victim_cn: u32,
-        actor_cn: u32,
+        victim_id: u64,
+        actor_id: u64,
     ) -> impl Future<Output = ()> + Send + Sync {
         async move {}
     }
@@ -126,8 +126,8 @@ pub trait Plugin: Send + Sync + 'static {
     fn on_damage(
         &self,
         ctx: &mut Context,
-        target_cn: u32,
-        actor_cn: u32,
+        target_id: u64,
+        actor_id: u64,
         damage: &mut i32,
     ) -> impl Future<Output = ()> + Send + Sync {
         async move {}
@@ -315,20 +315,20 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         self.1.map_changed(ctx, map_name, mode).await;
     }
 
-    async fn on_player_died(&self, ctx: &mut Context, victim_cn: u32, actor_cn: u32) {
-        self.0.on_player_died(ctx, victim_cn, actor_cn).await;
+    async fn on_player_died(&self, ctx: &mut Context, victim_id: u64, actor_id: u64) {
+        self.0.on_player_died(ctx, victim_id, actor_id).await;
         if ctx.cancelled {
             return;
         }
-        self.1.on_player_died(ctx, victim_cn, actor_cn).await;
+        self.1.on_player_died(ctx, victim_id, actor_id).await;
     }
 
-    async fn on_damage(&self, ctx: &mut Context, target_cn: u32, actor_cn: u32, damage: &mut i32) {
-        self.0.on_damage(ctx, target_cn, actor_cn, damage).await;
+    async fn on_damage(&self, ctx: &mut Context, target_id: u64, actor_id: u64, damage: &mut i32) {
+        self.0.on_damage(ctx, target_id, actor_id, damage).await;
         if ctx.cancelled {
             return;
         }
-        self.1.on_damage(ctx, target_cn, actor_cn, damage).await;
+        self.1.on_damage(ctx, target_id, actor_id, damage).await;
     }
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
