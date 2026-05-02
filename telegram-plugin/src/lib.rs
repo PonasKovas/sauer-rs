@@ -8,6 +8,7 @@ pub struct TelegramBridge {
     enabled: bool,
     bot: Bot,
     chat_id: ChatId,
+    bot_cn: u8,
 }
 
 impl TelegramBridge {
@@ -17,6 +18,7 @@ impl TelegramBridge {
             enabled,
             bot: Bot::new(token),
             chat_id: ChatId(chat_id),
+            bot_cn: 255,
         }
     }
 
@@ -35,6 +37,32 @@ impl TelegramBridge {
 }
 
 impl Plugin for TelegramBridge {
+    async fn init(&self, server: &mut Server) {
+        if self.enabled {
+            server.reserve_cn(self.bot_cn);
+        }
+    }
+
+    async fn on_client_welcomed(&self, ctx: &mut Context) {
+        if !self.enabled {
+            return;
+        }
+
+        use sauer_proto::channel1::{InitClient, SpectatorServer};
+        use sauer_proto::data::PlayerModel;
+
+        ctx.server().send_chan1(ctx.id(), &InitClient {
+            client_num: self.bot_cn as i32,
+            name: "TG".lossy_cubestring(),
+            player_model: PlayerModel::MrFixit,
+            team: "spectator".lossy_cubestring(),
+        });
+        ctx.server().send_chan1(ctx.id(), &SpectatorServer {
+            client_num: self.bot_cn as i32,
+            is_spectator: true,
+        });
+    }
+
     async fn start(&self, server: &Arc<Server>) {
         if !self.enabled {
             return;
@@ -43,29 +71,29 @@ impl Plugin for TelegramBridge {
         let bot = self.bot.clone();
         let target_chat_id = self.chat_id;
         let server_clone = Arc::clone(server);
+        let bot_cn = self.bot_cn;
 
         tokio::spawn(async move {
             tracing::info!("Starting Telegram bridge polling...");
 
-            // Set up a teloxide handler that listens to text messages and forwards them to Sauerbraten
             let handler = Update::filter_message().endpoint(
                 move |msg: Message, _bot: Bot, server: Arc<Server>| {
+                    let bot_cn = bot_cn;
                     async move {
-                        // Only listen to the target group/channel
                         if msg.chat.id == target_chat_id {
                             if let Some(text) = msg.text() {
-                                // Find the sender's username, fallback to first name, then "Unknown"
                                 let sender = msg
                                     .from()
                                     .and_then(|u| u.username.clone())
                                     .or_else(|| msg.from().map(|u| u.first_name.clone()))
                                     .unwrap_or_else(|| "Unknown".to_string());
 
-                                // Construct output string and convert to CubeString character encoding format
-                                let out = format!("[TG] {}: {}", sender, text).lossy_cubestring();
-
-                                // Broadcast using ServMsg
-                                server.broadcast_chan1(&ServMsg { text: out });
+                                server.broadcast_chan1(&sauer_proto::Client {
+                                    client_num: bot_cn as i32,
+                                    packet: sauer_proto::channel1::Text {
+                                        text: format!("{}: {}", sender, text).lossy_cubestring(),
+                                    },
+                                });
                             }
                         }
                         Ok::<(), std::convert::Infallible>(())
@@ -73,7 +101,6 @@ impl Plugin for TelegramBridge {
                 },
             );
 
-            // Start the bot's dispatcher
             Dispatcher::builder(bot, handler)
                 .dependencies(teloxide::dptree::deps![server_clone])
                 .build()
@@ -87,7 +114,11 @@ impl Plugin for TelegramBridge {
             return;
         }
 
-        // Retrieve the UTF-8 representations of the CubeStrings
+        // Do not forward messages from the TG bot itself
+        if ctx.server().get_cn(ctx.id()) == Some(self.bot_cn) {
+            return;
+        }
+
         let sender_name = ctx.server().players.get(ctx.id()).name.to_utf8();
         let msg = text.to_utf8();
         let text_to_send = format!("{}: {}", sender_name, msg);
@@ -95,7 +126,6 @@ impl Plugin for TelegramBridge {
         let bot = self.bot.clone();
         let chat_id = self.chat_id;
 
-        // Spawn as a background task to ensure we don't hold up the server's network loop
         tokio::spawn(async move {
             if let Err(e) = bot.send_message(chat_id, text_to_send).await {
                 tracing::error!("Failed to send chat message to Telegram: {}", e);

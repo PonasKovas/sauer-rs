@@ -152,6 +152,15 @@ impl Server {
         cns[cn as usize]
     }
 
+    pub fn reserve_cn(&self, cn: u8) -> bool {
+        let mut cns = self.cns.write().unwrap();
+        if cns[cn as usize].is_some() {
+            return false;
+        }
+        cns[cn as usize] = Some(u64::MAX);
+        true
+    }
+
     // ── Targeted sends ────────────────────────────────────────────────────────
 
     pub fn send_chan0(
