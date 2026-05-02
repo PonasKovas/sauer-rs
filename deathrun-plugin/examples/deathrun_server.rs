@@ -9,7 +9,7 @@ use sauer_proto::data::MasterMode;
 use sauer_server::{Server, ServerBuilder, plugin::Plugin};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -114,66 +114,112 @@ impl Config {
     }
 }
 
-async fn load_maps_from_dir(map_dir: &PathBuf, play: &DeathrunPlay) {
-    let mut entries = match fs::read_dir(map_dir).await {
-        Ok(e) => e,
-        Err(e) => {
-            warn!("Failed to read map directory {map_dir:?}: {e}");
-            return;
-        }
+use std::time::SystemTime;
+
+async fn load_initial_maps(map_dir: &PathBuf, play: &DeathrunPlay) -> HashMap<String, SystemTime> {
+    let mut known_files = HashMap::new();
+    let Ok(mut entries) = fs::read_dir(map_dir).await else {
+        warn!("Failed to read map directory {map_dir:?}");
+        return known_files;
     };
+
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
         if path.extension().map_or(false, |e| e == "ogz") {
-            let name = path.file_stem().unwrap().to_string_lossy().to_string();
-            match fs::read(&path).await {
-                Ok(data) => match play.add_map(name.clone(), &data) {
-                    Ok(()) => info!("Loaded map '{name}'"),
-                    Err(e) => error!("Failed to load map '{name}': {e}"),
-                },
-                Err(e) => error!("Failed to read {path:?}: {e}"),
+            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                let name_str = name.to_string();
+                if let Ok(data) = fs::read(&path).await {
+                    match play.add_map(name_str.clone(), &data) {
+                        Ok(()) => {
+                            info!("Loaded map '{name_str}'");
+                            if let Ok(metadata) = entry.metadata().await {
+                                if let Ok(modified) = metadata.modified() {
+                                    known_files.insert(name_str, modified);
+                                }
+                            }
+                        }
+                        Err(e) => error!("Failed to load map '{name_str}': {e}"),
+                    }
+                }
             }
         }
     }
+    known_files
 }
 
-async fn poll_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>) {
-    let mut known: HashSet<String> = maps.read().unwrap().maps.keys().cloned().collect();
+async fn sync_map_dir(map_dir: PathBuf, maps: Arc<RwLock<PlayMaps>>, mut known_files: HashMap<String, SystemTime>) {
+    use notify::{Watcher, RecursiveMode, Event};
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+
+    let tx_clone = tx.clone();
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
+        if res.is_ok() {
+            let _ = tx_clone.send(());
+        }
+    }).expect("Failed to initialize map watcher");
+
+    watcher.watch(&map_dir, RecursiveMode::NonRecursive).expect("Failed to watch map directory");
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::select! {
+            _ = interval.tick() => {}
+            _ = rx.recv() => {
+                // Debounce rapid events from cloud syncs or compilers
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                // Drain any queued events that arrived during the sleep
+                while let Ok(_) = rx.try_recv() {}
+            }
+        }
 
-        let mut current = HashSet::new();
+        let mut current_files = HashSet::new();
+
         if let Ok(mut entries) = fs::read_dir(&map_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let path = entry.path();
                 if path.extension().map_or(false, |e| e == "ogz") {
                     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        current.insert(name.to_string());
+                        let name_str = name.to_string();
+                        current_files.insert(name_str.clone());
+
+                        let Ok(metadata) = entry.metadata().await else { continue; };
+                        let Ok(modified) = metadata.modified() else { continue; };
+
+                        let needs_update = match known_files.get(&name_str) {
+                            Some(&last_mod) => modified > last_mod,
+                            None => true,
+                        };
+
+                        if needs_update {
+                            match fs::read(&path).await {
+                                Ok(data) => match maps.write().unwrap().add_map(name_str.clone(), &data) {
+                                    Ok(()) => {
+                                        info!("Map dir: loaded/updated '{name_str}'");
+                                        known_files.insert(name_str, modified);
+                                    }
+                                    Err(e) => error!("Map dir: failed to load '{name_str}': {e}"),
+                                },
+                                Err(e) => error!("Map dir: failed to read '{name_str}': {e}"),
+                            }
+                        }
                     }
                 }
             }
         }
 
-        for name in &current {
-            if !known.contains(name) {
-                let path = map_dir.join(format!("{name}.ogz"));
-                match fs::read(&path).await {
-                    Ok(data) => match maps.write().unwrap().add_map(name.clone(), &data) {
-                        Ok(()) => info!("Map dir: loaded '{name}'"),
-                        Err(e) => error!("Map dir: failed to load '{name}': {e}"),
-                    },
-                    Err(e) => error!("Map dir: failed to read '{name}': {e}"),
-                }
-            }
-        }
+        // Detect deletions
+        let removed: Vec<String> = known_files.keys()
+            .filter(|name| !current_files.contains(*name))
+            .cloned()
+            .collect();
 
-        for name in known.difference(&current).cloned().collect::<Vec<_>>() {
+        for name in removed {
             maps.write().unwrap().remove_map(&name);
+            known_files.remove(&name);
             info!("Map dir: removed '{name}'");
         }
-
-        known = current;
     }
 }
 
@@ -226,8 +272,8 @@ async fn main() {
             let play = DeathrunPlay::new(config.deathrun_play.clone());
 
             if let Some(ref map_dir) = config.map_dir {
-                load_maps_from_dir(map_dir, &play).await;
-                tokio::spawn(poll_map_dir(map_dir.clone(), play.maps_handle()));
+                let known = load_initial_maps(map_dir, &play).await;
+                tokio::spawn(sync_map_dir(map_dir.clone(), play.maps_handle(), known));
             } else {
                 warn!("No map_dir in config; starting play mode with no maps");
             }

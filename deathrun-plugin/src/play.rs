@@ -130,6 +130,9 @@ impl PlayMaps {
         self.maps.remove(name);
         if let Some(pos) = self.rotation.iter().position(|x| x == name) {
             self.rotation.remove(pos);
+            if pos < self.rotation_idx {
+                self.rotation_idx = self.rotation_idx.saturating_sub(1);
+            }
         }
         if self.rotation_idx >= self.rotation.len() {
             self.rotation_idx = 0;
