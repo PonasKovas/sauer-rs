@@ -12,8 +12,9 @@ use sauer_proto::{
 use sauer_server::plugin::Context;
 
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
+    let cn = server.get_cn(id).unwrap_or(0) as i32;
     let mut state = get_server_state(server).write().unwrap();
 
     let trap_idx = state.traps.iter().position(|t| {
@@ -26,7 +27,7 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let trap_idx = match trap_idx {
         None => {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "Not looking at a trap.".lossy_cubestring(),
                 },
@@ -58,19 +59,20 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     map.world.set_material(&sel, Default::default());
     drop(state);
 
-    sync_traps_to_map(server, cn);
+    sync_traps_to_map(server, id);
 
     let (adj_sel, _) =
         super::placement::get_selections(trap.button_pos, trap.button_size, trap.button_orient);
     server.broadcast_chan1(&Client {
-        client_num: cn as i32,
+        client_num: cn,
         packet: channel1::DelCube { sel: adj_sel },
     });
 }
 
 pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server().clone();
+    let cn = server.get_cn(id).unwrap_or(0) as i32;
     let mut state = get_server_state(&server).write().unwrap();
 
     let map = match state.map.as_mut() {
@@ -134,7 +136,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         },
     );
 
-    let target_cn = cn as i32;
+    let target_cn = cn;
     let (adj_sel, fill_sel) = super::placement::get_selections(adj, BUTTON_SIZE, hit_orient);
 
     super::placement::apply_internal_vslots(map, &adj_sel);
@@ -176,7 +178,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     drop(state);
 
-    sync_traps_to_map(&server, cn);
+    sync_traps_to_map(&server, id);
 
     // Broadcast the button using a clipboard so clients install the exact vslot
     // indices already in the server map, regardless of when /getmap is done.
@@ -230,7 +232,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
 }
 
 pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
@@ -244,7 +246,7 @@ pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
     let trap_idx = match trap_idx {
         None => {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "Not looking at a trap.".lossy_cubestring(),
                 },
@@ -264,17 +266,17 @@ pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
         ));
     }
     server.send_chan1(
-        cn,
+        id,
         &ServMsg {
             text: msg.lossy_cubestring(),
         },
     );
     drop(state);
-    sync_traps_to_map(server, cn);
+    sync_traps_to_map(server, id);
 }
 
 pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
@@ -288,7 +290,7 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
     let trap_idx = match trap_idx {
         None => {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "Not looking at a trap.".lossy_cubestring(),
                 },
@@ -308,17 +310,17 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
         ));
     }
     server.send_chan1(
-        cn,
+        id,
         &ServMsg {
             text: msg.lossy_cubestring(),
         },
     );
     drop(state);
-    sync_traps_to_map(server, cn);
+    sync_traps_to_map(server, id);
 }
 
 pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
     let state = get_server_state(server).read().unwrap();
 
@@ -332,7 +334,7 @@ pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
     let trap_idx = match trap_idx {
         None => {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "Not looking at a trap.".lossy_cubestring(),
                 },
@@ -344,7 +346,7 @@ pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
 
     let time = state.traps[trap_idx].time;
     server.send_chan1(
-        cn,
+        id,
         &ServMsg {
             text: format!("Trap time is {}ms.", time).lossy_cubestring(),
         },
@@ -352,7 +354,7 @@ pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
 }
 
 pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
     let state = get_server_state(server).read().unwrap();
 
@@ -366,7 +368,7 @@ pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
     let trap_idx = match trap_idx {
         None => {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "Not looking at a trap.".lossy_cubestring(),
                 },
@@ -378,7 +380,7 @@ pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
 
     let timeout = state.traps[trap_idx].timeout;
     server.send_chan1(
-        cn,
+        id,
         &ServMsg {
             text: format!("Trap timeout is {}ms.", timeout).lossy_cubestring(),
         },
@@ -386,7 +388,7 @@ pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
 }
 
 pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
 
     // Phase 1: validate, snapshot the base state, and collect existing trigger data.
@@ -396,7 +398,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
 
         if state.trap_edit.is_some() {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
                 },
@@ -412,7 +414,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         }) {
             None => {
                 server.send_chan1(
-                    cn,
+                    id,
                     &ServMsg {
                         text: "Not looking at a trap.".lossy_cubestring(),
                     },
@@ -492,7 +494,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
 
     let assigned_ids = super::trigger::apply_and_broadcast(
         server,
-        cn,
+        id,
         &region_sel,
         trigger_unpack_len,
         &trigger_clipboard,
@@ -522,13 +524,13 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
 }
 
 pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
-    let cn = ctx.cn();
+    let id = ctx.id();
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
     if state.trap_edit.is_some() {
         server.send_chan1(
-            cn,
+            id,
             &ServMsg {
                 text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
             },
@@ -546,7 +548,7 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     let trap_idx = match trap_idx {
         None => {
             server.send_chan1(
-                cn,
+                id,
                 &ServMsg {
                     text: "Not looking at a trap.".lossy_cubestring(),
                 },
@@ -568,6 +570,8 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
 }
 
 pub fn cmd_endtrap(ctx: &Context) {
+    let id = ctx.id();
+    let cn = ctx.server().get_cn(id).unwrap_or(0) as i32;
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
@@ -575,7 +579,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         Some(e) => e,
         None => {
             server.send_chan1(
-                ctx.cn(),
+                id,
                 &ServMsg {
                     text: "No trap is currently being edited.".lossy_cubestring(),
                 },
@@ -586,7 +590,7 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     if let Some(ent_id) = state.trap_edit_particle_ent.take() {
         server.broadcast_chan1(&Client {
-            client_num: ctx.cn() as i32,
+            client_num: cn,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
                 pos: sauer_proto::data::Vec3 {
@@ -733,7 +737,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     trap.reset_cells = reset_cells;
     trap.reset_entities_mod = reset_entities_mod;
 
-    let target_cn = ctx.cn() as i32;
+    let target_cn = cn;
     let region_sel = SelInfo {
         o: sauer_proto::data::Vec3 {
             x: clip_pos[0],
@@ -816,7 +820,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     }
     drop(state);
 
-    sync_traps_to_map(server, ctx.cn());
+    sync_traps_to_map(server, id);
 
     server.broadcast_chan1(&ServMsg {
         text: "Trap recorded and area reverted successfully.".lossy_cubestring(),

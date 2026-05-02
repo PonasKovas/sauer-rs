@@ -38,8 +38,8 @@ fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
 }
 
 pub struct DeathrunEdit {
-    player_dirs: DashMap<u32, Direction>,
-    last_particle_update: DashMap<u32, tokio::time::Instant>,
+    player_dirs: DashMap<u64, Direction>,
+    last_particle_update: DashMap<u64, tokio::time::Instant>,
 }
 
 impl DeathrunEdit {
@@ -77,7 +77,8 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
-        self.player_dirs.insert(packet.client_num, packet.dir);
+        let id = ctx.id();
+        self.player_dirs.insert(id, packet.dir);
 
         let server = ctx.server();
         let state = get_server_state(server).read().unwrap();
@@ -86,15 +87,14 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        let cn = packet.client_num;
         let now = tokio::time::Instant::now();
-        if let Some(mut last) = self.last_particle_update.get_mut(&cn) {
+        if let Some(mut last) = self.last_particle_update.get_mut(&id) {
             if now.duration_since(*last).as_millis() < 200 {
                 return;
             }
             *last = now;
         } else {
-            self.last_particle_update.insert(cn, now);
+            self.last_particle_update.insert(id, now);
         }
 
         let yaw = (packet.dir.yaw as f32) + TRAP_EDIT_PARTICLE_YAW_OFFSET;
@@ -169,8 +169,10 @@ impl Plugin for DeathrunEdit {
             }
         };
 
+        let cn = server.get_cn(id).unwrap_or(0) as i32;
+
         let ent = Client {
-            client_num: cn as i32,
+            client_num: cn,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
                 pos: particle_pos,
@@ -179,7 +181,7 @@ impl Plugin for DeathrunEdit {
             },
         };
 
-        server.send_chan1(cn, &ent);
+        server.send_chan1(id, &ent);
     }
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
@@ -196,7 +198,7 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server().clone();
 
         if cmd == "#endtrap" {
@@ -213,17 +215,17 @@ impl Plugin for DeathrunEdit {
             {
                 ui::send_warn(
                     &server,
-                    cn,
+                    id,
                     "Cannot add or remove traps while editing one. Use #endtrap first.",
                 );
                 return;
             }
         }
 
-        let pos = match server.players.try_get(cn) {
+        let pos = match server.players.try_get(id) {
             Some(p) => {
                 if p.client_state == ClientState::Spectator {
-                    ui::send_warn(&server, cn, "Cannot use trap commands while spectating.");
+                    ui::send_warn(&server, id, "Cannot use trap commands while spectating.");
                     return;
                 }
                 p.position
@@ -231,7 +233,7 @@ impl Plugin for DeathrunEdit {
             None => return,
         };
 
-        let dir = match self.player_dirs.get(&cn) {
+        let dir = match self.player_dirs.get(&id) {
             Some(d) => *d,
             None => return,
         };
@@ -302,7 +304,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server().clone();
 
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
@@ -325,22 +327,24 @@ impl Plugin for DeathrunEdit {
         };
 
         if let Some(trap_idx) = trap_to_trigger {
-            crate::trap::trigger_trap(&server, trap_idx, cn);
+            crate::trap::trigger_trap(&server, trap_idx, id);
         }
     }
 
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
+        let id = ctx.id();
+        let cn = ctx.server().get_cn(id).unwrap_or(0) as i32;
         if is_waiting_for_map(ctx.server()) {
             ctx.server().send_chan1(
-                ctx.cn(),
+                id,
                 &Client {
-                    client_num: ctx.cn() as i32,
+                    client_num: cn,
                     packet: EditMode { is_editing: false },
                 },
             );
             ui::send_warn(
                 ctx.server(),
-                ctx.cn(),
+                id,
                 "Waiting for map upload. Use /sendmap to proceed.",
             );
             ctx.cancel();
@@ -354,7 +358,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, _mode: GameMode) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         {
             let mut state = get_server_state(server).write().unwrap();
@@ -364,13 +368,13 @@ impl Plugin for DeathrunEdit {
             state.trap_edit = None;
             state.active_traps.clear();
         }
-        for c in server.client_cns() {
-            server.set_spectator(c, true);
+        for client_id in server.client_ids() {
+            server.set_spectator(client_id, true);
         }
 
         let player_name = server
             .players
-            .try_get(cn)
+            .try_get(id)
             .map(|p| p.name.strip_colors().to_utf8())
             .unwrap_or_else(|| "Someone".to_string());
         let map_str = map_name.strip_colors().to_utf8();
@@ -378,32 +382,29 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
+        let id = ctx.id();
+
         if get_server_state(ctx.server())
             .read()
             .unwrap()
             .trap_edit
             .is_some()
         {
-            ui::send_warn(
-                ctx.server(),
-                ctx.cn(),
-                "Cannot upload map while editing a trap.",
-            );
+            ui::send_warn(ctx.server(), id, "Cannot upload map while editing a trap.");
             ctx.cancel();
             return;
         }
         ctx.cancel();
-        let cn = ctx.cn();
         let server = ctx.server();
 
         let is_spectator = server
             .players
-            .try_get(cn)
+            .try_get(id)
             .map_or(false, |p| p.client_state == ClientState::Spectator);
-        let is_master = server.get_privilege(cn) >= Privilege::Master;
+        let is_master = server.get_privilege(id) >= Privilege::Master;
 
         if is_spectator && !is_master {
-            ui::send_warn(server, cn, "You must be unspectated to upload a map.");
+            ui::send_warn(server, id, "You must be unspectated to upload a map.");
             return;
         }
 
@@ -489,51 +490,52 @@ impl Plugin for DeathrunEdit {
                     s.trap_edit = None;
                     s.active_traps.clear();
                 }
-                info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
+                info!("id {id} uploaded a map (world_size={world_size}); state loaded");
 
                 // Push the corrected map to every connected client, including the uploader
                 // so they see the reset trap geometry instead of the triggered state they sent.
-                for client_cn in server.client_cns() {
-                    send_map_to(server, client_cn);
+                for client_id in server.client_ids() {
+                    send_map_to(server, client_id);
                 }
 
-                server.set_spectator(cn, false);
+                server.set_spectator(id, false);
                 ui::send(
                     server,
-                    cn,
+                    id,
                     ui::body("Map received. You can now spawn and edit freely."),
                 );
             }
-            Err(e) => warn!("cn {cn} sent an invalid map: {e}"),
+            Err(e) => warn!("id {id} sent an invalid map: {e}"),
         }
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         if server.client_count() == 1 {
-            server.set_privilege(cn, Privilege::Master);
-            server.set_spectator(cn, false);
+            server.set_privilege(id, Privilege::Master);
+            server.set_spectator(id, false);
         }
-        if send_map_to(server, cn) {
-            info!("sent map state to cn {cn} after welcome");
+        if send_map_to(server, id) {
+            info!("sent map state to id {id} after welcome");
         }
-        ui::send_welcome_edit(server, cn);
+        ui::send_welcome_edit(server, id);
     }
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
-        let cn = ctx.cn();
-        if send_map_to(ctx.server(), cn) {
-            info!("sent map state to cn {cn} on N_GETMAP");
+        let id = ctx.id();
+        if send_map_to(ctx.server(), id) {
+            info!("sent map state to id {id} on N_GETMAP");
             ctx.cancel();
         }
     }
 
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
+        let id = ctx.id();
         if !packet.val && is_waiting_for_map(ctx.server()) {
             ui::send_warn(
                 ctx.server(),
-                ctx.cn(),
+                id,
                 "Waiting for map upload. Use /sendmap to proceed.",
             );
             ctx.cancel();
@@ -606,14 +608,14 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server().clone();
 
         if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
             return;
         }
 
-        if let Some(mut p) = server.players.try_get_mut(cn) {
+        if let Some(mut p) = server.players.try_get_mut(id) {
             p.clipboard = None;
         }
 
@@ -685,7 +687,7 @@ impl Plugin for DeathrunEdit {
             encoder.write_all(&uncompressed).unwrap();
 
             if let Ok(compressed) = encoder.finish() {
-                if let Some(mut p) = server.players.try_get_mut(cn) {
+                if let Some(mut p) = server.players.try_get_mut(id) {
                     p.clipboard = Some(sauer_server::ClipboardData {
                         unpack_len: uncompressed.len() as i32,
                         data: compressed,
@@ -695,10 +697,11 @@ impl Plugin for DeathrunEdit {
         }
 
         ctx.cancel();
+        let cn = server.get_cn(id).unwrap_or(0) as i32;
         server.broadcast_except_chan1(
-            cn,
+            id,
             &sauer_proto::Client {
-                client_num: cn as i32,
+                client_num: cn,
                 packet: sauer_proto::channel1::CopyServer {
                     sel: packet.sel.clone(),
                 },
@@ -707,10 +710,10 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server().clone();
 
-        if let Some(p) = server.players.try_get(cn) {
+        if let Some(p) = server.players.try_get(id) {
             if let Some(cb) = &p.clipboard {
                 let cb_data = cb.data.clone();
                 with_map_state_mut(ctx, |state| state.handle_paste(packet, &cb_data));
@@ -750,19 +753,13 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
-        if get_server_state(ctx.server())
-            .read()
-            .unwrap()
-            .trap_edit
-            .is_some()
-        {
-            ui::send_warn(
-                ctx.server(),
-                ctx.cn(),
-                "Cannot use newmap while editing a trap.",
-            );
+        let id = ctx.id();
+        let server = ctx.server();
+
+        if get_server_state(server).read().unwrap().trap_edit.is_some() {
+            ui::send_warn(server, id, "Cannot use newmap while editing a trap.");
+            crate::map_state::send_map_to(server, id);
             ctx.cancel();
-            crate::map_state::send_map_to(ctx.server(), ctx.cn());
             return;
         }
         let server = ctx.server();
@@ -776,17 +773,11 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
-        if get_server_state(ctx.server())
-            .read()
-            .unwrap()
-            .trap_edit
-            .is_some()
-        {
-            ui::send_warn(
-                ctx.server(),
-                ctx.cn(),
-                "Cannot vote map while editing a trap.",
-            );
+        let id = ctx.id();
+        let server = ctx.server();
+
+        if get_server_state(server).read().unwrap().trap_edit.is_some() {
+            ui::send_warn(server, id, "Cannot vote map while editing a trap.");
             ctx.cancel();
             return;
         }

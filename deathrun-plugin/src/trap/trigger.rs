@@ -8,7 +8,7 @@ use sauer_server::Server;
 use super::placement::{get_selections, pack_vslot_bytes};
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY};
 
-pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: u32) {
+pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
     if trap_idx >= state.traps.len() {
         return;
@@ -100,7 +100,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             pz = button_pos[2] as f32 + offset;
         }
 
-        let target_cns = {
+        let actor_cn = server_clone.get_cn(actor_id).unwrap_or(0) as i32;
+
+        let target_ids = {
             let is_play_mode =
                 *server_clone.game_mode.read().unwrap() != sauer_proto::data::GameMode::CoopEdit;
             if is_play_mode {
@@ -109,20 +111,20 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     .get::<std::sync::Arc<std::sync::RwLock<crate::play::PlayMaps>>>()
                     .unwrap();
                 let lock = maps.read().unwrap();
-                lock.evil_cn.into_iter().collect::<Vec<_>>()
+                lock.evil_id.into_iter().collect::<Vec<_>>()
             } else {
-                server_clone.client_cns()
+                server_clone.client_ids()
             }
         };
 
         // Send initial 100% progress BEFORE applying trigger (beats client PasteServer freeze)
         if let Some(id) = ent_id {
             let color = (0 << 8) | (15 << 4); // Full green
-            for &cn in &target_cns {
+            for &target_id in &target_ids {
                 server_clone.send_chan1(
-                    cn,
+                    target_id,
                     &sauer_proto::Client {
-                        client_num: actor_cn as i32,
+                        client_num: actor_cn,
                         packet: sauer_proto::channel1::EditEnt {
                             ent_id: id as i32,
                             pos: sauer_proto::data::Vec3 {
@@ -202,7 +204,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         // --- 1. APPLY TRIGGER ---
         let assigned_ids = apply_and_broadcast(
             &server_clone,
-            actor_cn,
+            actor_id,
             &region_sel,
             trigger_unpack_len,
             &trigger_clipboard,
@@ -231,7 +233,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                 for (id, ent) in changed {
                     let ent_type = ent.ent_type;
                     batch.push(sauer_proto::Client {
-                        client_num: actor_cn as i32,
+                        client_num: actor_cn,
                         packet: sauer_proto::channel1::EditEnt {
                             ent_id: id as i32,
                             pos: sauer_proto::data::Vec3 {
@@ -254,9 +256,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             }
         }
 
-        if let Some(epos) = server_clone.players.try_get(actor_cn).map(|p| p.position) {
-            for cn in server_clone.client_cns() {
-                if let Some(p) = server_clone.players.try_get(cn) {
+        if let Some(epos) = server_clone.players.try_get(actor_id).map(|p| p.position) {
+            for target_id in server_clone.client_ids() {
+                if let Some(p) = server_clone.players.try_get(target_id) {
                     let d = [
                         p.position.x - epos.x,
                         p.position.y - epos.y,
@@ -265,9 +267,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     let dist_sq = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
                     if dist_sq < 500.0 * 500.0 {
                         server_clone.send_chan1(
-                            cn,
+                            target_id,
                             &sauer_proto::Client {
-                                client_num: actor_cn as i32,
+                                client_num: actor_cn,
                                 packet: sauer_proto::channel1::Sound { sound_id: 64 },
                             },
                         );
@@ -289,7 +291,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
         set_button_color(
             &server_clone,
-            actor_cn,
+            actor_id,
             button_pos,
             button_size,
             button_orient,
@@ -322,7 +324,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             if !reverted && elapsed >= revert_dur {
                 apply_and_broadcast(
                     &server_clone,
-                    actor_cn,
+                    actor_id,
                     &region_sel,
                     restore_unpack_len,
                     &restore_compressed,
@@ -334,7 +336,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     // Force button color back to ACTIVE for the duration of the timeout cooldown.
                     set_button_color(
                         &server_clone,
-                        actor_cn,
+                        actor_id,
                         button_pos,
                         button_size,
                         button_orient,
@@ -355,11 +357,11 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     let r = ((100 - progress) * 15 / 100).clamp(0, 15);
                     let color = (r << 8) | (g << 4);
 
-                    for &cn in &target_cns {
+                    for &target_id in &target_ids {
                         server_clone.send_chan1(
-                            cn,
+                            target_id,
                             &sauer_proto::Client {
-                                client_num: actor_cn as i32,
+                                client_num: actor_cn,
                                 packet: sauer_proto::channel1::EditEnt {
                                     ent_id: id as i32,
                                     pos: sauer_proto::data::Vec3 {
@@ -381,7 +383,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         if !reverted {
             apply_and_broadcast(
                 &server_clone,
-                actor_cn,
+                actor_id,
                 &region_sel,
                 restore_unpack_len,
                 &restore_compressed,
@@ -401,11 +403,11 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             }
             drop(state);
 
-            for &cn in &target_cns {
+            for &target_id in &target_ids {
                 server_clone.send_chan1(
-                    cn,
+                    target_id,
                     &sauer_proto::Client {
-                        client_num: actor_cn as i32,
+                        client_num: actor_cn,
                         packet: sauer_proto::channel1::EditEnt {
                             ent_id: id as i32,
                             pos: sauer_proto::data::Vec3 {
@@ -423,7 +425,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
         set_button_color(
             &server_clone,
-            actor_cn,
+            actor_id,
             button_pos,
             button_size,
             button_orient,
@@ -449,7 +451,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     for (id, ent) in changed {
                         let ent_type = ent.ent_type;
                         batch.push(sauer_proto::Client {
-                            client_num: actor_cn as i32,
+                            client_num: actor_cn,
                             packet: sauer_proto::channel1::EditEnt {
                                 ent_id: id as i32,
                                 pos: sauer_proto::data::Vec3 {
@@ -477,12 +479,13 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
 
 pub fn set_button_color(
     server: &Server,
-    actor_cn: u32,
+    actor_id: u64,
     pos: [i32; 3],
     size: i32,
     orient: u8,
     color: [f32; 3],
 ) {
+    let actor_cn = server.get_cn(actor_id).unwrap_or(0) as i32;
     let (adj_sel, _) = get_selections(pos, size, orient);
     let color_bytes: Vec<u8> = color.iter().flat_map(|f| f.to_le_bytes()).collect();
     let data = pack_vslot_bytes(&[(7, &color_bytes)]);
@@ -500,14 +503,14 @@ pub fn set_button_color(
     }
 
     server.broadcast_chan1(&Client {
-        client_num: actor_cn as i32,
+        client_num: actor_cn,
         packet,
     });
 }
 
 pub fn apply_and_broadcast(
     server: &Server,
-    actor_cn: u32,
+    actor_id: u64,
     sel: &SelInfo,
     unpack_len: i32,
     data: &[u8],
@@ -560,19 +563,21 @@ pub fn apply_and_broadcast(
     map.update_server_items(server);
     drop(state);
 
+    let actor_cn = server.get_cn(actor_id).unwrap_or(0) as i32;
+
     if !data.is_empty() {
         server.broadcast_chan1(&Client {
-            client_num: actor_cn as i32,
+            client_num: actor_cn,
             packet: channel1::DelCube { sel: sel.clone() },
         });
-        crate::geo_sync::broadcast_geometry(server, actor_cn as i32, sel, unpack_len, data);
+        crate::geo_sync::broadcast_geometry(server, actor_cn, sel, unpack_len, data);
     }
 
     let mut batch = Vec::new();
     for (ent_id, ent) in broadcast_ents {
         let ent_type = ent.ent_type;
         batch.push(Client {
-            client_num: actor_cn as i32,
+            client_num: actor_cn,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
                 pos: sauer_proto::data::Vec3 {

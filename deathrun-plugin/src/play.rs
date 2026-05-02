@@ -59,18 +59,18 @@ pub struct PlayMaps {
     pub rotation: Vec<String>,
     pub rotation_idx: usize,
     pub current_map: Option<String>,
-    pub evil_cn: Option<u32>,
+    pub evil_id: Option<u64>,
     pub round_state: RoundState,
     pub round_epoch: u64,
-    pub spawned_this_round: HashSet<u32>,
+    pub spawned_this_round: HashSet<u64>,
     pub round_start_time: Option<Instant>,
-    pub finished_players: Vec<(u32, Duration)>,
+    pub finished_players: Vec<(u64, Duration)>,
     /// Last recorded position per connected player.
-    afk_last_pos: HashMap<u32, [f32; 3]>,
+    afk_last_pos: HashMap<u64, [f32; 3]>,
     /// Time of the last significant movement per player.
-    afk_last_move: HashMap<u32, Instant>,
+    afk_last_move: HashMap<u64, Instant>,
     /// Players who have already received the AFK warning sound.
-    afk_warned: HashSet<u32>,
+    afk_warned: HashSet<u64>,
 }
 
 impl Default for PlayMaps {
@@ -80,7 +80,7 @@ impl Default for PlayMaps {
             rotation: Vec::new(),
             rotation_idx: 0,
             current_map: None,
-            evil_cn: None,
+            evil_id: None,
             round_state: RoundState::NotStarted,
             round_epoch: 0,
             spawned_this_round: HashSet::new(),
@@ -190,22 +190,22 @@ impl PlayMaps {
         (None, ds)
     }
 
-    pub fn update_afk_pos(&mut self, cn: u32, pos: [f32; 3]) {
-        let moved = self.afk_last_pos.get(&cn).map_or(true, |last| {
+    pub fn update_afk_pos(&mut self, id: u64, pos: [f32; 3]) {
+        let moved = self.afk_last_pos.get(&id).map_or(true, |last| {
             let d = [pos[0] - last[0], pos[1] - last[1], pos[2] - last[2]];
             d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 0.25 // 0.5 unit threshold
         });
-        self.afk_last_pos.insert(cn, pos);
+        self.afk_last_pos.insert(id, pos);
         if moved {
-            self.afk_last_move.insert(cn, Instant::now());
-            self.afk_warned.remove(&cn);
+            self.afk_last_move.insert(id, Instant::now());
+            self.afk_warned.remove(&id);
         }
     }
 
-    pub fn remove_player_afk(&mut self, cn: u32) {
-        self.afk_last_pos.remove(&cn);
-        self.afk_last_move.remove(&cn);
-        self.afk_warned.remove(&cn);
+    pub fn remove_player_afk(&mut self, id: u64) {
+        self.afk_last_pos.remove(&id);
+        self.afk_last_move.remove(&id);
+        self.afk_warned.remove(&id);
     }
 }
 
@@ -235,7 +235,7 @@ impl DeathrunPlay {
     }
 }
 
-fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_cn: Option<u32>) {
+fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
     let (world_size, root, entities, vslots, variables, store_ids, my_epoch) = {
         let mut lock = maps.write().unwrap();
         if lock.rotation.is_empty() {
@@ -284,8 +284,8 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
     };
 
     tokio::spawn(async move {
-        let cns = server.client_cns();
-        if cns.is_empty() {
+        let ids = server.client_ids();
+        if ids.is_empty() {
             let mut lock = maps.write().unwrap();
             if lock.round_epoch == my_epoch {
                 lock.round_state = RoundState::NotStarted;
@@ -294,8 +294,8 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             return;
         }
 
-        let evil_cn = if cns.len() > 1 {
-            Some(*cns.choose(&mut rand::thread_rng()).unwrap())
+        let evil_id = if ids.len() > 1 {
+            Some(*ids.choose(&mut rand::thread_rng()).unwrap())
         } else {
             None
         };
@@ -305,15 +305,15 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             if lock.round_epoch != my_epoch {
                 return;
             }
-            lock.evil_cn = evil_cn;
+            lock.evil_id = evil_id;
         }
 
         server.set_master_mode(MasterMode::Locked);
 
-        for &cn in &cns {
-            let team = if Some(cn) == evil_cn { "evil" } else { "good" };
-            server.set_team(cn, team.lossy_cubestring(), SetTeamReason::Forced);
-            server.set_spectator(cn, true);
+        for &id in &ids {
+            let team = if Some(id) == evil_id { "evil" } else { "good" };
+            server.set_team(id, team.lossy_cubestring(), SetTeamReason::Forced);
+            server.set_spectator(id, true);
         }
 
         let has_team_1 = entities
@@ -323,10 +323,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
 
-        let author_cn = cns.first().copied().unwrap_or(0) as i32;
+        let author_cn = ids.first().and_then(|&id| server.get_cn(id)).unwrap_or(0) as i32;
         crate::recreate::visual_rebuild_map(
             &server,
-            &cns,
+            &ids,
             author_cn,
             world_size,
             &root,
@@ -336,8 +336,8 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             4,
             20,
             true,
-            move |cn, i, ent| {
-                let is_evil = Some(cn) == evil_cn;
+            move |id, i, ent| {
+                let is_evil = Some(id) == evil_id;
                 if store_ids.contains(&i) {
                     return None;
                 }
@@ -379,7 +379,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         )
         .await;
 
-        let current_cns;
+        let current_ids;
         let current_evil;
         {
             let mut lock = maps.write().unwrap();
@@ -388,39 +388,41 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             }
             lock.round_state = RoundState::Playing;
             lock.round_start_time = Some(Instant::now());
-            current_cns = server.client_cns();
-            current_evil = lock.evil_cn;
+            current_ids = server.client_ids();
+            current_evil = lock.evil_id;
         }
 
-        for &cn in &current_cns {
-            server.set_spectator(cn, false); // Moves them into Dead state safely
-            server.send_chan1(
-                cn,
-                &channel1::ForceDeath {
-                    client_num: cn as i32,
-                },
-            ); // Resets screen
+        for &id in &current_ids {
+            server.set_spectator(id, false); // Moves them into Dead state safely
+            if let Some(cn) = server.get_cn(id) {
+                server.send_chan1(
+                    id,
+                    &channel1::ForceDeath {
+                        client_num: cn as i32,
+                    },
+                ); // Resets screen
+            }
 
-            server.force_spawn(cn, |state| {
+            server.force_spawn(id, |state| {
                 state.ammo.pistol = 200;
-                if Some(cn) == current_evil {
+                if Some(id) == current_evil {
                     state.ammo.grenade_launcher = 0;
                 }
             });
-            maps.write().unwrap().spawned_this_round.insert(cn);
+            maps.write().unwrap().spawned_this_round.insert(id);
         }
 
         let evil_name = current_evil
-            .and_then(|cn| server.players.try_get(cn))
+            .and_then(|id| server.players.try_get(id))
             .map(|p| p.name.strip_colors().to_utf8());
 
         // Send the generic connection welcome rules to the new player first
-        if let Some(w_cn) = welcome_cn {
+        if let Some(w_id) = welcome_id {
             let (is_solo, map_name) = {
                 let lock = maps.read().unwrap();
-                (lock.evil_cn.is_none(), lock.current_map.clone())
+                (lock.evil_id.is_none(), lock.current_map.clone())
             };
-            ui::send_welcome_play(&server, w_cn, map_name.as_deref(), is_solo);
+            ui::send_welcome_play(&server, w_id, map_name.as_deref(), is_solo);
         }
 
         // Then broadcast the round state/gamemode to everyone
@@ -431,28 +433,28 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 fn check_win_conditions(
     server: &Arc<Server>,
     maps: &Arc<RwLock<PlayMaps>>,
-    disconnecting_cn: Option<u32>,
+    disconnecting_id: Option<u64>,
 ) {
     let mut lock = maps.write().unwrap();
     if lock.round_state != RoundState::Playing {
         return;
     }
 
-    let mut cns = server.client_cns();
-    if let Some(d_cn) = disconnecting_cn {
-        cns.retain(|&cn| cn != d_cn);
+    let mut ids = server.client_ids();
+    if let Some(d_id) = disconnecting_id {
+        ids.retain(|&id| id != d_id);
     }
 
-    if cns.is_empty() {
+    if ids.is_empty() {
         lock.round_state = RoundState::NotStarted;
         server.set_master_mode(MasterMode::Veto);
         return;
     }
 
-    let evil_cn = lock.evil_cn;
+    let evil_id = lock.evil_id;
 
-    if let Some(e_cn) = evil_cn {
-        if !cns.contains(&e_cn) {
+    if let Some(e_id) = evil_id {
+        if !ids.contains(&e_id) {
             declare_win(
                 server,
                 maps,
@@ -463,15 +465,15 @@ fn check_win_conditions(
             return;
         }
 
-        let evil_state = server.players.try_get(e_cn).map(|p| p.client_state);
+        let evil_state = server.players.try_get(e_id).map(|p| p.client_state);
         if evil_state == Some(ClientState::Dead) || evil_state == Some(ClientState::Spectator) {
             let mut top = Vec::new();
             let mut sorted = lock.finished_players.clone();
             sorted.sort_by(|a, b| a.1.cmp(&b.1));
-            for (f_cn, dur) in sorted.into_iter().take(3) {
+            for (f_id, dur) in sorted.into_iter().take(3) {
                 let name = server
                     .players
-                    .try_get(f_cn)
+                    .try_get(f_id)
                     .map(|p| p.name.strip_colors().to_utf8())
                     .unwrap_or_else(|| "Unknown".to_string());
                 top.push((name, dur.as_secs_f32()));
@@ -485,14 +487,14 @@ fn check_win_conditions(
     let mut good_alive_count = 0;
     let mut good_unfinished_alive_count = 0;
 
-    for &cn in &cns {
-        if Some(cn) == evil_cn {
+    for &id in &ids {
+        if Some(id) == evil_id {
             continue;
         }
-        if lock.spawned_this_round.contains(&cn) {
+        if lock.spawned_this_round.contains(&id) {
             good_spawned_count += 1;
-            let is_finished = lock.finished_players.iter().any(|(f_cn, _)| *f_cn == cn);
-            if let Some(p) = server.players.try_get(cn) {
+            let is_finished = lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
+            if let Some(p) = server.players.try_get(id) {
                 if p.client_state == ClientState::Alive {
                     good_alive_count += 1;
                     if !is_finished {
@@ -505,15 +507,15 @@ fn check_win_conditions(
 
     if !lock.spawned_this_round.is_empty() {
         let mut good_still_playing = false;
-        for &cn in &lock.spawned_this_round {
-            if Some(cn) == evil_cn {
+        for &id in &lock.spawned_this_round {
+            if Some(id) == evil_id {
                 continue;
             }
-            let is_finished = lock.finished_players.iter().any(|(f_cn, _)| *f_cn == cn);
+            let is_finished = lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
             if !is_finished {
                 // If they are still connected and alive, the round is still playing
-                if cns.contains(&cn) {
-                    if let Some(p) = server.players.try_get(cn) {
+                if ids.contains(&id) {
+                    if let Some(p) = server.players.try_get(id) {
                         if p.client_state == ClientState::Alive {
                             good_still_playing = true;
                             break;
@@ -529,10 +531,10 @@ fn check_win_conditions(
                 let mut top = Vec::new();
                 let mut sorted = lock.finished_players.clone();
                 sorted.sort_by(|a, b| a.1.cmp(&b.1));
-                for (f_cn, dur) in sorted.into_iter().take(3) {
+                for (f_id, dur) in sorted.into_iter().take(3) {
                     let name = server
                         .players
-                        .try_get(f_cn)
+                        .try_get(f_id)
                         .map(|p| p.name.strip_colors().to_utf8())
                         .unwrap_or_else(|| "Unknown".to_string());
                     top.push((name, dur.as_secs_f32()));
@@ -568,14 +570,16 @@ fn declare_win(
     ui::broadcast_round_over(server, winner_text, top_times);
     drop(lock);
 
-    for cn in server.client_cns() {
-        server.send_chan1(
-            cn,
-            &Client {
-                client_num: cn as i32,
-                packet: channel1::Sound { sound_id: 63 },
-            },
-        );
+    for id in server.client_ids() {
+        if let Some(cn) = server.get_cn(id) {
+            server.send_chan1(
+                id,
+                &Client {
+                    client_num: cn as i32,
+                    packet: channel1::Sound { sound_id: 63 },
+                },
+            );
+        }
     }
 
     let s = Arc::clone(server);
@@ -588,11 +592,11 @@ fn declare_win(
 
 fn send_map_to_client(
     server: Arc<Server>,
-    target_cn: u32,
+    target_id: u64,
     maps: &Arc<RwLock<PlayMaps>>,
     welcome: bool,
 ) -> bool {
-    let (world_size, root, entities, vslots, variables, store_ids, evil_cn) = {
+    let (world_size, root, entities, vslots, variables, store_ids, evil_id) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -621,16 +625,16 @@ fn send_map_to_client(
             loaded.state.meta.vslots.clone(),
             variables,
             store_ids,
-            lock.evil_cn,
+            lock.evil_id,
         )
     };
 
     let maps_arc = Arc::clone(maps);
     tokio::spawn(async move {
-        let author_cn = target_cn as i32;
+        let author_cn = server.get_cn(target_id).unwrap_or(0) as i32;
         crate::recreate::visual_rebuild_map(
             &server,
-            &[target_cn],
+            &[target_id],
             author_cn,
             world_size,
             &root,
@@ -640,8 +644,8 @@ fn send_map_to_client(
             4,
             20,
             true,
-            |cn, i, ent| {
-                let is_evil = Some(cn) == evil_cn;
+            |id, i, ent| {
+                let is_evil = Some(id) == evil_id;
                 if store_ids.contains(&i) {
                     return None;
                 }
@@ -681,9 +685,9 @@ fn send_map_to_client(
         if welcome {
             let (is_solo, map_name) = {
                 let lock = maps_arc.read().unwrap();
-                (lock.evil_cn.is_none(), lock.current_map.clone())
+                (lock.evil_id.is_none(), lock.current_map.clone())
             };
-            ui::send_welcome_play(&server, target_cn, map_name.as_deref(), is_solo);
+            ui::send_welcome_play(&server, target_id, map_name.as_deref(), is_solo);
         }
     });
 
@@ -701,52 +705,54 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
         if lock.round_state != RoundState::Playing {
             return;
         }
-        let cns = server.client_cns();
-        if cns.len() <= 1 {
+        let ids = server.client_ids();
+        if ids.len() <= 1 {
             return;
         }
-        for cn in cns {
+        for id in ids {
             if !server
                 .players
-                .try_get(cn)
+                .try_get(id)
                 .map_or(false, |p| p.client_state == ClientState::Alive)
             {
                 continue;
             }
-            if let Some(&t) = lock.afk_last_move.get(&cn) {
+            if let Some(&t) = lock.afk_last_move.get(&id) {
                 let elapsed = now.duration_since(t);
                 if elapsed >= timeout {
-                    to_spectate.push(cn);
-                    lock.afk_warned.remove(&cn);
-                } else if elapsed >= warn_timeout && !lock.afk_warned.contains(&cn) {
-                    to_warn.push(cn);
-                    lock.afk_warned.insert(cn);
+                    to_spectate.push(id);
+                    lock.afk_warned.remove(&id);
+                } else if elapsed >= warn_timeout && !lock.afk_warned.contains(&id) {
+                    to_warn.push(id);
+                    lock.afk_warned.insert(id);
                 }
             }
         }
     }
 
-    for cn in to_warn {
-        server.send_chan1(
-            cn,
-            &Client {
-                client_num: cn as i32,
-                packet: channel1::Sound { sound_id: 61 },
-            },
-        );
+    for id in to_warn {
+        if let Some(cn) = server.get_cn(id) {
+            server.send_chan1(
+                id,
+                &Client {
+                    client_num: cn as i32,
+                    packet: channel1::Sound { sound_id: 61 },
+                },
+            );
+        }
     }
 
-    for cn in &to_spectate {
+    for id in &to_spectate {
         let name = server
             .players
-            .try_get(*cn)
+            .try_get(*id)
             .map(|p| p.name.strip_colors().to_utf8())
             .unwrap_or_default();
         ui::broadcast(
             server,
             ui::warn_msg(&format!("{name} was spectated for being AFK.")),
         );
-        server.set_spectator(*cn, true);
+        server.set_spectator(*id, true);
     }
 
     if !to_spectate.is_empty() {
@@ -778,14 +784,14 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
-            let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
+            let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_id.is_none();
             let is_waiting =
                 lock.round_state == RoundState::NotStarted && server.client_count() > 1;
             (is_first, is_solo_round, is_waiting)
@@ -793,38 +799,38 @@ impl Plugin for DeathrunPlay {
 
         if is_first || is_solo_round || is_waiting {
             // Restart or start if needed to ensure all players are included and roles assigned correctly.
-            start_round_sequence(Arc::clone(server), Arc::clone(&maps), Some(cn));
+            start_round_sequence(Arc::clone(server), Arc::clone(&maps), Some(id));
         } else {
             let is_playing = maps.read().unwrap().round_state != RoundState::NotStarted;
             if is_playing {
-                send_map_to_client(Arc::clone(server), cn, &maps, true);
-                server.set_spectator(cn, true);
-                server.set_team(cn, "good".lossy_cubestring(), SetTeamReason::Forced);
+                send_map_to_client(Arc::clone(server), id, &maps, true);
+                server.set_spectator(id, true);
+                server.set_team(id, "good".lossy_cubestring(), SetTeamReason::Forced);
             } else {
                 let (is_solo, map_name) = {
                     let lock = maps.read().unwrap();
-                    (lock.evil_cn.is_none(), lock.current_map.clone())
+                    (lock.evil_id.is_none(), lock.current_map.clone())
                 };
-                ui::send_welcome_play(server, cn, map_name.as_deref(), is_solo);
+                ui::send_welcome_play(server, id, map_name.as_deref(), is_solo);
             }
         }
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
         maps.write()
             .unwrap()
-            .update_afk_pos(cn, [packet.pos.x, packet.pos.y, packet.pos.z]);
+            .update_afk_pos(id, [packet.pos.x, packet.pos.y, packet.pos.z]);
 
         let (mut is_playing, mut is_good, mut not_finished, mut round_start) =
             (false, false, false, None);
         {
             let lock = maps.read().unwrap();
             is_playing = lock.round_state == RoundState::Playing;
-            is_good = lock.evil_cn != Some(cn);
-            not_finished = !lock.finished_players.iter().any(|(f_cn, _)| *f_cn == cn);
+            is_good = lock.evil_id != Some(id);
+            not_finished = !lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
             round_start = lock.round_start_time;
         }
 
@@ -862,11 +868,11 @@ impl Plugin for DeathrunPlay {
                 let mut first_finish = false;
                 {
                     let mut lock = maps.write().unwrap();
-                    if !lock.finished_players.iter().any(|(f_cn, _)| *f_cn == cn) {
+                    if !lock.finished_players.iter().any(|(f_id, _)| *f_id == id) {
                         if lock.finished_players.is_empty() {
                             first_finish = true;
                         }
-                        lock.finished_players.push((cn, time_taken));
+                        lock.finished_players.push((id, time_taken));
                     } else {
                         reached_flag = false;
                     }
@@ -875,7 +881,7 @@ impl Plugin for DeathrunPlay {
                 if reached_flag {
                     let name = server
                         .players
-                        .try_get(cn)
+                        .try_get(id)
                         .map(|p| p.name.strip_colors().to_utf8())
                         .unwrap_or_else(|| "Someone".to_string());
                     let secs = time_taken.as_secs_f32();
@@ -887,14 +893,16 @@ impl Plugin for DeathrunPlay {
                         )),
                     );
 
-                    for client_cn in server.client_cns() {
-                        server.send_chan1(
-                            client_cn,
-                            &sauer_proto::Client {
-                                client_num: client_cn as i32,
-                                packet: sauer_proto::channel1::Sound { sound_id: 60 },
-                            },
-                        );
+                    for client_id in server.client_ids() {
+                        if let Some(client_cn) = server.get_cn(client_id) {
+                            server.send_chan1(
+                                client_id,
+                                &sauer_proto::Client {
+                                    client_num: client_cn as i32,
+                                    packet: sauer_proto::channel1::Sound { sound_id: 60 },
+                                },
+                            );
+                        }
                     }
 
                     if first_finish {
@@ -942,11 +950,12 @@ impl Plugin for DeathrunPlay {
                             drop(state);
 
                             if let (Some(id1), Some(id2)) = ent_ids {
-                                for client_cn in server.client_cns() {
+                                let actor_cn = server.get_cn(id).unwrap_or(0) as i32;
+                                for client_id in server.client_ids() {
                                     server.send_chan1(
-                                        client_cn,
+                                        client_id,
                                         &sauer_proto::Client {
-                                            client_num: cn as i32,
+                                            client_num: actor_cn,
                                             packet: sauer_proto::channel1::EditEnt {
                                                 ent_id: id1 as i32,
                                                 pos: sauer_proto::data::Vec3 {
@@ -960,9 +969,9 @@ impl Plugin for DeathrunPlay {
                                         },
                                     );
                                     server.send_chan1(
-                                        client_cn,
+                                        client_id,
                                         &sauer_proto::Client {
-                                            client_num: cn as i32,
+                                            client_num: actor_cn,
                                             packet: sauer_proto::channel1::EditEnt {
                                                 ent_id: id2 as i32,
                                                 pos: sauer_proto::data::Vec3 {
@@ -987,30 +996,30 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
-        maps.write().unwrap().remove_player_afk(cn);
-        check_win_conditions(server, &maps, Some(cn));
+        maps.write().unwrap().remove_player_afk(id);
+        check_win_conditions(server, &maps, Some(id));
     }
 
-    async fn on_player_died(&self, ctx: &mut Context, victim_cn: u32, _actor_cn: u32) {
+    async fn on_player_died(&self, ctx: &mut Context, victim_id: u64, _actor_id: u64) {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
         // Spectate good players when they die
-        let is_evil = maps.read().unwrap().evil_cn == Some(victim_cn);
+        let is_evil = maps.read().unwrap().evil_id == Some(victim_id);
         if !is_evil {
-            server.set_spectator(victim_cn, true);
+            server.set_spectator(victim_id, true);
         }
 
         check_win_conditions(server, &maps, None);
     }
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let maps = self.maps.read().unwrap();
-        let is_evil = maps.evil_cn == Some(cn);
+        let is_evil = maps.evil_id == Some(id);
 
         state.ammo.pistol = 200;
         if is_evil {
@@ -1018,10 +1027,10 @@ impl Plugin for DeathrunPlay {
         }
     }
 
-    async fn on_damage(&self, ctx: &mut Context, target_cn: u32, actor_cn: u32, _damage: &mut i32) {
+    async fn on_damage(&self, ctx: &mut Context, target_id: u64, actor_id: u64, _damage: &mut i32) {
         let server = ctx.server();
-        let target_team = server.players.try_get(target_cn).map(|p| p.team.clone());
-        let actor_team = server.players.try_get(actor_cn).map(|p| p.team.clone());
+        let target_team = server.players.try_get(target_id).map(|p| p.team.clone());
+        let actor_team = server.players.try_get(actor_id).map(|p| p.team.clone());
 
         if target_team.is_some() && target_team == actor_team {
             ctx.cancel();
@@ -1029,7 +1038,7 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
 
@@ -1038,11 +1047,11 @@ impl Plugin for DeathrunPlay {
             let mut lock = maps.write().unwrap();
             match lock.round_state {
                 RoundState::Playing => {
-                    let solo = lock.evil_cn.is_none();
-                    if !solo && lock.spawned_this_round.contains(&cn) {
+                    let solo = lock.evil_id.is_none();
+                    if !solo && lock.spawned_this_round.contains(&id) {
                         cancel = true; // One life only in multiplayer!
                     } else {
-                        lock.spawned_this_round.insert(cn);
+                        lock.spawned_this_round.insert(id);
                     }
                 }
                 RoundState::MapLoading | RoundState::Ended => {
@@ -1057,12 +1066,12 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
 
         let is_evil = {
             let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
-            maps.read().unwrap().evil_cn == Some(cn)
+            maps.read().unwrap().evil_id == Some(id)
         };
         if !is_evil {
             return;
@@ -1086,7 +1095,7 @@ impl Plugin for DeathrunPlay {
         };
 
         if let Some(idx) = trap_idx {
-            crate::trap::trigger_trap(server, idx, cn);
+            crate::trap::trigger_trap(server, idx, id);
         }
     }
 
@@ -1112,11 +1121,11 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
-        let cn = ctx.cn();
+        let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
-        if send_map_to_client(Arc::clone(server), cn, &maps, false) {
-            info!("Sending map rebuild to cn {cn} on N_GETMAP");
+        if send_map_to_client(Arc::clone(server), id, &maps, false) {
+            info!("Sending map rebuild to id {id} on N_GETMAP");
             ctx.cancel();
         }
     }

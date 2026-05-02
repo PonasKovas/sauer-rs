@@ -26,15 +26,15 @@ pub fn broadcast_geometry(
 /// Send a ClipboardServer + PasteServer packet pair to multiple clients.
 pub fn send_geometry_to_clients(
     server: &Server,
-    target_cns: &[u32],
+    target_ids: &[u64],
     owner_cn: i32,
     sel: &sauer_proto::data::SelInfo,
     unpack_len: i32,
     data: &[u8],
 ) {
-    for &target_cn in target_cns {
+    for &target_id in target_ids {
         server.send_chan1(
-            target_cn,
+            target_id,
             &channel1::ClipboardServer {
                 client_num: owner_cn,
                 unpack_len,
@@ -42,7 +42,7 @@ pub fn send_geometry_to_clients(
             },
         );
         server.send_chan1(
-            target_cn,
+            target_id,
             &Client {
                 client_num: owner_cn,
                 packet: channel1::PasteServer { sel: sel.clone() },
@@ -57,7 +57,7 @@ pub fn send_geometry_to_clients(
 /// `chunks` must already be collected and (optionally) shuffled by the caller.
 pub async fn send_chunks_to_clients(
     server: &Server,
-    target_cns: &[u32],
+    target_ids: &[u64],
     owner_cn: i32,
     chunks: Vec<([i32; 3], i32, sauer_map::Node)>,
     vslots: &[Option<ogz_rs::data::VSlot>],
@@ -114,7 +114,7 @@ pub async fn send_chunks_to_clients(
             cys: 1,
             corner: 0,
         };
-        send_geometry_to_clients(server, target_cns, owner_cn, &sel, unpack_len, &data);
+        send_geometry_to_clients(server, target_ids, owner_cn, &sel, unpack_len, &data);
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }

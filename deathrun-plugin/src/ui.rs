@@ -113,10 +113,10 @@ pub fn broadcast_map_changed(server: &Server, player_name: &str, map_name: &str)
 
 // ─── Welcome messages ─────────────────────────────────────────────────────────
 
-pub fn send_welcome_edit(server: &Server, cn: u32) {
+pub fn send_welcome_edit(server: &Server, id: u64) {
     send_banner(
         server,
-        cn,
+        id,
         &[
             header("DEATHRUN EDIT SERVER"),
             body("  Build and test Deathrun maps here."),
@@ -147,7 +147,7 @@ pub fn send_welcome_edit(server: &Server, cn: u32) {
     );
 }
 
-pub fn send_welcome_play(server: &Server, cn: u32, map_name: Option<&str>, is_solo: bool) {
+pub fn send_welcome_play(server: &Server, id: u64, map_name: Option<&str>, is_solo: bool) {
     let mut lines = vec![
         header("DEATHRUN"),
         b().color(THEME.evil)
@@ -182,5 +182,5 @@ pub fn send_welcome_play(server: &Server, cn: u32, map_name: Option<&str>, is_so
         lines.push(body("  One life per round. Don't die!"));
     }
 
-    send_banner(server, cn, &lines);
+    send_banner(server, id, &lines);
 }

@@ -394,7 +394,7 @@ where
     }
 }
 
-pub(crate) fn send_map_to(server: &Server, cn: u32) -> bool {
+pub(crate) fn send_map_to(server: &Server, id: u64) -> bool {
     let bytes = {
         let lock = get_server_state(server).read().unwrap();
         match lock.map.as_ref() {
@@ -408,6 +408,6 @@ pub(crate) fn send_map_to(server: &Server, cn: u32) -> bool {
             },
         }
     };
-    server.send_chan2(cn, &channel2::SendMap { data: bytes });
+    server.send_chan2(id, &channel2::SendMap { data: bytes });
     true
 }

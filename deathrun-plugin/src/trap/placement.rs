@@ -221,14 +221,14 @@ pub fn rebuild_all_trap_buttons(
 
 pub(super) fn send_atomic_rebuild(
     server: &Server,
-    cn: u32,
+    owner_id: u64,
     adj: [i32; 3],
     button_size: i32,
     hit_orient: u8,
     clip_unpack_len: i32,
     clip_data: Vec<u8>,
 ) {
-    let target_cn = cn as i32;
+    let target_cn = server.get_cn(owner_id).unwrap_or(0) as i32;
     let (adj_sel, fill_sel) = get_selections(adj, button_size, hit_orient);
 
     server.broadcast_chan1(&Client {
@@ -261,7 +261,7 @@ pub fn check_and_rebuild_traps(
     intersects: impl Fn(&crate::map_state::Trap) -> bool,
 ) {
     let server = ctx.server().clone();
-    let cn = ctx.cn();
+    let id = ctx.id();
     let mut state = get_server_state(&server).write().unwrap();
 
     // Never rebuild the trap currently being recorded — the user is intentionally editing
@@ -363,7 +363,7 @@ pub fn check_and_rebuild_traps(
 
         send_atomic_rebuild(
             &server,
-            cn,
+            id,
             trap.button_pos,
             trap.button_size,
             trap.button_orient,

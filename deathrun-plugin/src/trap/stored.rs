@@ -168,8 +168,9 @@ impl StoredTrap {
     }
 }
 
-pub fn sync_traps_to_map(server: &Server, cn: u32) {
+pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
+    let owner_cn = server.get_cn(owner_id).unwrap_or(0) as i32;
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
 
     if let Some(map) = state.map.as_mut() {
@@ -184,7 +185,7 @@ pub fn sync_traps_to_map(server: &Server, cn: u32) {
                 for (id, ent) in changed {
                     let ent_type = ent.ent_type;
                     batch.push(Client {
-                        client_num: cn as i32,
+                        client_num: owner_cn,
                         packet: channel1::EditEnt {
                             ent_id: id as i32,
                             pos: sauer_proto::data::Vec3 {

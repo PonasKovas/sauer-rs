@@ -50,7 +50,7 @@ pub(crate) fn collect_chunks(
 
 pub async fn visual_rebuild_map<F>(
     server: &Server,
-    target_cns: &[u32],
+    target_ids: &[u64],
     author_cn: i32,
     world_size: i32,
     root: &sauer_map::Node,
@@ -62,21 +62,22 @@ pub async fn visual_rebuild_map<F>(
     send_newmap: bool,
     mut entity_transformer: F,
 ) where
-    F: FnMut(u32, usize, &ogz_rs::data::Entity) -> Option<ogz_rs::data::Entity>,
+    F: FnMut(u64, usize, &ogz_rs::data::Entity) -> Option<ogz_rs::data::Entity>,
 {
-    if target_cns.is_empty() {
+    if target_ids.is_empty() {
         return;
     }
 
     println!("world_size: {world_size}");
     let clear_size = world_size.max(1024);
 
-    for &cn in target_cns {
+    for &id in target_ids {
         if send_newmap {
+            let cn = server.get_cn(id).unwrap_or(0) as i32;
             server.send_chan1(
-                cn,
+                id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: channel1::NewMap {
                         size: (world_size.trailing_zeros() as i32).max(10),
                     },
@@ -85,7 +86,7 @@ pub async fn visual_rebuild_map<F>(
         }
 
         server.send_chan1(
-            cn,
+            id,
             &Client {
                 client_num: author_cn,
                 packet: channel1::DelCube {
@@ -112,7 +113,7 @@ pub async fn visual_rebuild_map<F>(
             };
 
             let mut send = true;
-            if let Some(mut p) = server.players.try_get_mut(cn) {
+            if let Some(mut p) = server.players.try_get_mut(id) {
                 if let Some(known) = p.known_vars.get(&name) {
                     if known == var {
                         send = false;
@@ -136,7 +137,7 @@ pub async fn visual_rebuild_map<F>(
                     }
                 };
                 server.send_chan1(
-                    cn,
+                    id,
                     &Client {
                         client_num: author_cn,
                         packet: channel1::EditVar { name, val },
@@ -161,12 +162,12 @@ pub async fn visual_rebuild_map<F>(
                 },
             });
             if empty_batch.len() >= 50 {
-                server.send_chan1(cn, empty_batch.clone());
+                server.send_chan1(id, empty_batch.clone());
                 empty_batch.clear();
             }
         }
         if !empty_batch.is_empty() {
-            server.send_chan1(cn, empty_batch);
+            server.send_chan1(id, empty_batch);
         }
     }
 
@@ -182,7 +183,7 @@ pub async fn visual_rebuild_map<F>(
 
     crate::geo_sync::send_chunks_to_clients(
         server,
-        target_cns,
+        target_ids,
         author_cn,
         chunks,
         vslots,
@@ -192,10 +193,10 @@ pub async fn visual_rebuild_map<F>(
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    for &cn in target_cns {
+    for &id in target_ids {
         let mut batch = Vec::new();
         for (i, ent) in entities.iter().enumerate() {
-            if let Some(transformed) = entity_transformer(cn, i, ent) {
+            if let Some(transformed) = entity_transformer(id, i, ent) {
                 batch.push(Client {
                     client_num: author_cn,
                     packet: channel1::EditEnt {
@@ -210,25 +211,25 @@ pub async fn visual_rebuild_map<F>(
                     },
                 });
                 if batch.len() >= 50 {
-                    server.send_chan1(cn, batch.clone());
+                    server.send_chan1(id, batch.clone());
                     batch.clear();
                 }
             }
         }
         if !batch.is_empty() {
-            server.send_chan1(cn, batch);
+            server.send_chan1(id, batch);
         }
     }
 }
 
-pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms: u64) {
+pub fn spawn_recreate_map(server: Arc<Server>, id: u64, divisions: i32, delay_ms: u64) {
     let (map_size, root, entities, vslots, variables) = {
         let state_lock = get_server_state(&server).read().unwrap();
         let state = match state_lock.map.as_ref() {
             Some(s) => s,
             None => {
                 server.send_chan1(
-                    cn,
+                    id,
                     &channel1::ServMsg {
                         text: "No custom map uploaded to recreate!".lossy_cubestring(),
                     },
@@ -254,11 +255,13 @@ pub fn spawn_recreate_map(server: Arc<Server>, cn: u32, divisions: i32, delay_ms
             text: "Morphing map sequence initiated...".lossy_cubestring(),
         });
 
-        let cns = server.client_cns();
+        let ids = server.client_ids();
+        let author_cn = server.get_cn(id).unwrap_or(0) as i32;
+
         visual_rebuild_map(
             &server,
-            &cns,
-            cn as i32,
+            &ids,
+            author_cn,
             map_size,
             &root,
             &vslots,
