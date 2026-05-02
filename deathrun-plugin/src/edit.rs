@@ -284,16 +284,20 @@ impl Plugin for DeathrunEdit {
             let time = args
                 .get(1)
                 .and_then(|s| s.as_str())
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(2000);
-            crate::trap::cmd_traptime(ctx, hit_pt, time);
+                .and_then(|s| s.parse::<u32>().ok());
+            match time {
+                Some(t) => crate::trap::cmd_traptime(ctx, hit_pt, t),
+                None => crate::trap::cmd_traptime_print(ctx, hit_pt),
+            }
         } else if cmd == "#traptimeout" {
             let timeout = args
                 .get(1)
                 .and_then(|s| s.as_str())
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(0);
-            crate::trap::cmd_traptimeout(ctx, hit_pt, timeout);
+                .and_then(|s| s.parse::<u32>().ok());
+            match timeout {
+                Some(t) => crate::trap::cmd_traptimeout(ctx, hit_pt, t),
+                None => crate::trap::cmd_traptimeout_print(ctx, hit_pt),
+            }
         }
     }
 

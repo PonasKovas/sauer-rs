@@ -7,7 +7,8 @@ pub mod stored;
 pub mod trigger;
 
 pub use commands::{
-    cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_traptime, cmd_traptimeout,
+    cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_traptime,
+    cmd_traptimeout, cmd_traptime_print, cmd_traptimeout_print,
 };
 pub use intersect::{intersects_bounds, intersects_edit_face, intersects_sel};
 pub use placement::{

@@ -317,6 +317,74 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
     sync_traps_to_map(server, cn);
 }
 
+pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
+    let cn = ctx.cn();
+    let server = ctx.server();
+    let state = get_server_state(server).read().unwrap();
+
+    let trap_idx = state.traps.iter().position(|t| {
+        (0..3).all(|ax| {
+            hit_pt[ax] >= t.button_pos[ax] as f32
+                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+        })
+    });
+
+    let trap_idx = match trap_idx {
+        None => {
+            server.send_chan1(
+                cn,
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
+            );
+            return;
+        }
+        Some(i) => i,
+    };
+
+    let time = state.traps[trap_idx].time;
+    server.send_chan1(
+        cn,
+        &ServMsg {
+            text: format!("Trap time is {}ms.", time).lossy_cubestring(),
+        },
+    );
+}
+
+pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
+    let cn = ctx.cn();
+    let server = ctx.server();
+    let state = get_server_state(server).read().unwrap();
+
+    let trap_idx = state.traps.iter().position(|t| {
+        (0..3).all(|ax| {
+            hit_pt[ax] >= t.button_pos[ax] as f32
+                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+        })
+    });
+
+    let trap_idx = match trap_idx {
+        None => {
+            server.send_chan1(
+                cn,
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
+            );
+            return;
+        }
+        Some(i) => i,
+    };
+
+    let timeout = state.traps[trap_idx].timeout;
+    server.send_chan1(
+        cn,
+        &ServMsg {
+            text: format!("Trap timeout is {}ms.", timeout).lossy_cubestring(),
+        },
+    );
+}
+
 pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
     let cn = ctx.cn();
     let server = ctx.server();
