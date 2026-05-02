@@ -167,7 +167,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         clip_s: [1; 3],
         clip_grid: 1,
         time: 2000,
-        timeout: 0,
+        timeout: 20000,
         reset_clipboard: Vec::new(),
         reset_unpack_len: 0,
         reset_cells: Vec::new(),
