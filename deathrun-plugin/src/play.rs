@@ -400,6 +400,14 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
                     client_num: cn as i32,
                 },
             ); // Resets screen
+
+            server.force_spawn(cn, |state| {
+                state.ammo.pistol = 200;
+                if Some(cn) == current_evil {
+                    state.ammo.grenade_launcher = 0;
+                }
+            });
+            maps.write().unwrap().spawned_this_round.insert(cn);
         }
 
         let evil_name = current_evil

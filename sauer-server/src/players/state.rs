@@ -34,7 +34,7 @@ impl Server {
 
     /// Computes the new spawn state for `cn` without applying any side effects.
     /// Returns `None` if the player is not in `Dead` state or hasn't been initialised yet.
-    pub(crate) fn compute_spawn_state(&self, cn: u32) -> Option<PlayerState> {
+    pub fn compute_spawn_state(&self, cn: u32) -> Option<PlayerState> {
         let insta = self.game_mode.read().unwrap().is_insta();
         let p = self.players.try_get(cn)?;
         if p.client_state != ClientState::Dead {
@@ -45,7 +45,7 @@ impl Server {
     }
 
     /// Applies a previously computed spawn state to `cn` and sends `N_SPAWNSTATE`.
-    pub(crate) fn apply_spawn_state(&self, cn: u32, state: PlayerState) {
+    pub fn apply_spawn_state(&self, cn: u32, state: PlayerState) {
         if let Some(mut p) = self.players.try_get_mut(cn) {
             p.state = Some(state.clone());
             p.quad_millis = 0;
@@ -57,6 +57,19 @@ impl Server {
                 state,
             },
         );
+    }
+
+    /// Forces a player to spawn.
+    /// It only works when the client is dead, and correctly sets the default loadout and `life_sequence`.
+    /// The closure `f` is called with the `PlayerState` before it is applied, allowing for loadout customization.
+    pub fn force_spawn<F>(&self, cn: u32, mut f: F)
+    where
+        F: FnMut(&mut PlayerState),
+    {
+        if let Some(mut state) = self.compute_spawn_state(cn) {
+            f(&mut state);
+            self.apply_spawn_state(cn, state);
+        }
     }
 
     /// Prepare a respawn: increment life_sequence, reset state, send N_SPAWNSTATE to this client.
