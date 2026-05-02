@@ -70,18 +70,6 @@ impl Plugin for TelegramBridge {
                 is_spectator: true,
             },
         );
-
-        let master_mode = *ctx.server().master_mode.read().unwrap();
-        ctx.server().send_chan1(
-            ctx.id(),
-            &CurrentMaster {
-                master_mode,
-                clients: vec![MasterClient {
-                    client_num: self.bot_cn as i32,
-                    privilege: Privilege::Auth,
-                }],
-            },
-        );
     }
 
     async fn start(&self, server: &Arc<Server>) {
