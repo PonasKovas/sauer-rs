@@ -21,7 +21,7 @@ pub struct MapState {
 
 impl MapState {
     pub fn default_empty() -> Self {
-        Self::new_empty(512)
+        Self::new_empty(1024)
     }
 
     /// Create a fresh empty map matching Sauerbraten's `emptymap(scale)`:
@@ -54,10 +54,22 @@ impl MapState {
         self.meta.octree = self.world.to_ogz_octree();
     }
 
+    pub fn enlarge_empty(&mut self) {
+        self.world.enlarge_empty();
+        self.meta.world_size = self.world.size;
+        self.meta.octree = self.world.to_ogz_octree();
+    }
+
     pub fn from_bytes(data: &[u8]) -> Result<Self, ogz_rs::OgzError> {
         let ogz = OgzMap::parse(data)?;
         let world = World::from_ogz(&ogz);
-        Ok(Self { world, meta: ogz })
+        let mut state = Self { world, meta: ogz };
+        
+        while state.world.size < 1024 {
+            state.enlarge_empty();
+        }
+        
+        Ok(state)
     }
 
     pub fn to_ogz_bytes(&self) -> Result<Vec<u8>, ogz_rs::OgzError> {

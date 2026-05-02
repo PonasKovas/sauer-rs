@@ -69,6 +69,9 @@ pub async fn visual_rebuild_map<F>(
         return;
     }
 
+    println!("world_size: {world_size}");
+    let clear_size = world_size.max(1024);
+
     for &cn in target_cns {
         if send_newmap {
             server.send_chan1(
@@ -76,7 +79,7 @@ pub async fn visual_rebuild_map<F>(
                 &Client {
                     client_num: cn as i32,
                     packet: channel1::NewMap {
-                        size: world_size.trailing_zeros() as i32,
+                        size: (world_size.trailing_zeros() as i32).max(10),
                     },
                 },
             );
@@ -90,7 +93,7 @@ pub async fn visual_rebuild_map<F>(
                     sel: SelInfo {
                         o: Vec3 { x: 0, y: 0, z: 0 },
                         s: Vec3 { x: 2, y: 2, z: 2 },
-                        grid: world_size / 2,
+                        grid: clear_size / 2,
                         orient: sauer_proto::data::Orient::Left,
                         cx: 0,
                         cxs: 2,

@@ -48,6 +48,27 @@ impl World {
         }
     }
 
+    pub fn enlarge_empty(&mut self) {
+        let new_size = self.size * 2;
+        let air = Node::Leaf(Cube {
+            edges: [0x00; 12],
+            textures: [0; 6],
+            material: Default::default(),
+        });
+        let old_root = std::mem::replace(&mut self.root, air.clone());
+        self.root = Node::Branch(Box::new([
+            old_root,
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air.clone(),
+            air,
+        ]));
+        self.size = new_size;
+    }
+
     pub fn enlarge(&mut self) {
         let new_size = self.size * 2;
         let solid = Node::Leaf(Cube {
