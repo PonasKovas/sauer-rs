@@ -227,9 +227,10 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                     crate::trap::ACTIVE_TRAP_DOMAIN,
                 )
                 .unwrap_or_default();
+                let mut batch = Vec::new();
                 for (id, ent) in changed {
                     let ent_type = ent.ent_type;
-                    server_clone.broadcast_chan1(&sauer_proto::Client {
+                    batch.push(sauer_proto::Client {
                         client_num: actor_cn as i32,
                         packet: sauer_proto::channel1::EditEnt {
                             ent_id: id as i32,
@@ -242,6 +243,13 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                             attrs: ent.attrs.map(|x| x as i32),
                         },
                     });
+                    if batch.len() >= 50 {
+                        server_clone.broadcast_chan1(batch.clone());
+                        batch.clear();
+                    }
+                }
+                if !batch.is_empty() {
+                    server_clone.broadcast_chan1(batch);
                 }
             }
         }
@@ -437,9 +445,10 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                         crate::trap::ACTIVE_TRAP_DOMAIN,
                     )
                     .unwrap_or_default();
+                    let mut batch = Vec::new();
                     for (id, ent) in changed {
                         let ent_type = ent.ent_type;
-                        server_clone.broadcast_chan1(&sauer_proto::Client {
+                        batch.push(sauer_proto::Client {
                             client_num: actor_cn as i32,
                             packet: sauer_proto::channel1::EditEnt {
                                 ent_id: id as i32,
@@ -452,6 +461,13 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
                                 attrs: ent.attrs.map(|x| x as i32),
                             },
                         });
+                        if batch.len() >= 50 {
+                            server_clone.broadcast_chan1(batch.clone());
+                            batch.clear();
+                        }
+                    }
+                    if !batch.is_empty() {
+                        server_clone.broadcast_chan1(batch);
                     }
                 }
             }
@@ -552,9 +568,10 @@ pub fn apply_and_broadcast(
         crate::geo_sync::broadcast_geometry(server, actor_cn as i32, sel, unpack_len, data);
     }
 
+    let mut batch = Vec::new();
     for (ent_id, ent) in broadcast_ents {
         let ent_type = ent.ent_type;
-        server.broadcast_chan1(&Client {
+        batch.push(Client {
             client_num: actor_cn as i32,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
@@ -567,6 +584,13 @@ pub fn apply_and_broadcast(
                 attrs: ent.attrs.map(|x| x as i32),
             },
         });
+        if batch.len() >= 50 {
+            server.broadcast_chan1(batch.clone());
+            batch.clear();
+        }
+    }
+    if !batch.is_empty() {
+        server.broadcast_chan1(batch);
     }
 
     assigned_ids

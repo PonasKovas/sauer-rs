@@ -180,9 +180,10 @@ pub fn sync_traps_to_map(server: &Server, cn: u32) {
             super::TRAP_DOMAIN,
         ) {
             Ok(changed) => {
+                let mut batch = Vec::new();
                 for (id, ent) in changed {
                     let ent_type = ent.ent_type;
-                    server.broadcast_chan1(&Client {
+                    batch.push(Client {
                         client_num: cn as i32,
                         packet: channel1::EditEnt {
                             ent_id: id as i32,
@@ -195,6 +196,13 @@ pub fn sync_traps_to_map(server: &Server, cn: u32) {
                             attrs: ent.attrs.map(|x| x as i32),
                         },
                     });
+                    if batch.len() >= 50 {
+                        server.broadcast_chan1(batch.clone());
+                        batch.clear();
+                    }
+                }
+                if !batch.is_empty() {
+                    server.broadcast_chan1(batch);
                 }
             }
             Err(e) => tracing::error!("Failed to save trap store: {}", e),

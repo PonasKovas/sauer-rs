@@ -19,33 +19,39 @@ impl Peer {
         let mut writer = Writer::<S2C<Chan0>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        let _ = self.raw.try_send_packet(enet_rs::Packet {
+        if let Err(e) = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
             channel: sauer_proto::CHANNEL_POSITIONS,
             mode: convert_mode(mode),
-        });
+        }) {
+            tracing::error!("ENet dropped Chan0 packet: {:?}", e);
+        }
     }
 
     pub fn try_send_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>>) {
         let mut writer = Writer::<S2C<Chan1>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        let _ = self.raw.try_send_packet(enet_rs::Packet {
+        if let Err(e) = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
             channel: sauer_proto::CHANNEL_MESSAGES,
             mode: convert_mode(mode),
-        });
+        }) {
+            tracing::error!("ENet dropped Chan1 packet: {:?}", e);
+        }
     }
 
     pub fn try_send_chan2(&self, pkt: impl PacketSequence<S2C<Chan2>>) {
         let mut writer = Writer::<S2C<Chan2>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        let _ = self.raw.try_send_packet(enet_rs::Packet {
+        if let Err(e) = self.raw.try_send_packet(enet_rs::Packet {
             data: bytes.into(),
             channel: sauer_proto::CHANNEL_MAPS,
             mode: convert_mode(mode),
-        });
+        }) {
+            tracing::error!("ENet dropped Chan2 packet: {:?}", e);
+        }
     }
 
     pub fn try_disconnect(&self) {

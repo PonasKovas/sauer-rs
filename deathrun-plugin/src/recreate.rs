@@ -145,23 +145,28 @@ pub async fn visual_rebuild_map<F>(
             }
         }
 
+        let mut empty_batch = Vec::new();
         for i in 0..entities.len() {
-            server.send_chan1(
-                cn,
-                &Client {
-                    client_num: author_cn,
-                    packet: channel1::EditEnt {
-                        ent_id: i as i32,
-                        pos: Vec3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
-                        type_: sauer_proto::data::EntityType::Empty,
-                        attrs: [0; 5],
+            empty_batch.push(Client {
+                client_num: author_cn,
+                packet: channel1::EditEnt {
+                    ent_id: i as i32,
+                    pos: Vec3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
                     },
+                    type_: sauer_proto::data::EntityType::Empty,
+                    attrs: [0; 5],
                 },
-            );
+            });
+            if empty_batch.len() >= 50 {
+                server.send_chan1(cn, empty_batch.clone());
+                empty_batch.clear();
+            }
+        }
+        if !empty_batch.is_empty() {
+            server.send_chan1(cn, empty_batch);
         }
     }
 
@@ -188,25 +193,30 @@ pub async fn visual_rebuild_map<F>(
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     for &cn in target_cns {
+        let mut batch = Vec::new();
         for (i, ent) in entities.iter().enumerate() {
             if let Some(transformed) = entity_transformer(cn, i, ent) {
-                server.send_chan1(
-                    cn,
-                    &Client {
-                        client_num: author_cn,
-                        packet: channel1::EditEnt {
-                            ent_id: i as i32,
-                            pos: sauer_proto::data::Vec3 {
-                                x: transformed.position[0],
-                                y: transformed.position[1],
-                                z: transformed.position[2],
-                            },
-                            type_: transformed.ent_type,
-                            attrs: transformed.attrs.map(|x| x as i32),
+                batch.push(Client {
+                    client_num: author_cn,
+                    packet: channel1::EditEnt {
+                        ent_id: i as i32,
+                        pos: sauer_proto::data::Vec3 {
+                            x: transformed.position[0],
+                            y: transformed.position[1],
+                            z: transformed.position[2],
                         },
+                        type_: transformed.ent_type,
+                        attrs: transformed.attrs.map(|x| x as i32),
                     },
-                );
+                });
+                if batch.len() >= 50 {
+                    server.send_chan1(cn, batch.clone());
+                    batch.clear();
+                }
             }
+        }
+        if !batch.is_empty() {
+            server.send_chan1(cn, batch);
         }
     }
 }

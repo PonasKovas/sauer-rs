@@ -773,6 +773,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     }
 
     // Restore entities to pre-recording state.
+    let mut batch = Vec::new();
     for &ent_id in &edit_state.affected_entities {
         let ent = edit_state
             .original_map
@@ -781,7 +782,7 @@ pub fn cmd_endtrap(ctx: &Context) {
             .get(ent_id)
             .unwrap_or(&empty_ent);
         let ent_type = ent.ent_type;
-        server.broadcast_chan1(&Client {
+        batch.push(Client {
             client_num: target_cn,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
@@ -794,6 +795,13 @@ pub fn cmd_endtrap(ctx: &Context) {
                 attrs: ent.attrs.map(|x| x as i32),
             },
         });
+        if batch.len() >= 50 {
+            server.broadcast_chan1(batch.clone());
+            batch.clear();
+        }
+    }
+    if !batch.is_empty() {
+        server.broadcast_chan1(batch);
     }
 
     // Restore server geometry to original, keeping the expanded vslot table so indices
