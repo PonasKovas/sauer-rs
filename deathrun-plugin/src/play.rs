@@ -61,6 +61,7 @@ pub struct PlayMaps {
     pub current_map: Option<String>,
     pub evil_cn: Option<u32>,
     pub round_state: RoundState,
+    pub round_epoch: u64,
     pub spawned_this_round: HashSet<u32>,
     pub round_start_time: Option<Instant>,
     pub finished_players: Vec<(u32, Duration)>,
@@ -81,6 +82,7 @@ impl Default for PlayMaps {
             current_map: None,
             evil_cn: None,
             round_state: RoundState::NotStarted,
+            round_epoch: 0,
             spawned_this_round: HashSet::new(),
             round_start_time: None,
             finished_players: Vec::new(),
@@ -234,56 +236,61 @@ impl DeathrunPlay {
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_cn: Option<u32>) {
-    tokio::spawn(async move {
-        let (world_size, root, entities, vslots, variables, store_ids) = {
-            let mut lock = maps.write().unwrap();
-            if lock.rotation.is_empty() {
-                return;
-            }
-            lock.round_state = RoundState::MapLoading;
-            lock.spawned_this_round.clear();
-            lock.finished_players.clear();
+    let (world_size, root, entities, vslots, variables, store_ids, my_epoch) = {
+        let mut lock = maps.write().unwrap();
+        if lock.rotation.is_empty() {
+            return;
+        }
+        lock.round_epoch += 1;
+        let epoch = lock.round_epoch;
+        lock.round_state = RoundState::MapLoading;
+        lock.spawned_this_round.clear();
+        lock.finished_players.clear();
 
-            if lock.rotation_idx >= lock.rotation.len() {
-                lock.rotation.shuffle(&mut rand::thread_rng());
-                lock.rotation_idx = 0;
-            }
-            let next_map = lock.rotation[lock.rotation_idx].clone();
-            lock.rotation_idx += 1;
-            lock.current_map = Some(next_map);
+        if lock.rotation_idx >= lock.rotation.len() {
+            lock.rotation.shuffle(&mut rand::thread_rng());
+            lock.rotation_idx = 0;
+        }
+        let next_map = lock.rotation[lock.rotation_idx].clone();
+        lock.rotation_idx += 1;
+        lock.current_map = Some(next_map);
 
-            let (_, new_state) = lock.make_active_state();
-            *get_server_state(&server).write().unwrap() = new_state;
+        let (_, new_state) = lock.make_active_state();
+        *get_server_state(&server).write().unwrap() = new_state;
 
-            let state_lock = get_server_state(&server);
-            let state_read = state_lock.read().unwrap();
-            let map = state_read.map.as_ref().unwrap();
-            let mut store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
-                .into_iter()
-                .collect::<HashSet<_>>();
-            store_ids.extend(crate::entity_store::get_store_entity_ids(
-                &map.world,
-                crate::trap::ACTIVE_TRAP_DOMAIN,
-            ));
-            let variables = match &map.meta.config {
-                MapConfig::Modern { variables } => variables.clone(),
-                _ => vec![],
-            };
-            (
-                map.world.size,
-                map.world.root.clone(),
-                map.world.entities.clone(),
-                map.meta.vslots.clone(),
-                variables,
-                store_ids,
-            )
+        let state_lock = get_server_state(&server);
+        let state_read = state_lock.read().unwrap();
+        let map = state_read.map.as_ref().unwrap();
+        let mut store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        store_ids.extend(crate::entity_store::get_store_entity_ids(
+            &map.world,
+            crate::trap::ACTIVE_TRAP_DOMAIN,
+        ));
+        let variables = match &map.meta.config {
+            MapConfig::Modern { variables } => variables.clone(),
+            _ => vec![],
         };
+        (
+            map.world.size,
+            map.world.root.clone(),
+            map.world.entities.clone(),
+            map.meta.vslots.clone(),
+            variables,
+            store_ids,
+            epoch,
+        )
+    };
 
+    tokio::spawn(async move {
         let cns = server.client_cns();
         if cns.is_empty() {
             let mut lock = maps.write().unwrap();
-            lock.round_state = RoundState::NotStarted;
-            server.set_master_mode(MasterMode::Veto);
+            if lock.round_epoch == my_epoch {
+                lock.round_state = RoundState::NotStarted;
+                server.set_master_mode(MasterMode::Veto);
+            }
             return;
         }
 
@@ -295,6 +302,9 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
         {
             let mut lock = maps.write().unwrap();
+            if lock.round_epoch != my_epoch {
+                return;
+            }
             lock.evil_cn = evil_cn;
         }
 
@@ -305,6 +315,13 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             server.set_team(cn, team.lossy_cubestring(), SetTeamReason::Forced);
             server.set_spectator(cn, true);
         }
+
+        let has_team_1 = entities
+            .iter()
+            .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 1);
+        let has_team_2 = entities
+            .iter()
+            .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
 
         let author_cn = cns.first().copied().unwrap_or(0) as i32;
         crate::recreate::visual_rebuild_map(
@@ -319,20 +336,18 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             4,
             20,
             true,
-            |cn, i, ent| {
+            move |cn, i, ent| {
                 let is_evil = Some(cn) == evil_cn;
                 if store_ids.contains(&i) {
                     return None;
                 }
 
-                let ent_type = ent.ent_type;
+                let mut ent_type = ent.ent_type;
                 let mut attrs = ent.attrs;
 
                 if ent_type == EntityType::PlayerStart {
                     let team_attr = attrs[1];
-                    if team_attr == 0 {
-                        return None;
-                    } else if team_attr == 2 {
+                    if team_attr == 2 {
                         if is_evil {
                             attrs[1] = 0;
                         } else {
@@ -342,6 +357,13 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
                         if !is_evil {
                             attrs[1] = 0;
                         } else {
+                            return None;
+                        }
+                    } else if team_attr == 0 {
+                        if is_evil && has_team_2 {
+                            return None;
+                        }
+                        if !is_evil && has_team_1 {
                             return None;
                         }
                     }
@@ -357,13 +379,20 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         )
         .await;
 
+        let current_cns;
+        let current_evil;
         {
             let mut lock = maps.write().unwrap();
+            if lock.round_epoch != my_epoch {
+                return;
+            }
             lock.round_state = RoundState::Playing;
             lock.round_start_time = Some(Instant::now());
+            current_cns = server.client_cns();
+            current_evil = lock.evil_cn;
         }
 
-        for &cn in &cns {
+        for &cn in &current_cns {
             server.set_spectator(cn, false); // Moves them into Dead state safely
             server.send_chan1(
                 cn,
@@ -373,7 +402,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             ); // Resets screen
         }
 
-        let evil_name = evil_cn
+        let evil_name = current_evil
             .and_then(|cn| server.players.try_get(cn))
             .map(|p| p.name.strip_colors().to_utf8());
 
@@ -745,17 +774,16 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
-        let (is_first, is_solo_round, is_loading, is_waiting) = {
+        let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
             let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
-            let is_loading = lock.round_state == RoundState::MapLoading;
             let is_waiting =
                 lock.round_state == RoundState::NotStarted && server.client_count() > 1;
-            (is_first, is_solo_round, is_loading, is_waiting)
+            (is_first, is_solo_round, is_waiting)
         };
 
-        if is_first || is_solo_round || is_loading || is_waiting {
+        if is_first || is_solo_round || is_waiting {
             // Restart or start if needed to ensure all players are included and roles assigned correctly.
             start_round_sequence(Arc::clone(server), Arc::clone(&maps), Some(cn));
         } else {
