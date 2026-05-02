@@ -359,6 +359,7 @@ impl Plugin for DeathrunEdit {
             state.waiting_for_map = true;
             state.traps.clear();
             state.trap_edit = None;
+            state.active_traps.clear();
         }
         for c in server.client_cns() {
             server.set_spectator(c, true);
@@ -439,6 +440,42 @@ impl Plugin for DeathrunEdit {
                     }
                 }
 
+                match crate::entity_store::read::<Vec<crate::trap::ActiveTrap>>(
+                    &state.world,
+                    crate::trap::ACTIVE_TRAP_STORE_VERSION,
+                    crate::trap::ACTIVE_TRAP_DOMAIN,
+                ) {
+                    Ok(Some(active_traps)) => {
+                        let empty_ent = ogz_rs::data::Entity {
+                            position: [0.0; 3],
+                            attrs: [0; 5],
+                            ent_type: ogz_rs::data::EntityType::Empty,
+                            extra_data: vec![],
+                        };
+                        for active in active_traps {
+                            if let Some(pid) = active.progress_bar_ent_id {
+                                if pid < state.world.entities.len() {
+                                    state.world.entities[pid] = empty_ent.clone();
+                                }
+                            }
+                            for id in active.assigned_ids {
+                                if id < state.world.entities.len() {
+                                    state.world.entities[id] = empty_ent.clone();
+                                }
+                            }
+                        }
+                        crate::entity_store::write(
+                            &mut state.world,
+                            &Vec::<crate::trap::ActiveTrap>::new(),
+                            crate::trap::ACTIVE_TRAP_STORE_VERSION,
+                            crate::trap::ACTIVE_TRAP_DOMAIN,
+                        ).unwrap_or_default();
+                    }
+                    _ => {}
+                }
+
+                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
+
                 state.update_server_items(server);
                 {
                     let mut s = get_server_state(server).write().unwrap();
@@ -446,15 +483,7 @@ impl Plugin for DeathrunEdit {
                     s.traps = loaded_traps;
                     s.waiting_for_map = false;
                     s.trap_edit = None;
-                    // Reset button vslot colors in the map before it's sent to clients.
-                    let traps_snapshot: Vec<_> = s
-                        .traps
-                        .iter()
-                        .map(|t| (t.button_pos, t.button_size, t.button_orient))
-                        .collect();
-                    if let Some(map) = s.map.as_mut() {
-                        crate::trap::reset_button_colors_by_pos(map, &traps_snapshot);
-                    }
+                    s.active_traps.clear();
                 }
                 info!("cn {cn} uploaded a map (world_size={world_size}); state loaded");
 

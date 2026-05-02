@@ -211,6 +211,40 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
             &trigger_entities_add,
         );
 
+        if is_edit_mode {
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            state.active_traps.push(crate::trap::ActiveTrap {
+                trap_idx,
+                progress_bar_ent_id: ent_id,
+                assigned_ids: assigned_ids.clone(),
+            });
+            let active_traps = state.active_traps.clone();
+            if let Some(map) = state.map.as_mut() {
+                let changed = crate::entity_store::write(
+                    &mut map.world,
+                    &active_traps,
+                    crate::trap::ACTIVE_TRAP_STORE_VERSION,
+                    crate::trap::ACTIVE_TRAP_DOMAIN,
+                ).unwrap_or_default();
+                for (id, ent) in changed {
+                    let ent_type = ent.ent_type;
+                    server_clone.broadcast_chan1(&sauer_proto::Client {
+                        client_num: actor_cn as i32,
+                        packet: sauer_proto::channel1::EditEnt {
+                            ent_id: id as i32,
+                            pos: sauer_proto::data::Vec3 {
+                                x: ent.position[0],
+                                y: ent.position[1],
+                                z: ent.position[2],
+                            },
+                            type_: ent_type,
+                            attrs: ent.attrs.map(|x| x as i32),
+                        },
+                    });
+                }
+            }
+        }
+
         if let Some(epos) = server_clone.players.try_get(actor_cn).map(|p| p.position) {
             for cn in server_clone.client_cns() {
                 if let Some(p) = server_clone.players.try_get(cn) {
@@ -390,6 +424,34 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_cn: 
         if let Ok(mut state) = get_server_state(&server_clone).write() {
             if trap_idx < state.traps.len() {
                 state.traps[trap_idx].is_active = false;
+            }
+            if is_edit_mode {
+                state.active_traps.retain(|t| t.trap_idx != trap_idx);
+                let active_traps = state.active_traps.clone();
+                if let Some(map) = state.map.as_mut() {
+                    let changed = crate::entity_store::write(
+                        &mut map.world,
+                        &active_traps,
+                        crate::trap::ACTIVE_TRAP_STORE_VERSION,
+                        crate::trap::ACTIVE_TRAP_DOMAIN,
+                    ).unwrap_or_default();
+                    for (id, ent) in changed {
+                        let ent_type = ent.ent_type;
+                        server_clone.broadcast_chan1(&sauer_proto::Client {
+                            client_num: actor_cn as i32,
+                            packet: sauer_proto::channel1::EditEnt {
+                                ent_id: id as i32,
+                                pos: sauer_proto::data::Vec3 {
+                                    x: ent.position[0],
+                                    y: ent.position[1],
+                                    z: ent.position[2],
+                                },
+                                type_: ent_type,
+                                attrs: ent.attrs.map(|x| x as i32),
+                            },
+                        });
+                    }
+                }
             }
         }
     });

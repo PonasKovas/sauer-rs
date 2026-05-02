@@ -114,6 +114,42 @@ impl PlayMaps {
             Err(e) => warn!("Could not load traps from map '{name}': {e}"),
         }
 
+        match crate::entity_store::read::<Vec<crate::trap::ActiveTrap>>(
+            &state.world,
+            crate::trap::ACTIVE_TRAP_STORE_VERSION,
+            crate::trap::ACTIVE_TRAP_DOMAIN,
+        ) {
+            Ok(Some(active_traps)) => {
+                let empty_ent = ogz_rs::data::Entity {
+                    position: [0.0; 3],
+                    attrs: [0; 5],
+                    ent_type: ogz_rs::data::EntityType::Empty,
+                    extra_data: vec![],
+                };
+                for active in active_traps {
+                    if let Some(pid) = active.progress_bar_ent_id {
+                        if pid < state.world.entities.len() {
+                            state.world.entities[pid] = empty_ent.clone();
+                        }
+                    }
+                    for id in active.assigned_ids {
+                        if id < state.world.entities.len() {
+                            state.world.entities[id] = empty_ent.clone();
+                        }
+                    }
+                }
+                crate::entity_store::write(
+                    &mut state.world,
+                    &Vec::<crate::trap::ActiveTrap>::new(),
+                    crate::trap::ACTIVE_TRAP_STORE_VERSION,
+                    crate::trap::ACTIVE_TRAP_DOMAIN,
+                ).unwrap_or_default();
+            }
+            _ => {}
+        }
+
+        crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
+
         if !self.rotation.contains(&name) {
             self.rotation.push(name.clone());
         }
@@ -224,9 +260,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             let state_lock = get_server_state(&server);
             let state_read = state_lock.read().unwrap();
             let map = state_read.map.as_ref().unwrap();
-            let store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
+            let mut store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
                 .into_iter()
                 .collect::<HashSet<_>>();
+            store_ids.extend(crate::entity_store::get_store_entity_ids(&map.world, crate::trap::ACTIVE_TRAP_DOMAIN));
             let variables = match &map.meta.config {
                 MapConfig::Modern { variables } => variables.clone(),
                 _ => vec![],
@@ -522,9 +559,10 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             Some(m) => m,
             None => return false,
         };
-        let store_ids = crate::entity_store::get_store_entity_ids(&loaded.state.world, TRAP_DOMAIN)
+        let mut store_ids = crate::entity_store::get_store_entity_ids(&loaded.state.world, TRAP_DOMAIN)
             .into_iter()
             .collect::<HashSet<_>>();
+        store_ids.extend(crate::entity_store::get_store_entity_ids(&loaded.state.world, crate::trap::ACTIVE_TRAP_DOMAIN));
         let variables = match &loaded.state.meta.config {
             MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],

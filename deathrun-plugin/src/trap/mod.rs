@@ -10,7 +10,7 @@ pub use commands::{
     cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_traptime, cmd_traptimeout,
 };
 pub use intersect::{intersects_bounds, intersects_edit_face, intersects_sel};
-pub use placement::{check_and_rebuild_traps, reset_button_colors_by_pos};
+pub use placement::{check_and_rebuild_traps, reset_button_colors_by_pos, rebuild_all_trap_buttons};
 pub use stored::{StoredTrap, sync_traps_to_map};
 pub use trigger::trigger_trap;
 
@@ -20,8 +20,18 @@ pub const BUTTON_SIDE_TEX: u16 = 242;
 pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
 pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
 
-pub const TRAP_STORE_VERSION: u8 = 2;
+pub const TRAP_STORE_VERSION: u8 = 3;
 pub const TRAP_DOMAIN: u8 = 1;
+
+pub const ACTIVE_TRAP_STORE_VERSION: u8 = 1;
+pub const ACTIVE_TRAP_DOMAIN: u8 = 2;
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct ActiveTrap {
+    pub trap_idx: usize,
+    pub progress_bar_ent_id: Option<usize>,
+    pub assigned_ids: Vec<usize>,
+}
 
 #[derive(Clone)]
 pub enum RecordedPacket {

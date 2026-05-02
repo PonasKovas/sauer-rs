@@ -80,39 +80,45 @@ fn unpack(entities: &[&Entity]) -> Result<(u8, Vec<u8>), StoreError> {
     Ok((version, stream[3..3 + len].to_vec()))
 }
 
-fn is_store_entity(ent: &Entity) -> bool {
-    matches!(ent.ent_type, EntityType::Particles) && 
-    ent.position[0] < -9000.0 && ent.position[1] < -9000.0 && ent.position[2] < -9000.0
+fn is_store_entity(ent: &Entity, domain_id: u8) -> bool {
+    if !matches!(ent.ent_type, EntityType::Particles) {
+        return false;
+    }
+    if (ent.position[0] - SENTINEL_COORD).abs() > 0.1 || (ent.position[1] - SENTINEL_COORD).abs() > 0.1 {
+        return false;
+    }
+    let expected_z = SENTINEL_COORD - (domain_id as f32);
+    (ent.position[2] - expected_z).abs() < 0.1 || (domain_id == 1 && (ent.position[2] - SENTINEL_COORD).abs() < 0.1)
 }
 
-fn build_entity(attrs: [i16; 5]) -> Entity {
+fn build_entity(attrs: [i16; 5], domain_id: u8) -> Entity {
     Entity {
-        position: [SENTINEL_COORD, SENTINEL_COORD, SENTINEL_COORD],
+        position: [SENTINEL_COORD, SENTINEL_COORD, SENTINEL_COORD - (domain_id as f32)],
         attrs,
         ent_type: EntityType::Particles,
         extra_data: vec![],
     }
 }
 
-pub fn get_store_entity_ids(world: &sauer_map::World, _domain_id: u8) -> Vec<usize> {
+pub fn get_store_entity_ids(world: &sauer_map::World, domain_id: u8) -> Vec<usize> {
     world
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| if is_store_entity(e) { Some(i) } else { None })
+        .filter_map(|(i, e)| if is_store_entity(e, domain_id) { Some(i) } else { None })
         .collect()
 }
 
 pub fn read<T: DeserializeOwned>(
     world: &sauer_map::World,
     version: u8,
-    _domain_id: u8,
+    domain_id: u8,
 ) -> Result<Option<T>, StoreError> {
     let mut store_ents: Vec<(usize, &Entity)> = world
         .entities
         .iter()
         .enumerate()
-        .filter(|(_, e)| is_store_entity(e))
+        .filter(|(_, e)| is_store_entity(e, domain_id))
         .collect();
     if store_ents.is_empty() {
         return Ok(None);
@@ -137,7 +143,7 @@ pub fn write<T: Serialize>(
     world: &mut sauer_map::World,
     data: &T,
     version: u8,
-    _domain_id: u8,
+    domain_id: u8,
 ) -> Result<Vec<(usize, Entity)>, StoreError> {
     let compressed = compress(data)?;
     let chunks = pack(&compressed, version)?;
@@ -145,7 +151,7 @@ pub fn write<T: Serialize>(
         .entities
         .iter()
         .enumerate()
-        .filter_map(|(i, e)| if is_store_entity(e) { Some(i) } else { None })
+        .filter_map(|(i, e)| if is_store_entity(e, domain_id) { Some(i) } else { None })
         .collect();
     let n_old = old_ids.len();
     let n_new = chunks.len();
@@ -195,7 +201,7 @@ pub fn write<T: Serialize>(
     slots.sort_unstable();
 
     for (i, &slot) in slots.iter().enumerate() {
-        world.entities[slot] = build_entity(chunks[i]);
+        world.entities[slot] = build_entity(chunks[i], domain_id);
         changed.push((slot, world.entities[slot].clone()));
     }
 

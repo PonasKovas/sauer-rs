@@ -167,6 +167,54 @@ pub fn reset_button_colors_by_pos(
     }
 }
 
+// ─── Rebuild all trap buttons ─────────────────────────────────────────────────
+
+pub fn rebuild_all_trap_buttons(
+    map: &mut crate::map_state::MapState,
+    traps: &[crate::map_state::Trap],
+) {
+    for trap in traps {
+        let sel = sauer_map::Selection {
+            o: sauer_proto::data::Vec3 {
+                x: trap.button_pos[0],
+                y: trap.button_pos[1],
+                z: trap.button_pos[2],
+            },
+            s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+            grid: trap.button_size,
+            orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
+                .unwrap_or(sauer_proto::data::Orient::Left),
+            cx: 0,
+            cxs: 2,
+            cy: 0,
+            cys: 2,
+            corner: 0,
+        };
+        map.world.fill(&sel, true);
+        map.world.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
+        map.world.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
+        map.world.set_material(
+            &sel,
+            ogz_rs::data::Material {
+                alpha: true,
+                ..Default::default()
+            },
+        );
+
+        let (adj_sel, _) = get_selections(trap.button_pos, trap.button_size, trap.button_orient);
+        apply_internal_vslots(map, &adj_sel);
+
+        for corner in 0..4 {
+            let mut csel = sel.clone();
+            csel.corner = corner;
+            for _ in 0..6 {
+                map.world.edit_face(&csel, 1, 2);
+            }
+        }
+    }
+    map.invalidate_cache();
+}
+
 // ─── Atomic rebuild ───────────────────────────────────────────────────────────
 
 pub(super) fn send_atomic_rebuild(
