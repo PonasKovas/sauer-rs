@@ -199,7 +199,7 @@ impl DeathrunPlay {
     }
 }
 
-fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
+fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_cn: Option<u32>) {
     tokio::spawn(async move {
         let (world_size, root, entities, vslots, variables, store_ids) = {
             let mut lock = maps.write().unwrap();
@@ -338,6 +338,17 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>) {
         let evil_name = evil_cn
             .and_then(|cn| server.players.try_get(cn))
             .map(|p| p.name.strip_colors().to_utf8());
+
+        // Send the generic connection welcome rules to the new player first
+        if let Some(w_cn) = welcome_cn {
+            let (is_solo, map_name) = {
+                let lock = maps.read().unwrap();
+                (lock.evil_cn.is_none(), lock.current_map.clone())
+            };
+            ui::send_welcome_play(&server, w_cn, map_name.as_deref(), is_solo);
+        }
+
+        // Then broadcast the round state/gamemode to everyone
         ui::broadcast_round_start(&server, evil_name.as_deref());
     });
 }
@@ -496,11 +507,11 @@ fn declare_win(
     let m = Arc::clone(maps);
     tokio::spawn(async move {
         sleep(Duration::from_secs(3)).await;
-        start_round_sequence(s, m);
+        start_round_sequence(s, m, None);
     });
 }
 
-fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>) -> bool {
+fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<PlayMaps>>, welcome: bool) -> bool {
     let (world_size, root, entities, vslots, variables, store_ids, evil_cn) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
@@ -529,6 +540,7 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
         )
     };
 
+    let maps_arc = Arc::clone(maps);
     tokio::spawn(async move {
         let author_cn = target_cn as i32;
         crate::recreate::visual_rebuild_map(
@@ -580,6 +592,14 @@ fn send_map_to_client(server: Arc<Server>, target_cn: u32, maps: &Arc<RwLock<Pla
             },
         )
         .await;
+
+        if welcome {
+            let (is_solo, map_name) = {
+                let lock = maps_arc.read().unwrap();
+                (lock.evil_cn.is_none(), lock.current_map.clone())
+            };
+            ui::send_welcome_play(&server, target_cn, map_name.as_deref(), is_solo);
+        }
     });
 
     true
@@ -677,28 +697,31 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
-        let (is_first, is_solo_round, is_loading, is_waiting, map_name) = {
+        let (is_first, is_solo_round, is_loading, is_waiting) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
             let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_cn.is_none();
             let is_loading = lock.round_state == RoundState::MapLoading;
             let is_waiting =
                 lock.round_state == RoundState::NotStarted && server.client_count() > 1;
-            let map_name = lock.current_map.clone();
-            (is_first, is_solo_round, is_loading, is_waiting, map_name)
+            (is_first, is_solo_round, is_loading, is_waiting)
         };
-
-        ui::send_welcome_play(server, cn, map_name.as_deref(), is_solo_round || is_first);
 
         if is_first || is_solo_round || is_loading || is_waiting {
             // Restart or start if needed to ensure all players are included and roles assigned correctly.
-            start_round_sequence(Arc::clone(server), Arc::clone(&maps));
+            start_round_sequence(Arc::clone(server), Arc::clone(&maps), Some(cn));
         } else {
             let is_playing = maps.read().unwrap().round_state != RoundState::NotStarted;
             if is_playing {
-                send_map_to_client(Arc::clone(server), cn, &maps);
+                send_map_to_client(Arc::clone(server), cn, &maps, true);
                 server.set_spectator(cn, true);
                 server.set_team(cn, "good".lossy_cubestring(), SetTeamReason::Forced);
+            } else {
+                let (is_solo, map_name) = {
+                    let lock = maps.read().unwrap();
+                    (lock.evil_cn.is_none(), lock.current_map.clone())
+                };
+                ui::send_welcome_play(server, cn, map_name.as_deref(), is_solo);
             }
         }
     }
@@ -1008,7 +1031,7 @@ impl Plugin for DeathrunPlay {
         let cn = ctx.cn();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
-        if send_map_to_client(Arc::clone(server), cn, &maps) {
+        if send_map_to_client(Arc::clone(server), cn, &maps, false) {
             info!("Sending map rebuild to cn {cn} on N_GETMAP");
             ctx.cancel();
         }

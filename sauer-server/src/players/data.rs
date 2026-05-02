@@ -29,6 +29,7 @@ pub struct PlayerData {
     /// Remaining quad damage milliseconds. Decremented each server tick.
     pub quad_millis: i32,
     pub privilege: Privilege,
+    pub known_vars: std::collections::HashMap<CubeString, ogz_rs::data::Variable>,
 }
 
 impl PlayerData {
@@ -54,6 +55,7 @@ impl PlayerData {
             clipboard: None,
             quad_millis: 0,
             privilege: Privilege::None,
+            known_vars: std::collections::HashMap::new(),
         }
     }
 }

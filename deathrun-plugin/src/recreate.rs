@@ -106,25 +106,38 @@ pub async fn visual_rebuild_map<F>(
         );
 
         for var in variables {
-            let (name, val) = match var {
-                ogz_rs::data::Variable::Int { name, value } => {
-                    (name.clone(), sauer_proto::data::EditVarValue::Int(*value))
-                }
-                ogz_rs::data::Variable::Float { name, value } => {
-                    (name.clone(), sauer_proto::data::EditVarValue::Float(*value))
-                }
-                ogz_rs::data::Variable::String { name, value } => (
-                    name.clone(),
-                    sauer_proto::data::EditVarValue::String(value.clone()),
-                ),
+            let name = match var {
+                ogz_rs::data::Variable::Int { name, .. } => name.clone(),
+                ogz_rs::data::Variable::Float { name, .. } => name.clone(),
+                ogz_rs::data::Variable::String { name, .. } => name.clone(),
             };
-            server.send_chan1(
-                cn,
-                &Client {
-                    client_num: author_cn,
-                    packet: channel1::EditVar { name, val },
-                },
-            );
+
+            let mut send = true;
+            if let Some(mut p) = server.players.try_get_mut(cn) {
+                if let Some(known) = p.known_vars.get(&name) {
+                    if known == var {
+                        send = false;
+                    }
+                }
+                if send {
+                    p.known_vars.insert(name.clone(), var.clone());
+                }
+            }
+
+            if send {
+                let val = match var {
+                    ogz_rs::data::Variable::Int { value, .. } => sauer_proto::data::EditVarValue::Int(*value),
+                    ogz_rs::data::Variable::Float { value, .. } => sauer_proto::data::EditVarValue::Float(*value),
+                    ogz_rs::data::Variable::String { value, .. } => sauer_proto::data::EditVarValue::String(value.clone()),
+                };
+                server.send_chan1(
+                    cn,
+                    &Client {
+                        client_num: author_cn,
+                        packet: channel1::EditVar { name, val },
+                    },
+                );
+            }
         }
 
         for i in 0..entities.len() {
