@@ -1,5 +1,8 @@
 use cube_string::IntoCubeStringLossy;
-use sauer_proto::channel1::ServMsg;
+use sauer_proto::{
+    channel1::CurrentMaster,
+    data::{MasterClient, Privilege},
+};
 use sauer_server::{Context, Plugin, Server};
 use std::sync::Arc;
 use teloxide::prelude::*;
@@ -51,16 +54,34 @@ impl Plugin for TelegramBridge {
         use sauer_proto::channel1::{InitClient, SpectatorServer};
         use sauer_proto::data::PlayerModel;
 
-        ctx.server().send_chan1(ctx.id(), &InitClient {
-            client_num: self.bot_cn as i32,
-            name: "TG".lossy_cubestring(),
-            player_model: PlayerModel::MrFixit,
-            team: "spectator".lossy_cubestring(),
-        });
-        ctx.server().send_chan1(ctx.id(), &SpectatorServer {
-            client_num: self.bot_cn as i32,
-            is_spectator: true,
-        });
+        ctx.server().send_chan1(
+            ctx.id(),
+            &InitClient {
+                client_num: self.bot_cn as i32,
+                name: "TG".lossy_cubestring(),
+                player_model: PlayerModel::MrFixit,
+                team: "".lossy_cubestring(),
+            },
+        );
+        ctx.server().send_chan1(
+            ctx.id(),
+            &SpectatorServer {
+                client_num: self.bot_cn as i32,
+                is_spectator: true,
+            },
+        );
+
+        let master_mode = *ctx.server().master_mode.read().unwrap();
+        ctx.server().send_chan1(
+            ctx.id(),
+            &CurrentMaster {
+                master_mode,
+                clients: vec![MasterClient {
+                    client_num: self.bot_cn as i32,
+                    privilege: Privilege::Auth,
+                }],
+            },
+        );
     }
 
     async fn start(&self, server: &Arc<Server>) {
@@ -83,9 +104,10 @@ impl Plugin for TelegramBridge {
                         if msg.chat.id == target_chat_id {
                             if let Some(text) = msg.text() {
                                 let sender = msg
-                                    .from()
+                                    .from
+                                    .as_ref()
                                     .and_then(|u| u.username.clone())
-                                    .or_else(|| msg.from().map(|u| u.first_name.clone()))
+                                    .or_else(|| msg.from.as_ref().map(|u| u.first_name.clone()))
                                     .unwrap_or_else(|| "Unknown".to_string());
 
                                 server.broadcast_chan1(&sauer_proto::Client {
