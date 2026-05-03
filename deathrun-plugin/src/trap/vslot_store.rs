@@ -5,9 +5,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::io::{Read, Write};
 use crate::map_state::MapState;
 
-const MAX_NAME_PAYLOAD: usize = 200;
-const MAX_FLOAT_PAYLOAD: usize = 16;
-const MAX_CHUNK_PAYLOAD: usize = MAX_NAME_PAYLOAD + MAX_FLOAT_PAYLOAD;
+const MAX_CHUNK_PAYLOAD: usize = 220;
 const MAX_CHUNKS_PER_PACKET: usize = 90;
 
 #[derive(Debug, thiserror::Error)]
@@ -126,32 +124,15 @@ pub fn write<T: Serialize>(
         let end = (start + MAX_CHUNK_PAYLOAD).min(compressed.len());
         let chunk = &compressed[start..end];
 
-        let float_bytes = &chunk[..chunk.len().min(MAX_FLOAT_PAYLOAD)];
-        let name_bytes = if chunk.len() > MAX_FLOAT_PAYLOAD {
-            &chunk[MAX_FLOAT_PAYLOAD..]
-        } else {
-            &[]
-        };
-
-        let mut float_padded = [0u8; 16];
-        float_padded[..float_bytes.len()].copy_from_slice(float_bytes);
-
-        let vals = [
-            f32::from_le_bytes(float_padded[0..4].try_into().unwrap()),
-            f32::from_le_bytes(float_padded[4..8].try_into().unwrap()),
-            f32::from_le_bytes(float_padded[8..12].try_into().unwrap()),
-            f32::from_le_bytes(float_padded[12..16].try_into().unwrap()),
-        ];
-
-        let cobs_encoded = cobs_encode(name_bytes);
+        let cobs_encoded = cobs_encode(chunk);
         let prefix = format!("DR{}_{}_{}_", domain_id, idx, total_chunks);
         let mut name_full = prefix.into_bytes();
         name_full.extend_from_slice(&cobs_encoded);
 
         current_extra_data.push(0); // VSLOT_SHPARAM
         write_sendstring(&mut current_extra_data, &name_full);
-        for v in &vals {
-            current_extra_data.extend_from_slice(&v.to_le_bytes());
+        for _ in 0..4 {
+            current_extra_data.extend_from_slice(&0f32.to_le_bytes());
         }
 
         chunks_in_packet += 1;
@@ -180,27 +161,25 @@ pub fn read<T: DeserializeOwned>(
     let mut total_chunks = None;
 
     let prefix_match = format!("DR{}_", domain_id);
+    let prefix_bytes = prefix_match.as_bytes();
 
     for vs_opt in &map.meta.vslots {
         if let Some(vs) = vs_opt {
             for p in &vs.params {
-                let name_str = p.name.to_utf8();
-                if name_str.starts_with(&prefix_match) {
-                    let parts: Vec<&str> = name_str.splitn(4, '_').collect();
-                    if parts.len() == 4 {
-                        if let (Ok(idx), Ok(tot)) = (parts[1].parse::<usize>(), parts[2].parse::<usize>()) {
+                let name_bytes = p.name.as_bytes();
+                
+                if name_bytes.starts_with(prefix_bytes) {
+                    let rest = &name_bytes[prefix_bytes.len()..];
+                    
+                    let mut parts = rest.splitn(3, |&b| b == b'_');
+                    if let (Some(idx_bytes), Some(tot_bytes), Some(cobs_data)) = (parts.next(), parts.next(), parts.next()) {
+                        let idx_str = std::str::from_utf8(idx_bytes).unwrap_or("");
+                        let tot_str = std::str::from_utf8(tot_bytes).unwrap_or("");
+                        
+                        if let (Ok(idx), Ok(tot)) = (idx_str.parse::<usize>(), tot_str.parse::<usize>()) {
                             total_chunks = Some(tot);
-                            
-                            let mut chunk_data = Vec::new();
-                            for &val in &p.values {
-                                chunk_data.extend_from_slice(&f32::to_le_bytes(val));
-                            }
-                            
-                            let cobs_data = parts[3].as_bytes();
-                            let decoded_name = cobs_decode(cobs_data)?;
-                            chunk_data.extend_from_slice(&decoded_name);
-                            
-                            chunks.insert(idx, chunk_data);
+                            let decoded_chunk = cobs_decode(cobs_data)?;
+                            chunks.insert(idx, decoded_chunk);
                         }
                     }
                 }
