@@ -220,6 +220,8 @@ pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
         }
     }
 
+    drop(state); // Drop write lock before acquiring read lock in tracker
+
     let num_edits = packets_to_send.len();
     if num_edits > 0 {
         crate::map_state::track_vslot_edits(server, num_edits);
