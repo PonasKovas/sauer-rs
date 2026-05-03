@@ -10,7 +10,7 @@ use tokio_util::sync::PollSender;
 
 use crate::{
     error::{Error, Result},
-    task::{PeerKey, PeerMsg, ToTask},
+    peer_task::{PeerCmd, PeerMsg},
     Packet,
 };
 
@@ -18,94 +18,61 @@ use crate::{
 
 /// The sending half of a [`Peer`] connection.
 ///
-/// Implements [`Sink<Packet>`].
+/// Implements [`Sink<Packet>`]. Dropping this triggers a graceful disconnect.
 pub struct PeerSender {
-    pub(crate) key: PeerKey,
-    pub(crate) task_tx: mpsc::Sender<ToTask>,
-    /// Backpressure-aware sender used by the `Sink` implementation.
-    poll_sender: PollSender<ToTask>,
-    /// The remote address of the peer.
+    cmd_tx: mpsc::Sender<PeerCmd>,
+    poll_sender: PollSender<PeerCmd>,
     pub(crate) addr: SocketAddr,
 }
 
 impl PeerSender {
-    pub(crate) fn new(key: PeerKey, task_tx: mpsc::Sender<ToTask>, addr: SocketAddr) -> Self {
-        let poll_sender = PollSender::new(task_tx.clone());
-        Self {
-            key,
-            task_tx,
-            poll_sender,
-            addr,
-        }
+    pub(crate) fn new(cmd_tx: mpsc::Sender<PeerCmd>, addr: SocketAddr) -> Self {
+        let poll_sender = PollSender::new(cmd_tx.clone());
+        Self { cmd_tx, poll_sender, addr }
     }
 
-    /// Get the remote address of the peer.
+    /// The remote address of the peer.
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// Send a packet, waiting until the internal send buffer has room.
+    pub async fn send_packet(&self, pkt: Packet) -> Result<()> {
+        self.cmd_tx.send(PeerCmd::Send(pkt)).await.map_err(|_| Error::ChannelClosed)
+    }
+
+    /// Send a packet without blocking.
+    ///
+    /// Returns `Err(Error::ChannelFull)` if the internal send buffer is at capacity.
+    pub fn try_send_packet(&self, pkt: Packet) -> Result<()> {
+        self.cmd_tx.try_send(PeerCmd::Send(pkt)).map_err(|e| match e {
+            tokio::sync::mpsc::error::TrySendError::Full(_) => Error::ChannelFull,
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => Error::ChannelClosed,
+        })
+    }
+
+    /// Initiate a graceful disconnect without blocking.
+    pub fn try_disconnect(&self, data: u32) {
+        let _ = self.cmd_tx.try_send(PeerCmd::Disconnect { data });
+    }
+
+    /// Initiate a graceful disconnect.
+    pub async fn disconnect(&self, data: u32) -> Result<()> {
+        self.cmd_tx.send(PeerCmd::Disconnect { data }).await.map_err(|_| Error::ChannelClosed)
     }
 }
 
 impl Drop for PeerSender {
     fn drop(&mut self) {
-        // Best-effort graceful disconnect when the sending half is dropped without
-        // an explicit call to `disconnect()`. Silently ignored if the task is gone.
-        let _ = self.task_tx.try_send(ToTask::Disconnect {
-            peer_key: self.key,
-            data: 0,
-        });
-    }
-}
-
-impl PeerSender {
-    /// Send a packet, waiting until the internal send buffer has room.
-    pub async fn send_packet(&self, pkt: Packet) -> Result<()> {
-        self.task_tx
-            .send(ToTask::Send {
-                peer_key: self.key,
-                packet: pkt,
-            })
-            .await
-            .map_err(|_| Error::ChannelClosed)
-    }
-
-    /// Send a packet without blocking. Returns `Err(Error::ChannelFull)` if the
-    /// internal send buffer is at capacity.
-    pub fn try_send_packet(&self, pkt: Packet) -> Result<()> {
-        self.task_tx
-            .try_send(ToTask::Send {
-                peer_key: self.key,
-                packet: pkt,
-            })
-            .map_err(|e| match e {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => Error::ChannelFull,
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => Error::ChannelClosed,
-            })
-    }
-
-    /// Initiate a graceful disconnect without blocking.
-    pub fn try_disconnect(&self, data: u32) {
-        let _ = self.task_tx.try_send(ToTask::Disconnect {
-            peer_key: self.key,
-            data,
-        });
-    }
-
-    /// Initiate a graceful disconnect.
-    pub async fn disconnect(&self, data: u32) -> Result<()> {
-        self.task_tx
-            .send(ToTask::Disconnect {
-                peer_key: self.key,
-                data,
-            })
-            .await
-            .map_err(|_| Error::ChannelClosed)
+        // Best-effort disconnect when sender is dropped without an explicit call.
+        // PeerTask also detects cmd_rx closure as a fallback.
+        let _ = self.cmd_tx.try_send(PeerCmd::Disconnect { data: 0 });
     }
 }
 
 impl Sink<Packet> for PeerSender {
     type Error = Error;
 
-    /// Waits until the backing MPSC channel has capacity (correct backpressure).
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         Pin::new(&mut self.poll_sender)
             .poll_reserve(cx)
@@ -113,12 +80,8 @@ impl Sink<Packet> for PeerSender {
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Packet) -> Result<()> {
-        let key = self.key;
         Pin::new(&mut self.poll_sender)
-            .send_item(ToTask::Send {
-                peer_key: key,
-                packet: item,
-            })
+            .send_item(PeerCmd::Send(item))
             .map_err(|_| Error::ChannelClosed)
     }
 
@@ -140,12 +103,11 @@ impl Sink<Packet> for PeerSender {
 /// Implements [`Stream<Item = Result<Packet>>`].
 pub struct PeerReceiver {
     pub rx: mpsc::Receiver<PeerMsg>,
-    /// The remote address of the peer.
     pub(crate) addr: SocketAddr,
 }
 
 impl PeerReceiver {
-    /// Get the remote address of the peer.
+    /// The remote address of the peer.
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
@@ -168,24 +130,8 @@ impl Stream for PeerReceiver {
 
 /// A connected ENet peer.
 ///
-/// Implements [`Sink<Packet>`] for sending and [`Stream<Item = Result<Packet>>`] for
-/// receiving. Can be split into a [`PeerSender`] and [`PeerReceiver`] with [`Peer::split`].
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use enet_rs::{Host, Packet};
-/// use futures::{SinkExt, StreamExt};
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let mut peer = Host::connect("127.0.0.1:7777", 2).await?;
-/// peer.send(Packet::reliable(b"hello".as_slice(), 0)).await?;
-/// while let Ok(pkt) = peer.recv().await {
-///     println!("got {} bytes on ch{}", pkt.data.len(), pkt.channel);
-/// }
-/// # Ok(())
-/// # }
-/// ```
+/// Implements [`Sink<Packet>`] and [`Stream<Item = Result<Packet>>`].
+/// Dropping this (or the [`PeerSender`] half after a split) triggers a graceful disconnect.
 pub struct Peer {
     sender: PeerSender,
     receiver: PeerReceiver,
@@ -193,43 +139,37 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(
-        key: PeerKey,
-        task_tx: mpsc::Sender<ToTask>,
+        cmd_tx: mpsc::Sender<PeerCmd>,
         rx: mpsc::Receiver<PeerMsg>,
         addr: SocketAddr,
     ) -> Self {
         Self {
-            sender: PeerSender::new(key, task_tx, addr),
+            sender: PeerSender::new(cmd_tx, addr),
             receiver: PeerReceiver { rx, addr },
         }
     }
 
-    /// Split into independent sender and receiver.
+    /// Split into independent sender and receiver halves.
     pub fn split(self) -> (PeerSender, PeerReceiver) {
         (self.sender, self.receiver)
     }
 
-    /// The peer's slot key (for use with advanced [`Host`][crate::Host] APIs).
-    pub fn key(&self) -> PeerKey {
-        self.sender.key
-    }
-
-    /// Get the remote address of the peer.
+    /// The remote address of this peer.
     pub fn addr(&self) -> SocketAddr {
         self.sender.addr
     }
 
     /// Send a packet.
-    pub async fn send_packet(&self, pkt: Packet) -> crate::error::Result<()> {
+    pub async fn send_packet(&self, pkt: Packet) -> Result<()> {
         self.sender.send_packet(pkt).await
     }
 
-    /// Receive the next packet.
+    /// Receive the next packet or disconnect event.
     ///
-    /// Returns `Err(Error::Disconnected(Some(data)))` when the remote peer sends a
-    /// graceful disconnect (with the application-defined reason in `data`).
-    /// Returns `Err(Error::Disconnected(None))` on connection timeout.
-    /// Returns `Err(Error::ChannelClosed)` when the host task has shut down.
+    /// - `Ok(pkt)` — data arrived.
+    /// - `Err(Disconnected(Some(data)))` — remote sent a graceful disconnect.
+    /// - `Err(Disconnected(None))` — connection timed out.
+    /// - `Err(ChannelClosed)` — the host task shut down.
     pub async fn recv(&mut self) -> Result<Packet> {
         match self.receiver.rx.recv().await {
             Some(Ok(pkt)) => Ok(pkt),
@@ -239,36 +179,29 @@ impl Peer {
     }
 
     /// Initiate a graceful disconnect.
-    pub async fn disconnect(&self, data: u32) -> crate::error::Result<()> {
+    pub async fn disconnect(&self, data: u32) -> Result<()> {
         self.sender.disconnect(data).await
     }
 }
 
-// Sink: delegate to sender
 impl Sink<Packet> for Peer {
     type Error = Error;
-
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         Pin::new(&mut self.sender).poll_ready(cx)
     }
-
     fn start_send(mut self: Pin<&mut Self>, item: Packet) -> Result<()> {
         Pin::new(&mut self.sender).start_send(item)
     }
-
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         Pin::new(&mut self.sender).poll_flush(cx)
     }
-
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         Pin::new(&mut self.sender).poll_close(cx)
     }
 }
 
-// Stream: delegate to receiver
 impl Stream for Peer {
     type Item = Result<Packet>;
-
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Packet>>> {
         Pin::new(&mut self.receiver).poll_next(cx)
     }
