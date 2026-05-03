@@ -168,40 +168,66 @@ impl StoredTrap {
     }
 }
 
+pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channel1::EditVSlot> {
+    let sel = crate::trap::placement::get_selections(trap.button_pos, trap.button_size, trap.button_orient).0;
+    let mut packets = Vec::new();
+    
+    let mut data_blocks = crate::trap::vslot_store::encode_payload(
+        trap,
+        crate::trap::TRAP_STORE_VERSION,
+        crate::trap::TRAP_DOMAIN,
+    ).unwrap_or_default();
+
+    let color_bytes: Vec<u8> = crate::trap::BUTTON_COLOR_READY.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let mut color_param = crate::trap::placement::pack_vslot_bytes(&[(7, &color_bytes)]);
+    if color_param.ends_with(&[0xFF]) { color_param.pop(); }
+    
+    if !data_blocks.is_empty() {
+        color_param.append(&mut data_blocks.remove(0));
+    } else {
+        color_param.push(0xFF);
+    }
+
+    packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 0, all_faces: true, extra_data: color_param });
+    
+    for block in data_blocks {
+        packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: true, extra_data: block });
+    }
+
+    let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
+    packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: false, extra_data: crate::trap::placement::pack_vslot_bytes(&[(1, &scale_bytes)]) });
+
+    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect();
+    packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: true, extra_data: crate::trap::placement::pack_vslot_bytes(&[(6, &alpha_bytes)]) });
+
+    packets
+}
+
 pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
     let owner_cn = server.get_cn(owner_id).unwrap_or(0) as i32;
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
 
-    if let Some(map) = state.map.as_mut() {
-        let sel = if let Some(first) = stored_traps.first() {
-            super::placement::get_selections(first.button_pos, first.button_size, first.button_orient).0
-        } else {
-            sauer_map::Selection {
-                o: sauer_proto::data::Vec3 { x: 0, y: 0, z: 0 },
-                s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
-                grid: 1,
-                orient: sauer_proto::data::Orient::Left,
-                cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
-            }
-        };
+    let mut packets_to_send = Vec::new();
 
-        match crate::trap::vslot_store::write(
-            &sel,
-            &stored_traps,
-            super::TRAP_STORE_VERSION,
-            super::TRAP_DOMAIN,
-        ) {
-            Ok(packets) => {
-                for pkt in &packets {
-                    map.handle_edit_v_slot(pkt);
-                    server.broadcast_chan1(&Client {
-                        client_num: owner_cn,
-                        packet: pkt.clone(),
-                    });
-                }
+    if let Some(map) = state.map.as_mut() {
+        for trap in stored_traps {
+            let packets = generate_trap_vslot_packets(&trap);
+            for pkt in packets {
+                map.handle_edit_v_slot(&pkt);
+                packets_to_send.push(pkt);
             }
-            Err(e) => tracing::error!("Failed to save trap store: {}", e),
+        }
+    }
+
+    let num_edits = packets_to_send.len();
+    if num_edits > 0 {
+        crate::map_state::track_vslot_edits(server, num_edits);
+        for pkt in packets_to_send {
+            server.broadcast_chan1(&Client {
+                client_num: owner_cn,
+                packet: pkt,
+            });
         }
     }
 }

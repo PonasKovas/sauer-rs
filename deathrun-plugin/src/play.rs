@@ -97,21 +97,32 @@ impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = MapState::from_bytes(data).map_err(|e| e.to_string())?;
         let mut traps = Vec::new();
+        // Universal cleanup of ANY legacy entity store entities at negative coords and magic active traps
+        for ent in &mut state.world.entities {
+            if ent.position[2] < -9000.0 {
+                ent.ent_type = ogz_rs::data::EntityType::Empty;
+                ent.attrs = [0; 5];
+            }
+            if ent.ent_type == ogz_rs::data::EntityType::Particles && ent.attrs[3] == 1337 && ent.attrs[4] == 7331 {
+                ent.ent_type = ogz_rs::data::EntityType::Empty;
+                ent.attrs = [0; 5];
+            }
+        }
+
         let mut loaded_from_entity_store = false;
-        match crate::trap::vslot_store::read::<Vec<StoredTrap>>(
+        match crate::trap::vslot_store::read_all::<StoredTrap>(
             &state,
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,
         ) {
-            Ok(Some(stored)) => {
+            Ok(stored) if !stored.is_empty() => {
                 for st in &stored {
                     st.apply_reset_to_world(&mut state.world);
                 }
                 traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
                 info!("Loaded {} traps from map '{name}' (vslot store)", traps.len());
             }
-            Ok(None) | Err(_) => {
-                // Fallback to legacy entity store
+            _ => {
                 match crate::entity_store::read::<Vec<StoredTrap>>(
                     &state.world,
                     TRAP_STORE_VERSION,
@@ -139,46 +150,8 @@ impl PlayMaps {
                     extra_data: vec![],
                 };
             }
-            // Active Traps are not automatically migrated because they are fleeting.
-            // We just let the normal logic clear them out below.
+            crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
         }
-
-        match crate::entity_store::read::<Vec<crate::trap::ActiveTrap>>(
-            &state.world,
-            crate::trap::ACTIVE_TRAP_STORE_VERSION,
-            crate::trap::ACTIVE_TRAP_DOMAIN,
-        ) {
-            Ok(Some(active_traps)) => {
-                let empty_ent = ogz_rs::data::Entity {
-                    position: [0.0; 3],
-                    attrs: [0; 5],
-                    ent_type: ogz_rs::data::EntityType::Empty,
-                    extra_data: vec![],
-                };
-                for active in active_traps {
-                    if let Some(pid) = active.progress_bar_ent_id {
-                        if pid < state.world.entities.len() {
-                            state.world.entities[pid] = empty_ent.clone();
-                        }
-                    }
-                    for id in active.assigned_ids {
-                        if id < state.world.entities.len() {
-                            state.world.entities[id] = empty_ent.clone();
-                        }
-                    }
-                }
-                crate::entity_store::write(
-                    &mut state.world,
-                    &Vec::<crate::trap::ActiveTrap>::new(),
-                    crate::trap::ACTIVE_TRAP_STORE_VERSION,
-                    crate::trap::ACTIVE_TRAP_DOMAIN,
-                )
-                .unwrap_or_default();
-            }
-            _ => {}
-        }
-
-        crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
 
         if !self.rotation.contains(&name) {
             self.rotation.push(name.clone());

@@ -1,6 +1,5 @@
 use crate::map_state::get_server_state;
 use cube_string::IntoCubeStringLossy;
-use rand::seq::SliceRandom;
 use sauer_proto::{
     Client, channel1,
     data::{SelInfo, Vec3},

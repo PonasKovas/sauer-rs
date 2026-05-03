@@ -367,6 +367,7 @@ impl Plugin for DeathrunEdit {
             state.traps.clear();
             state.trap_edit = None;
             state.active_traps.clear();
+            state.vslot_edits.clear();
         }
         for client_id in server.client_ids() {
             server.set_spectator(client_id, true);
@@ -412,14 +413,25 @@ impl Plugin for DeathrunEdit {
             Ok(mut state) => {
                 let world_size = state.world.size;
 
+                for ent in &mut state.world.entities {
+                    if ent.position[2] < -9000.0 {
+                        ent.ent_type = ogz_rs::data::EntityType::Empty;
+                        ent.attrs = [0; 5];
+                    }
+                    if ent.ent_type == ogz_rs::data::EntityType::Particles && ent.attrs[3] == 1337 && ent.attrs[4] == 7331 {
+                        ent.ent_type = ogz_rs::data::EntityType::Empty;
+                        ent.attrs = [0; 5];
+                    }
+                }
+
                 let mut loaded_traps = Vec::new();
                 let mut loaded_from_entity_store = false;
-                match crate::trap::vslot_store::read::<Vec<crate::trap::StoredTrap>>(
+                match crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
                     &state,
                     crate::trap::TRAP_STORE_VERSION,
                     crate::trap::TRAP_DOMAIN,
                 ) {
-                    Ok(Some(stored_traps)) => {
+                    Ok(stored_traps) if !stored_traps.is_empty() => {
                         for st in &stored_traps {
                             st.apply_reset_to_world(&mut state.world);
                         }
@@ -429,9 +441,8 @@ impl Plugin for DeathrunEdit {
                             .collect();
                         info!("Loaded {} traps from map vslot store", loaded_traps.len());
                     }
-                    Ok(None) => {}
-                    Err(e) => {
-                        let msg = format!("Failed to load vslot trap store: {e}. Trying legacy entity store...");
+                    _ => {
+                        let msg = format!("Failed to load vslot trap store. Trying legacy entity store...");
                         warn!("{msg}");
                         match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(
                             &state.world,
@@ -476,62 +487,14 @@ impl Plugin for DeathrunEdit {
                             extra_data: vec![],
                         };
                     }
-                    // Writing the migrated traps immediately guarantees the first broadcasted map will contain vslot stores.
-                    let sel = if let Some(first) = loaded_traps.first() {
-                        crate::trap::placement::get_selections(first.button_pos, first.button_size, first.button_orient).0
-                    } else {
-                        sauer_map::Selection {
-                            o: sauer_proto::data::Vec3 { x: 0, y: 0, z: 0 },
-                            s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
-                            grid: 1,
-                            orient: sauer_proto::data::Orient::Left,
-                            cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
-                        }
-                    };
-                    let stored: Vec<crate::trap::StoredTrap> = loaded_traps.iter().map(crate::trap::StoredTrap::from_trap).collect();
-                    if let Ok(packets) = crate::trap::vslot_store::write(&sel, &stored, crate::trap::TRAP_STORE_VERSION, crate::trap::TRAP_DOMAIN) {
+                    crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
+                    for trap in &loaded_traps {
+                        let packets = crate::trap::stored::generate_trap_vslot_packets(&crate::trap::StoredTrap::from_trap(trap));
                         for p in &packets {
                             state.handle_edit_v_slot(p);
                         }
                     }
                 }
-
-                match crate::entity_store::read::<Vec<crate::trap::ActiveTrap>>(
-                    &state.world,
-                    crate::trap::ACTIVE_TRAP_STORE_VERSION,
-                    crate::trap::ACTIVE_TRAP_DOMAIN,
-                ) {
-                    Ok(Some(active_traps)) => {
-                        let empty_ent = ogz_rs::data::Entity {
-                            position: [0.0; 3],
-                            attrs: [0; 5],
-                            ent_type: ogz_rs::data::EntityType::Empty,
-                            extra_data: vec![],
-                        };
-                        for active in active_traps {
-                            if let Some(pid) = active.progress_bar_ent_id {
-                                if pid < state.world.entities.len() {
-                                    state.world.entities[pid] = empty_ent.clone();
-                                }
-                            }
-                            for id in active.assigned_ids {
-                                if id < state.world.entities.len() {
-                                    state.world.entities[id] = empty_ent.clone();
-                                }
-                            }
-                        }
-                        crate::entity_store::write(
-                            &mut state.world,
-                            &Vec::<crate::trap::ActiveTrap>::new(),
-                            crate::trap::ACTIVE_TRAP_STORE_VERSION,
-                            crate::trap::ACTIVE_TRAP_DOMAIN,
-                        )
-                        .unwrap_or_default();
-                    }
-                    _ => {}
-                }
-
-                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
 
                 state.update_server_items(server);
                 {
@@ -564,6 +527,8 @@ impl Plugin for DeathrunEdit {
     async fn on_client_welcomed(&self, ctx: &mut Context) {
         let id = ctx.id();
         let server = ctx.server();
+        crate::map_state::get_server_state(server).read().unwrap().vslot_edits.insert(id, 0);
+
         if server.client_count() == 1 {
             server.set_privilege(id, Privilege::Master);
             server.set_spectator(id, false);
@@ -644,6 +609,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
+        crate::map_state::track_vslot_edits(ctx.server(), 1);
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
         check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
@@ -819,6 +785,11 @@ impl Plugin for DeathrunEdit {
         if packet.size >= 0 {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
             state.map = Some(MapState::new_empty(world_size));
+            state.traps.clear();
+            state.active_traps.clear();
+            state.trap_edit = None;
+            state.trap_edit_particle_ent = None;
+            state.vslot_edits.clear();
         } else if let Some(map) = state.map.as_mut() {
             map.enlarge();
         }

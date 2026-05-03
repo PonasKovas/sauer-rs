@@ -362,6 +362,7 @@ pub struct DeathrunState {
     pub trap_edit: Option<crate::trap::TrapEditState>,
     pub trap_edit_particle_ent: Option<usize>,
     pub active_traps: Vec<crate::trap::ActiveTrap>,
+    pub vslot_edits: dashmap::DashMap<u64, usize>,
 }
 
 impl Default for DeathrunState {
@@ -373,6 +374,20 @@ impl Default for DeathrunState {
             trap_edit: None,
             trap_edit_particle_ent: None,
             active_traps: Vec::new(),
+            vslot_edits: dashmap::DashMap::new(),
+        }
+    }
+}
+
+pub fn track_vslot_edits(server: &Server, count: usize) {
+    let state = get_server_state(server).read().unwrap();
+    for mut entry in state.vslot_edits.iter_mut() {
+        let id = *entry.key();
+        let old_count = *entry;
+        let new_count = old_count + count;
+        *entry = new_count;
+        if new_count >= 50000 && old_count < 50000 {
+            crate::ui::send_warn(server, id, "\x0C3[WARNING] Your game memory is approaching the engine limit due to heavy editing. Please /savemap and /reconnect to prevent visual corruption.");
         }
     }
 }

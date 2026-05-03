@@ -53,32 +53,6 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
     let server_clone = std::sync::Arc::clone(server);
     tokio::spawn(async move {
-        let ent_id = {
-            let mut state = get_server_state(&server_clone).write().unwrap();
-            let mut id = None;
-            if let Some(map) = state.map.as_mut() {
-                let blank = ogz_rs::data::Entity {
-                    position: [0.0, 0.0, -10000.0],
-                    attrs: [0; 5],
-                    ent_type: ogz_rs::data::EntityType::Particles, // Secured immediately
-                    extra_data: vec![],
-                };
-                let i = map
-                    .world
-                    .entities
-                    .iter()
-                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
-                    .unwrap_or_else(|| {
-                        let idx = map.world.entities.len();
-                        map.world.entities.push(blank.clone());
-                        idx
-                    });
-                map.world.entities[i] = blank;
-                id = Some(i);
-            }
-            id
-        };
-
         // Calculate progress bar position to be exactly 0.5 units off the face
         let mut px = button_pos[0] as f32 + button_size as f32 / 2.0;
         let mut py = button_pos[1] as f32 + button_size as f32 / 2.0;
@@ -99,6 +73,32 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         } else if d == 2 {
             pz = button_pos[2] as f32 + offset;
         }
+
+        let ent_id = {
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            let mut id = None;
+            if let Some(map) = state.map.as_mut() {
+                let blank = ogz_rs::data::Entity {
+                    position: [px, py, pz],
+                    attrs: [0, 0, 0, 1337, 7331],
+                    ent_type: ogz_rs::data::EntityType::Particles, // Secured immediately
+                    extra_data: vec![],
+                };
+                let i = map
+                    .world
+                    .entities
+                    .iter()
+                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                    .unwrap_or_else(|| {
+                        let idx = map.world.entities.len();
+                        map.world.entities.push(blank.clone());
+                        idx
+                    });
+                map.world.entities[i] = blank;
+                id = Some(i);
+            }
+            id
+        };
 
         let actor_cn = server_clone.get_cn(actor_id).unwrap_or(0) as i32;
 
@@ -133,7 +133,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                                 z: pz,
                             },
                             type_: sauer_proto::data::EntityType::Particles,
-                            attrs: [5, 100, color as i32, 0, 0],
+                            attrs: [5, 100, color as i32, 1337, 7331],
                         },
                     },
                 );
@@ -220,40 +220,6 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 progress_bar_ent_id: ent_id,
                 assigned_ids: assigned_ids.clone(),
             });
-            let active_traps = state.active_traps.clone();
-            if let Some(map) = state.map.as_mut() {
-                let changed = crate::entity_store::write(
-                    &mut map.world,
-                    &active_traps,
-                    crate::trap::ACTIVE_TRAP_STORE_VERSION,
-                    crate::trap::ACTIVE_TRAP_DOMAIN,
-                )
-                .unwrap_or_default();
-                let mut batch = Vec::new();
-                for (id, ent) in changed {
-                    let ent_type = ent.ent_type;
-                    batch.push(sauer_proto::Client {
-                        client_num: actor_cn,
-                        packet: sauer_proto::channel1::EditEnt {
-                            ent_id: id as i32,
-                            pos: sauer_proto::data::Vec3 {
-                                x: ent.position[0],
-                                y: ent.position[1],
-                                z: ent.position[2],
-                            },
-                            type_: ent_type,
-                            attrs: ent.attrs.map(|x| x as i32),
-                        },
-                    });
-                    if batch.len() >= 50 {
-                        server_clone.broadcast_chan1(batch.clone());
-                        batch.clear();
-                    }
-                }
-                if !batch.is_empty() {
-                    server_clone.broadcast_chan1(batch);
-                }
-            }
         }
 
         if let Some(epos) = server_clone.players.try_get(actor_id).map(|p| p.position) {
@@ -370,7 +336,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                                         z: pz,
                                     },
                                     type_: sauer_proto::data::EntityType::Particles,
-                                    attrs: [5, progress as i32, color as i32, 0, 0],
+                                    attrs: [5, progress as i32, color as i32, 1337, 7331],
                                 },
                             },
                         );
@@ -438,40 +404,6 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
             if is_edit_mode {
                 state.active_traps.retain(|t| t.trap_idx != trap_idx);
-                let active_traps = state.active_traps.clone();
-                if let Some(map) = state.map.as_mut() {
-                    let changed = crate::entity_store::write(
-                        &mut map.world,
-                        &active_traps,
-                        crate::trap::ACTIVE_TRAP_STORE_VERSION,
-                        crate::trap::ACTIVE_TRAP_DOMAIN,
-                    )
-                    .unwrap_or_default();
-                    let mut batch = Vec::new();
-                    for (id, ent) in changed {
-                        let ent_type = ent.ent_type;
-                        batch.push(sauer_proto::Client {
-                            client_num: actor_cn,
-                            packet: sauer_proto::channel1::EditEnt {
-                                ent_id: id as i32,
-                                pos: sauer_proto::data::Vec3 {
-                                    x: ent.position[0],
-                                    y: ent.position[1],
-                                    z: ent.position[2],
-                                },
-                                type_: ent_type,
-                                attrs: ent.attrs.map(|x| x as i32),
-                            },
-                        });
-                        if batch.len() >= 50 {
-                            server_clone.broadcast_chan1(batch.clone());
-                            batch.clear();
-                        }
-                    }
-                    if !batch.is_empty() {
-                        server_clone.broadcast_chan1(batch);
-                    }
-                }
             }
         }
     });
@@ -491,7 +423,7 @@ pub fn set_button_color(
     let data = pack_vslot_bytes(&[(7, &color_bytes)]);
     let packet = channel1::EditVSlot {
         sel: adj_sel,
-        delta: 0,
+        delta: 1, // MUST be 1 to not wipe data params
         all_faces: true,
         extra_data: data,
     };

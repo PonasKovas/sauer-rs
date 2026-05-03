@@ -10,7 +10,7 @@ use super::{BUTTON_COLOR_READY, BUTTON_FRONT_TEX, BUTTON_SIDE_TEX};
 
 // ─── vslot packing helpers ────────────────────────────────────────────────────
 
-pub(super) fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
+pub fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
     let mut buf = Vec::new();
     for (type_byte, data) in entries {
         buf.push(*type_byte);
@@ -87,7 +87,7 @@ pub(super) fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &
         .collect();
     let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
 
-    // Step 1: color, all faces
+    // Step 1: color, all faces. Delta 0 resets the VSlot completely.
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
         delta: 0,
@@ -95,18 +95,18 @@ pub(super) fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &
         extra_data: pack_vslot_bytes(&[(7, &color_bytes)]),
     });
 
-    // Step 2: scale, front face only
+    // Step 2: scale, front face only. Delta 1 adds to the new VSlot.
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
-        delta: 0,
+        delta: 1,
         all_faces: false,
         extra_data: pack_vslot_bytes(&[(1, &scale_bytes)]),
     });
 
-    // Step 3: alpha, all faces
+    // Step 3: alpha, all faces. Delta 1 adds to the new VSlot.
     map.handle_edit_v_slot(&channel1::EditVSlot {
         sel: sel.clone(),
-        delta: 0,
+        delta: 1,
         all_faces: true,
         extra_data: pack_vslot_bytes(&[(6, &alpha_bytes)]),
     });
@@ -160,7 +160,7 @@ pub fn reset_button_colors_by_pos(
         let data = pack_vslot_bytes(&[(7, &color_bytes)]);
         map.handle_edit_v_slot(&sauer_proto::channel1::EditVSlot {
             sel: adj_sel,
-            delta: 0,
+            delta: 1,
             all_faces: true,
             extra_data: data,
         });
