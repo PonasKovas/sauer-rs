@@ -102,7 +102,7 @@ impl Sink<Packet> for PeerSender {
 ///
 /// Implements [`Stream<Item = Result<Packet>>`].
 pub struct PeerReceiver {
-    pub rx: mpsc::Receiver<PeerMsg>,
+    rx: mpsc::Receiver<PeerMsg>,
     pub(crate) addr: SocketAddr,
 }
 
@@ -110,6 +110,20 @@ impl PeerReceiver {
     /// The remote address of the peer.
     pub fn addr(&self) -> SocketAddr {
         self.addr
+    }
+
+    /// Receive the next packet or disconnect event.
+    ///
+    /// - `Ok(pkt)` — data arrived.
+    /// - `Err(Disconnected(Some(data)))` — remote sent a graceful disconnect.
+    /// - `Err(Disconnected(None))` — connection timed out.
+    /// - `Err(ChannelClosed)` — the host task shut down.
+    pub async fn recv(&mut self) -> Result<Packet> {
+        match self.rx.recv().await {
+            Some(Ok(pkt)) => Ok(pkt),
+            Some(Err(data)) => Err(Error::Disconnected(data)),
+            None => Err(Error::ChannelClosed),
+        }
     }
 }
 

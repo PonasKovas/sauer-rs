@@ -2,7 +2,6 @@
 use bytes::{Bytes, BytesMut};
 use tracing::warn;
 
-use crate::channel::encode_command;
 use crate::protocol::{
     self, CHANNEL_ID_CONNECTION, CMD_CONNECT, CMD_DISCONNECT, CMD_SEND_FRAGMENT,
     CMD_SEND_RELIABLE, CMD_SEND_UNRELIABLE, CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED,
@@ -14,6 +13,21 @@ use crate::protocol::{
 use crate::{Packet, SendMode};
 
 use super::{OutstandingReliable, PeerState, PeerTask};
+
+/// Encode a command into bytes (without the datagram header).
+fn encode_command(
+    cmd_type: u8,
+    flags: u8,
+    channel_id: u8,
+    reliable_seq: u16,
+    body_writer: impl FnOnce(&mut BytesMut),
+) -> Bytes {
+    let mut buf = BytesMut::with_capacity(64);
+    buf.extend_from_slice(&[cmd_type | flags, channel_id]);
+    buf.extend_from_slice(&reliable_seq.to_be_bytes());
+    body_writer(&mut buf);
+    buf.freeze()
+}
 
 /// Maximum reliable packets queued while the send window is full.
 const MAX_PENDING_SEND: usize = 1024;
@@ -291,8 +305,8 @@ impl PeerTask {
     }
 
     async fn send_unsequenced(&mut self, pkt: Packet, ch: u8, now_ms: u32) {
-        let group = self.channels.get_mut(ch as usize)
-            .map(|c| c.next_unsequenced_group()).unwrap_or(0);
+        let Some(chan) = self.channels.get_mut(ch as usize) else { return; };
+        let group = chan.next_unsequenced_group();
         let data = pkt.data;
         let data_len = data.len() as u16;
         let cmd = encode_command(CMD_SEND_UNSEQUENCED, COMMAND_FLAG_UNSEQUENCED, ch, 0, move |buf| {

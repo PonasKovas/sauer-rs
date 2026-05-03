@@ -11,9 +11,6 @@ pub enum Error {
     #[error("peer disconnected (data={0:?})")]
     Disconnected(Option<u32>),
 
-    #[error("connection refused")]
-    ConnectionRefused,
-
     #[error("invalid packet: {0}")]
     InvalidPacket(&'static str),
 
@@ -22,9 +19,6 @@ pub enum Error {
 
     #[error("channel full")]
     ChannelFull,
-
-    #[error("connect ID mismatch")]
-    ConnectIdMismatch,
 
     #[error("too many peers")]
     TooManyPeers,

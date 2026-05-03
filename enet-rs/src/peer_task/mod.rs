@@ -105,7 +105,7 @@ pub(crate) struct PeerTask {
     pub(super) fragment_bytes_in_flight: usize,
     pub(super) packet_throttle_epoch: u32,
     pub(super) rtt_at_throttle_epoch: u32,
-    pub(super) incoming_reliable_seq: u16,
+    pub(super) connect_user_data: u32,
     pub(super) outgoing_reliable_seq: u16,
     pub(super) connect_seq: u16,
 
@@ -169,7 +169,7 @@ impl PeerTask {
             fragment_bytes_in_flight: 0,
             packet_throttle_epoch: 0,
             rtt_at_throttle_epoch: DEFAULT_RTT_MS,
-            incoming_reliable_seq: 0,
+            connect_user_data: 0,
             outgoing_reliable_seq: 0,
             connect_seq: 0,
             use_checksum,
@@ -217,8 +217,7 @@ impl PeerTask {
         t.connect_id = rand::thread_rng().gen();
         t.channels = (0..channel_count.max(1)).map(|_| Channel::new()).collect();
         t.connect_reply = Some(reply);
-        // user_data stored temporarily so begin_connect can read it
-        t.outgoing_peer_id = user_data as u16; // reused field; overwritten after connect
+        t.connect_user_data = user_data;
         t
     }
 
@@ -355,8 +354,7 @@ impl PeerTask {
         // Client side: send CMD_CONNECT immediately.
         if self.connect_reply.is_some() {
             let now_ms = self.now_ms();
-            let user_data = self.outgoing_peer_id as u32;
-            self.outgoing_peer_id = crate::protocol::PEER_ID_UNASSIGNED;
+            let user_data = self.connect_user_data;
             let cmd = self.build_connect_cmd(user_data, now_ms);
             self.emit(&[cmd], now_ms).await;
         }

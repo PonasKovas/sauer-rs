@@ -155,10 +155,9 @@ impl SauerReceiver {
                 return Ok(msg);
             }
 
-            let pkt = match self.rx.rx.recv().await {
-                Some(Ok(x)) => x,
-                Some(Err(e)) => bail!("enet connection error: {e:?}"),
-                None => bail!("enet packet read channel lost sender"),
+            let pkt = match self.rx.recv().await {
+                Ok(x) => x,
+                Err(e) => bail!("enet connection error: {e}"),
             };
 
             match pkt.channel {

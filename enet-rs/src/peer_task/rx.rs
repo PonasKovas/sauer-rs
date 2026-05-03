@@ -75,7 +75,7 @@ impl PeerTask {
         body: CommandBody,
         sent_time: Option<u16>,
         now_ms: u32,
-        pending_acks: &mut Vec<bytes::Bytes>,
+        _pending_acks: &mut Vec<bytes::Bytes>,
     ) {
         let hdr_has_ack = hdr.has_ack_flag();
         let hdr_channel = hdr.channel_id;
@@ -176,7 +176,6 @@ impl PeerTask {
             }
             _ => {}
         }
-        let _ = pending_acks; // consumed above where needed
     }
 
     // ── CONNECT (server side) ─────────────────────────────────────────────────
@@ -228,7 +227,6 @@ impl PeerTask {
         self.throttle_deceleration = connect.throttle_deceleration;
         self.last_send_time = now_ms;
         self.last_receive_time = now_ms;
-        self.incoming_reliable_seq = hdr.reliable_seq;
         self.channels = (0..ch).map(|_| crate::channel::Channel::new()).collect();
 
         let ack_opt = sent_time.map(|st| Self::ack(CHANNEL_ID_CONNECTION, hdr.reliable_seq, st));
@@ -264,7 +262,7 @@ impl PeerTask {
 
     // ── VERIFY_CONNECT (client side) ──────────────────────────────────────────
 
-    async fn on_verify_connect(&mut self, vc: VerifyConnectCmd, hdr: CommandHeader, now_ms: u32) {
+    async fn on_verify_connect(&mut self, vc: VerifyConnectCmd, _hdr: CommandHeader, now_ms: u32) {
         if self.state != PeerState::Connecting || vc.connect_id != self.connect_id {
             return;
         }
@@ -278,7 +276,6 @@ impl PeerTask {
         self.throttle_deceleration = vc.throttle_deceleration;
         self.state = PeerState::Connected;
         self.last_receive_time = now_ms;
-        self.incoming_reliable_seq = hdr.reliable_seq;
 
         // Remove CMD_CONNECT from outstanding (VERIFY_CONNECT implicitly ACKs it).
         let connect_seq = self.connect_seq;

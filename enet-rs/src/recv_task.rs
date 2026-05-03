@@ -140,7 +140,10 @@ impl RecvTask {
         user_data: u32,
         reply: oneshot::Sender<Result<Peer, Error>>,
     ) -> Option<PeerKey> {
-        let idx = self.alloc_slot()?;
+        let Some(idx) = self.alloc_slot() else {
+            let _ = reply.send(Err(Error::TooManyPeers));
+            return None;
+        };
         let key = PeerKey(idx);
         let (inbox_tx, inbox_rx) = mpsc::channel(256);
 
@@ -275,9 +278,7 @@ impl RecvTask {
                         }
                     }
                     Some(HostCmd::Connect { addr, channel_count, data, reply }) => {
-                        if self.spawn_client_peer(addr, channel_count, data, reply).is_none() {
-                            // No slot — drop reply, caller will get TimedOut/ChannelClosed.
-                        }
+                        let _ = self.spawn_client_peer(addr, channel_count, data, reply);
                     }
                 },
                 notify = self.notify_rx.recv() => match notify {

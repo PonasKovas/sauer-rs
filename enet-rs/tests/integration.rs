@@ -243,10 +243,9 @@ async fn test_split_peer() {
         .await
         .unwrap();
 
-    let reply = timeout(Duration::from_secs(5), receiver.rx.recv())
+    let reply = timeout(Duration::from_secs(5), receiver.recv())
         .await
         .expect("timeout")
-        .expect("channel closed")
         .expect("disconnected");
 
     assert_eq!(reply.data.as_ref(), b"split works");
