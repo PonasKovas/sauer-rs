@@ -88,7 +88,9 @@ impl Server {
 
         // Introduce all existing players to the new player and send their clipboards.
         for other_id in self.client_ids().into_iter().filter(|&other| other != id) {
-            let Some(other_cn) = self.get_cn(other_id) else { continue; };
+            let Some(other_cn) = self.get_cn(other_id) else {
+                continue;
+            };
             let pd = self.players.get(other_id);
             let name = pd.name.clone();
             let player_model = pd.model;

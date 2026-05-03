@@ -193,7 +193,17 @@ impl PeerTask {
         incoming_bw: u32,
         outgoing_bw: u32,
     ) -> Self {
-        let mut t = Self::base(key, socket, inbox_rx, notify_tx, from, use_checksum, host_mtu, incoming_bw, outgoing_bw);
+        let mut t = Self::base(
+            key,
+            socket,
+            inbox_rx,
+            notify_tx,
+            from,
+            use_checksum,
+            host_mtu,
+            incoming_bw,
+            outgoing_bw,
+        );
         t.accept_tx = Some(accept_tx);
         t.state = PeerState::AcknowledgingConnect;
         t
@@ -213,7 +223,17 @@ impl PeerTask {
         incoming_bw: u32,
         outgoing_bw: u32,
     ) -> Self {
-        let mut t = Self::base(key, socket, inbox_rx, notify_tx, addr, use_checksum, host_mtu, incoming_bw, outgoing_bw);
+        let mut t = Self::base(
+            key,
+            socket,
+            inbox_rx,
+            notify_tx,
+            addr,
+            use_checksum,
+            host_mtu,
+            incoming_bw,
+            outgoing_bw,
+        );
         t.connect_id = rand::thread_rng().gen();
         t.channels = (0..channel_count.max(1)).map(|_| Channel::new()).collect();
         t.connect_reply = Some(reply);
@@ -245,7 +265,9 @@ impl PeerTask {
     }
 
     pub(super) fn initial_rtt_timeout(&self) -> u32 {
-        self.rtt.saturating_add(self.rtt_var.saturating_mul(4)).max(200)
+        self.rtt
+            .saturating_add(self.rtt_var.saturating_mul(4))
+            .max(200)
     }
 
     pub(super) fn next_connect_seq(&mut self) -> u16 {
@@ -305,10 +327,7 @@ impl PeerTask {
         }
     }
 
-    fn collect_service_actions(
-        &mut self,
-        now_ms: u32,
-    ) -> (bool, Vec<Bytes>, bool, Option<u32>) {
+    fn collect_service_actions(&mut self, now_ms: u32) -> (bool, Vec<Bytes>, bool, Option<u32>) {
         let mut timed_out = false;
         let mut retransmits = Vec::new();
 
@@ -337,7 +356,11 @@ impl PeerTask {
 
         let disconnect_later = if !timed_out {
             if let PeerState::DisconnectLater(data) = self.state {
-                if self.outgoing_reliable.is_empty() { Some(data) } else { None }
+                if self.outgoing_reliable.is_empty() {
+                    Some(data)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -409,6 +432,8 @@ impl PeerTask {
             }
         }
 
-        let _ = self.notify_tx.try_send(PeerNotify::Removed { key: self.key });
+        let _ = self
+            .notify_tx
+            .try_send(PeerNotify::Removed { key: self.key });
     }
 }

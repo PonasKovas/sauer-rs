@@ -169,36 +169,70 @@ impl StoredTrap {
 }
 
 pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channel1::EditVSlot> {
-    let sel = crate::trap::placement::get_selections(trap.button_pos, trap.button_size, trap.button_orient).0;
+    let sel = crate::trap::placement::get_selections(
+        trap.button_pos,
+        trap.button_size,
+        trap.button_orient,
+    )
+    .0;
     let mut packets = Vec::new();
-    
+
     let mut data_blocks = crate::trap::vslot_store::encode_payload(
         trap,
         crate::trap::TRAP_STORE_VERSION,
         crate::trap::TRAP_DOMAIN,
-    ).unwrap_or_default();
+    )
+    .unwrap_or_default();
 
-    let color_bytes: Vec<u8> = crate::trap::BUTTON_COLOR_READY.iter().flat_map(|f| f.to_le_bytes()).collect();
+    let color_bytes: Vec<u8> = crate::trap::BUTTON_COLOR_READY
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect();
     let mut color_param = crate::trap::placement::pack_vslot_bytes(&[(7, &color_bytes)]);
-    if color_param.ends_with(&[0xFF]) { color_param.pop(); }
-    
+    if color_param.ends_with(&[0xFF]) {
+        color_param.pop();
+    }
+
     if !data_blocks.is_empty() {
         color_param.append(&mut data_blocks.remove(0));
     } else {
         color_param.push(0xFF);
     }
 
-    packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 0, all_faces: true, extra_data: color_param });
-    
+    packets.push(sauer_proto::channel1::EditVSlot {
+        sel: sel.clone(),
+        delta: 0,
+        all_faces: true,
+        extra_data: color_param,
+    });
+
     for block in data_blocks {
-        packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: true, extra_data: block });
+        packets.push(sauer_proto::channel1::EditVSlot {
+            sel: sel.clone(),
+            delta: 1,
+            all_faces: true,
+            extra_data: block,
+        });
     }
 
     let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
-    packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: false, extra_data: crate::trap::placement::pack_vslot_bytes(&[(1, &scale_bytes)]) });
+    packets.push(sauer_proto::channel1::EditVSlot {
+        sel: sel.clone(),
+        delta: 1,
+        all_faces: false,
+        extra_data: crate::trap::placement::pack_vslot_bytes(&[(1, &scale_bytes)]),
+    });
 
-    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect();
-    packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: true, extra_data: crate::trap::placement::pack_vslot_bytes(&[(6, &alpha_bytes)]) });
+    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32]
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect();
+    packets.push(sauer_proto::channel1::EditVSlot {
+        sel: sel.clone(),
+        delta: 1,
+        all_faces: true,
+        extra_data: crate::trap::placement::pack_vslot_bytes(&[(6, &alpha_bytes)]),
+    });
 
     packets
 }

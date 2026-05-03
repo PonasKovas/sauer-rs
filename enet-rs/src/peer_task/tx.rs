@@ -3,10 +3,10 @@ use bytes::{Bytes, BytesMut};
 use tracing::warn;
 
 use crate::protocol::{
-    self, CHANNEL_ID_CONNECTION, CMD_CONNECT, CMD_DISCONNECT, CMD_SEND_FRAGMENT,
-    CMD_SEND_RELIABLE, CMD_SEND_UNRELIABLE, CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED,
-    COMMAND_FLAG_ACKNOWLEDGE, COMMAND_FLAG_UNSEQUENCED, FREE_RELIABLE_WINDOWS, HEADER_FLAG_SENT_TIME,
-    HEADER_SESSION_SHIFT, PACKET_THROTTLE_SCALE, RELIABLE_WINDOW_SIZE,
+    self, CHANNEL_ID_CONNECTION, CMD_CONNECT, CMD_DISCONNECT, CMD_SEND_FRAGMENT, CMD_SEND_RELIABLE,
+    CMD_SEND_UNRELIABLE, CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED,
+    COMMAND_FLAG_ACKNOWLEDGE, COMMAND_FLAG_UNSEQUENCED, FREE_RELIABLE_WINDOWS,
+    HEADER_FLAG_SENT_TIME, HEADER_SESSION_SHIFT, PACKET_THROTTLE_SCALE, RELIABLE_WINDOW_SIZE,
     THROTTLE_ACCELERATION, THROTTLE_DECELERATION, THROTTLE_INTERVAL_MS, WINDOW_SIZE_MAX,
     WINDOW_SIZE_MIN,
 };
@@ -105,7 +105,13 @@ impl PeerTask {
             self.channels[channel_id as usize].next_reliable_seq()
         };
 
-        let cmd = encode_command(cmd_type, COMMAND_FLAG_ACKNOWLEDGE | extra_flags, channel_id, seq, body);
+        let cmd = encode_command(
+            cmd_type,
+            COMMAND_FLAG_ACKNOWLEDGE | extra_flags,
+            channel_id,
+            seq,
+            body,
+        );
         let timeout = self.initial_rtt_timeout();
 
         self.outgoing_reliable.insert(
@@ -171,18 +177,31 @@ impl PeerTask {
 
         match pkt.mode {
             SendMode::Reliable => self.send_reliable(pkt, ch, mtu, hdr_overhead, now_ms).await,
-            SendMode::Unreliable => self.send_unreliable(pkt, ch, mtu, hdr_overhead, now_ms).await,
+            SendMode::Unreliable => {
+                self.send_unreliable(pkt, ch, mtu, hdr_overhead, now_ms)
+                    .await
+            }
             SendMode::Unsequenced => self.send_unsequenced(pkt, ch, now_ms).await,
         }
     }
 
-    async fn send_reliable(&mut self, pkt: Packet, ch: u8, mtu: u32, hdr_overhead: usize, now_ms: u32) {
+    async fn send_reliable(
+        &mut self,
+        pkt: Packet,
+        ch: u8,
+        mtu: u32,
+        hdr_overhead: usize,
+        now_ms: u32,
+    ) {
         if ch as usize >= self.channels.len() {
             return;
         }
         // Check the reliable send window.
-        let next_seq = self.channels[ch as usize].outgoing_reliable_seq.wrapping_add(1);
-        let oldest = self.outgoing_reliable
+        let next_seq = self.channels[ch as usize]
+            .outgoing_reliable_seq
+            .wrapping_add(1);
+        let oldest = self
+            .outgoing_reliable
             .values()
             .filter(|r| r.channel_id == ch)
             .map(|r| r.reliable_seq)
@@ -190,7 +209,8 @@ impl PeerTask {
 
         let effective_window = ((self.packet_throttle as u64 * self.window_size as u64)
             / PACKET_THROTTLE_SCALE as u64)
-            .min(FREE_RELIABLE_WINDOWS as u64 * RELIABLE_WINDOW_SIZE as u64) as u32;
+            .min(FREE_RELIABLE_WINDOWS as u64 * RELIABLE_WINDOW_SIZE as u64)
+            as u32;
 
         let window_open = match oldest {
             None => true,
@@ -214,11 +234,19 @@ impl PeerTask {
             });
             self.emit(&[cmd], now_ms).await;
         } else {
-            self.send_reliable_fragmented(pkt.data, ch, mtu, hdr_overhead, now_ms).await;
+            self.send_reliable_fragmented(pkt.data, ch, mtu, hdr_overhead, now_ms)
+                .await;
         }
     }
 
-    async fn send_reliable_fragmented(&mut self, data: Bytes, ch: u8, mtu: u32, hdr_overhead: usize, now_ms: u32) {
+    async fn send_reliable_fragmented(
+        &mut self,
+        data: Bytes,
+        ch: u8,
+        mtu: u32,
+        hdr_overhead: usize,
+        now_ms: u32,
+    ) {
         let frag_payload = mtu as usize - hdr_overhead - 4 - 20; // cmd_hdr=4, frag_fields=20
         let total = data.len();
         let frag_count = total.div_ceil(frag_payload);
@@ -231,7 +259,11 @@ impl PeerTask {
             let frag = data.slice(offset..end);
             let frag_len = frag.len() as u16;
 
-            let seq = if i == 0 { start_seq } else { self.channels[ch as usize].next_reliable_seq() };
+            let seq = if i == 0 {
+                start_seq
+            } else {
+                self.channels[ch as usize].next_reliable_seq()
+            };
             let timeout = self.initial_rtt_timeout();
 
             let cmd = encode_command(CMD_SEND_FRAGMENT, COMMAND_FLAG_ACKNOWLEDGE, ch, seq, {
@@ -246,19 +278,34 @@ impl PeerTask {
                     buf.extend_from_slice(&frag);
                 }
             });
-            self.outgoing_reliable.insert((ch, seq), OutstandingReliable {
-                reliable_seq: seq, channel_id: ch,
-                original_sent_time: now_ms, sent_time: now_ms,
-                rtt_timeout: timeout, send_attempts: 1,
-                packet_bytes: cmd.clone(),
-            });
+            self.outgoing_reliable.insert(
+                (ch, seq),
+                OutstandingReliable {
+                    reliable_seq: seq,
+                    channel_id: ch,
+                    original_sent_time: now_ms,
+                    sent_time: now_ms,
+                    rtt_timeout: timeout,
+                    send_attempts: 1,
+                    packet_bytes: cmd.clone(),
+                },
+            );
             cmds.push(cmd);
         }
         self.flush_batch(cmds, now_ms).await;
     }
 
-    async fn send_unreliable(&mut self, pkt: Packet, ch: u8, mtu: u32, hdr_overhead: usize, now_ms: u32) {
-        if ch as usize >= self.channels.len() { return; }
+    async fn send_unreliable(
+        &mut self,
+        pkt: Packet,
+        ch: u8,
+        mtu: u32,
+        hdr_overhead: usize,
+        now_ms: u32,
+    ) {
+        if ch as usize >= self.channels.len() {
+            return;
+        }
         let max_payload = mtu as usize - hdr_overhead - 4 - 4; // cmd_hdr=4, fields=4
 
         if pkt.data.len() <= max_payload {
@@ -273,11 +320,19 @@ impl PeerTask {
             });
             self.emit(&[cmd], now_ms).await;
         } else {
-            self.send_unreliable_fragmented(pkt.data, ch, mtu, hdr_overhead, now_ms).await;
+            self.send_unreliable_fragmented(pkt.data, ch, mtu, hdr_overhead, now_ms)
+                .await;
         }
     }
 
-    async fn send_unreliable_fragmented(&mut self, data: Bytes, ch: u8, mtu: u32, hdr_overhead: usize, now_ms: u32) {
+    async fn send_unreliable_fragmented(
+        &mut self,
+        data: Bytes,
+        ch: u8,
+        mtu: u32,
+        hdr_overhead: usize,
+        now_ms: u32,
+    ) {
         let frag_payload = mtu as usize - hdr_overhead - 4 - 20;
         let total = data.len();
         let frag_count = total.div_ceil(frag_payload);
@@ -290,37 +345,54 @@ impl PeerTask {
             let end = (offset + frag_payload).min(total);
             let frag = data.slice(offset..end);
             let frag_len = frag.len() as u16;
-            let cmd = encode_command(CMD_SEND_UNRELIABLE_FRAGMENT, 0, ch, reliable_seq, move |buf| {
-                buf.extend_from_slice(&start_seq.to_be_bytes());
-                buf.extend_from_slice(&frag_len.to_be_bytes());
-                buf.extend_from_slice(&(frag_count as u32).to_be_bytes());
-                buf.extend_from_slice(&(i as u32).to_be_bytes());
-                buf.extend_from_slice(&(total as u32).to_be_bytes());
-                buf.extend_from_slice(&(offset as u32).to_be_bytes());
-                buf.extend_from_slice(&frag);
-            });
+            let cmd = encode_command(
+                CMD_SEND_UNRELIABLE_FRAGMENT,
+                0,
+                ch,
+                reliable_seq,
+                move |buf| {
+                    buf.extend_from_slice(&start_seq.to_be_bytes());
+                    buf.extend_from_slice(&frag_len.to_be_bytes());
+                    buf.extend_from_slice(&(frag_count as u32).to_be_bytes());
+                    buf.extend_from_slice(&(i as u32).to_be_bytes());
+                    buf.extend_from_slice(&(total as u32).to_be_bytes());
+                    buf.extend_from_slice(&(offset as u32).to_be_bytes());
+                    buf.extend_from_slice(&frag);
+                },
+            );
             cmds.push(cmd);
         }
         self.flush_batch(cmds, now_ms).await;
     }
 
     async fn send_unsequenced(&mut self, pkt: Packet, ch: u8, now_ms: u32) {
-        let Some(chan) = self.channels.get_mut(ch as usize) else { return; };
+        let Some(chan) = self.channels.get_mut(ch as usize) else {
+            return;
+        };
         let group = chan.next_unsequenced_group();
         let data = pkt.data;
         let data_len = data.len() as u16;
-        let cmd = encode_command(CMD_SEND_UNSEQUENCED, COMMAND_FLAG_UNSEQUENCED, ch, 0, move |buf| {
-            buf.extend_from_slice(&group.to_be_bytes());
-            buf.extend_from_slice(&data_len.to_be_bytes());
-            buf.extend_from_slice(&data);
-        });
+        let cmd = encode_command(
+            CMD_SEND_UNSEQUENCED,
+            COMMAND_FLAG_UNSEQUENCED,
+            ch,
+            0,
+            move |buf| {
+                buf.extend_from_slice(&group.to_be_bytes());
+                buf.extend_from_slice(&data_len.to_be_bytes());
+                buf.extend_from_slice(&data);
+            },
+        );
         self.emit(&[cmd], now_ms).await;
     }
 
     // ── Disconnect ────────────────────────────────────────────────────────────
 
     pub(super) async fn begin_disconnect(&mut self, data: u32, now_ms: u32) {
-        if matches!(self.state, PeerState::Disconnecting | PeerState::DisconnectLater(_)) {
+        if matches!(
+            self.state,
+            PeerState::Disconnecting | PeerState::DisconnectLater(_)
+        ) {
             return;
         }
         if self.state == PeerState::AcknowledgingConnect {
@@ -331,15 +403,26 @@ impl PeerTask {
             return;
         }
         self.state = PeerState::Disconnecting;
-        let cmd = self.make_reliable(CHANNEL_ID_CONNECTION, CMD_DISCONNECT, 0, now_ms, move |buf| {
-            buf.extend_from_slice(&data.to_be_bytes());
-        });
+        let cmd = self.make_reliable(
+            CHANNEL_ID_CONNECTION,
+            CMD_DISCONNECT,
+            0,
+            now_ms,
+            move |buf| {
+                buf.extend_from_slice(&data.to_be_bytes());
+            },
+        );
         self.emit(&[cmd], now_ms).await;
     }
 
     // ── Bandwidth update from host ────────────────────────────────────────────
 
-    pub(super) async fn apply_bw_update(&mut self, incoming_bw: u32, per_peer_ob: u32, now_ms: u32) {
+    pub(super) async fn apply_bw_update(
+        &mut self,
+        incoming_bw: u32,
+        per_peer_ob: u32,
+        now_ms: u32,
+    ) {
         if self.state != PeerState::Connected {
             return;
         }
@@ -351,10 +434,16 @@ impl PeerTask {
         }
         let ib = incoming_bw;
         let ob = per_peer_ob;
-        let cmd = self.make_reliable(CHANNEL_ID_CONNECTION, crate::protocol::CMD_BANDWIDTH_LIMIT, 0, now_ms, move |buf| {
-            buf.extend_from_slice(&ib.to_be_bytes());
-            buf.extend_from_slice(&ob.to_be_bytes());
-        });
+        let cmd = self.make_reliable(
+            CHANNEL_ID_CONNECTION,
+            crate::protocol::CMD_BANDWIDTH_LIMIT,
+            0,
+            now_ms,
+            move |buf| {
+                buf.extend_from_slice(&ib.to_be_bytes());
+                buf.extend_from_slice(&ob.to_be_bytes());
+            },
+        );
         self.emit(&[cmd], now_ms).await;
     }
 }

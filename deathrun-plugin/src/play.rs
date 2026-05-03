@@ -103,7 +103,10 @@ impl PlayMaps {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
             }
-            if ent.ent_type == ogz_rs::data::EntityType::Particles && ent.attrs[3] == 1337 && ent.attrs[4] == 7331 {
+            if ent.ent_type == ogz_rs::data::EntityType::Particles
+                && ent.attrs[3] == 1337
+                && ent.attrs[4] == 7331
+            {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
             }
@@ -120,7 +123,10 @@ impl PlayMaps {
                     st.apply_reset_to_world(&mut state.world);
                 }
                 traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
-                info!("Loaded {} traps from map '{name}' (vslot store)", traps.len());
+                info!(
+                    "Loaded {} traps from map '{name}' (vslot store)",
+                    traps.len()
+                );
             }
             _ => {
                 match crate::entity_store::read::<Vec<StoredTrap>>(
@@ -134,7 +140,10 @@ impl PlayMaps {
                         }
                         traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
                         loaded_from_entity_store = true;
-                        info!("Loaded {} traps from map '{name}' (legacy entity store)", traps.len());
+                        info!(
+                            "Loaded {} traps from map '{name}' (legacy entity store)",
+                            traps.len()
+                        );
                     }
                     _ => {}
                 }
@@ -142,7 +151,9 @@ impl PlayMaps {
         }
 
         if loaded_from_entity_store {
-            for id in crate::entity_store::get_store_entity_ids(&state.world, crate::trap::TRAP_DOMAIN) {
+            for id in
+                crate::entity_store::get_store_entity_ids(&state.world, crate::trap::TRAP_DOMAIN)
+            {
                 state.world.entities[id] = ogz_rs::data::Entity {
                     position: [0.0; 3],
                     attrs: [0; 5],

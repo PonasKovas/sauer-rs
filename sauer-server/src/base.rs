@@ -234,10 +234,12 @@ impl<P: Plugin> Plugin for Base<P> {
                                 if let Some(p) = server.players.try_get(id) {
                                     server.send_server_query(
                                         ctx.addr(),
-                                        &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                                            client_number: Some(*cn_i32),
-                                            ok: true,
-                                        }),
+                                        &ServerQueryResponse::ExtInfo(
+                                            ExtInfoResponse::PlayerStats {
+                                                client_number: Some(*cn_i32),
+                                                ok: true,
+                                            },
+                                        ),
                                     );
                                     server.send_server_query(
                                         ctx.addr(),
@@ -316,7 +318,9 @@ impl<P: Plugin> Plugin for Base<P> {
 
                             for e in server.players.map.iter() {
                                 let id = *e.key();
-                                let Some(cn) = server.get_cn(id) else { continue; };
+                                let Some(cn) = server.get_cn(id) else {
+                                    continue;
+                                };
                                 let p = e.value();
                                 let state = p.state.clone().unwrap_or_else(|| {
                                     crate::players::state::make_spawn_state(
@@ -406,8 +410,11 @@ impl<P: Plugin> Plugin for Base<P> {
     async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
         let id = ctx.id();
         let server = ctx.server();
-        
-        let cn_str = server.get_cn(id).map(|c| c.to_string()).unwrap_or_else(|| "?".to_string());
+
+        let cn_str = server
+            .get_cn(id)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "?".to_string());
         info!("{} (cn {}) connected.", packet.name, cn_str);
 
         server.init_name(id, packet.name.clone());
@@ -483,7 +490,9 @@ impl<P: Plugin> Plugin for Base<P> {
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
         let id = ctx.id();
         let server = ctx.server();
-        let Some(target_id) = server.get_id(packet.spectator_cn as u8) else { return; };
+        let Some(target_id) = server.get_id(packet.spectator_cn as u8) else {
+            return;
+        };
 
         let has_privilege = server.get_privilege(id) >= Privilege::Master;
         let locked = server.master_mode() == MasterMode::Locked;
@@ -542,7 +551,9 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         for hit in &packet.hits {
-            let Some(target_id) = server.get_id(hit.target_cn as u8) else { continue; };
+            let Some(target_id) = server.get_id(hit.target_cn as u8) else {
+                continue;
+            };
             if !check_hit(&server, target_id, hit.life_sequence) {
                 continue;
             }
@@ -581,7 +592,9 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         for hit in &packet.hits {
-            let Some(target_id) = server.get_id(hit.target_cn as u8) else { continue; };
+            let Some(target_id) = server.get_id(hit.target_cn as u8) else {
+                continue;
+            };
             if !check_hit(&server, target_id, hit.life_sequence) {
                 continue;
             }
@@ -728,7 +741,10 @@ impl<P: Plugin> Plugin for Base<P> {
         *server.map_data.write().unwrap() = Some(data.clone());
 
         let name = server.players.get(id).name.clone();
-        let cn_str = server.get_cn(id).map(|c| c.to_string()).unwrap_or_else(|| "?".to_string());
+        let cn_str = server
+            .get_cn(id)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "?".to_string());
         info!("[MAP] {name} (cn {cn_str}) uploaded a new map.");
 
         server.broadcast_chan1(&channel1::ServMsg {

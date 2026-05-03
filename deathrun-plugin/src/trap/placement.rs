@@ -22,11 +22,7 @@ pub fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 
 // ─── Selection helpers ────────────────────────────────────────────────────────
 
-pub fn get_selections(
-    adj: [i32; 3],
-    button_size: i32,
-    hit_orient: u8,
-) -> (SelInfo, SelInfo) {
+pub fn get_selections(adj: [i32; 3], button_size: i32, hit_orient: u8) -> (SelInfo, SelInfo) {
     let d = (hit_orient >> 1) as usize;
     let dc = (hit_orient & 1) as usize;
     let mut editf_o = adj;

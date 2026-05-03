@@ -55,11 +55,7 @@ pub use error::{Error, Result};
 pub use peer::{Peer, PeerReceiver, PeerSender};
 
 use bytes::Bytes;
-use std::{
-    net::ToSocketAddrs,
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 use tokio::{net::UdpSocket, sync::mpsc, time::timeout};
 
 use recv_task::{HostCmd, RecvTask};
@@ -182,7 +178,10 @@ impl Host {
         );
         tokio::spawn(task.run());
 
-        Ok(Self { accept_rx, _host_cmd_tx: host_cmd_tx })
+        Ok(Self {
+            accept_rx,
+            _host_cmd_tx: host_cmd_tx,
+        })
     }
 
     /// Wait for the next incoming [`Peer`] connection.
@@ -218,7 +217,12 @@ impl Host {
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         host_cmd_tx
-            .send(HostCmd::Connect { addr, channel_count, data: 0, reply: reply_tx })
+            .send(HostCmd::Connect {
+                addr,
+                channel_count,
+                data: 0,
+                reply: reply_tx,
+            })
             .await
             .map_err(|_| Error::ChannelClosed)?;
 

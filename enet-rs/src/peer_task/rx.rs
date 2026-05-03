@@ -4,11 +4,10 @@ use tracing::{debug, warn};
 use crate::channel::FragmentBuffer;
 use crate::protocol::{
     self, AcknowledgeCmd, CommandBody, CommandHeader, ConnectCmd, VerifyConnectCmd,
-    CHANNEL_ID_CONNECTION, CMD_ACKNOWLEDGE, CMD_BANDWIDTH_LIMIT,
-    CMD_CONNECT, CMD_DISCONNECT, CMD_PING, CMD_SEND_FRAGMENT, CMD_SEND_RELIABLE,
-    CMD_SEND_UNRELIABLE, CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED, CMD_THROTTLE_CONFIGURE,
-    CMD_VERIFY_CONNECT, MAX_CHANNELS, MTU_MAX, MTU_MIN, PACKET_THROTTLE_SCALE,
-    WINDOW_SIZE_MAX, WINDOW_SIZE_MIN,
+    CHANNEL_ID_CONNECTION, CMD_ACKNOWLEDGE, CMD_BANDWIDTH_LIMIT, CMD_CONNECT, CMD_DISCONNECT,
+    CMD_PING, CMD_SEND_FRAGMENT, CMD_SEND_RELIABLE, CMD_SEND_UNRELIABLE,
+    CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED, CMD_THROTTLE_CONFIGURE, CMD_VERIFY_CONNECT,
+    MAX_CHANNELS, MTU_MAX, MTU_MIN, PACKET_THROTTLE_SCALE, WINDOW_SIZE_MAX, WINDOW_SIZE_MIN,
 };
 use crate::{Packet, SendMode};
 
@@ -22,25 +21,36 @@ impl PeerTask {
 
     pub(super) async fn on_datagram(&mut self, raw: &[u8], now_ms: u32) {
         let mut slice = raw;
-        let Some(hdr) = protocol::ProtocolHeader::parse(&mut slice) else { return };
-        if hdr.is_compressed() { return; }
+        let Some(hdr) = protocol::ProtocolHeader::parse(&mut slice) else {
+            return;
+        };
+        if hdr.is_compressed() {
+            return;
+        }
 
         // Session validation for established peers.
         let first_cmd_type = slice.first().map(|b| b & 0x0F);
         let is_connect = first_cmd_type == Some(CMD_CONNECT);
-        if !is_connect && self.incoming_session_id != 0xFF && hdr.session_id() != self.incoming_session_id {
+        if !is_connect
+            && self.incoming_session_id != 0xFF
+            && hdr.session_id() != self.incoming_session_id
+        {
             return;
         }
 
         if self.use_checksum {
-            if slice.len() < 4 { return; }
+            if slice.len() < 4 {
+                return;
+            }
             let stored = u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]);
             let hdr_len = raw.len() - slice.len();
             let mut scratch = Vec::with_capacity(raw.len());
             scratch.extend_from_slice(&raw[..hdr_len]);
             scratch.extend_from_slice(&self.connect_id.to_be_bytes());
             scratch.extend_from_slice(&slice[4..]);
-            if protocol::crc32(&scratch) != stored { return; }
+            if protocol::crc32(&scratch) != stored {
+                return;
+            }
             slice = &slice[4..];
         }
 
@@ -60,7 +70,15 @@ impl PeerTask {
                 }
             }
 
-            self.dispatch(cmd_type, cmd.header, cmd.body, sent_time, now_ms, &mut pending_acks).await;
+            self.dispatch(
+                cmd_type,
+                cmd.header,
+                cmd.body,
+                sent_time,
+                now_ms,
+                &mut pending_acks,
+            )
+            .await;
         }
 
         if !pending_acks.is_empty() {
@@ -111,7 +129,9 @@ impl PeerTask {
                     }
                 }
             }
-            CMD_PING => { self.last_receive_time = now_ms; }
+            CMD_PING => {
+                self.last_receive_time = now_ms;
+            }
             CMD_SEND_RELIABLE => {
                 if let CommandBody::SendReliable(sr) = body {
                     self.last_receive_time = now_ms;
@@ -130,7 +150,9 @@ impl PeerTask {
                     let ch = hdr_channel as usize;
                     if ch < self.channels.len() {
                         if !protocol::seq_lt(hdr_seq, self.channels[ch].incoming_reliable_seq) {
-                            if let Some(data) = self.channels[ch].receive_unreliable(su.unreliable_seq, su.data) {
+                            if let Some(data) =
+                                self.channels[ch].receive_unreliable(su.unreliable_seq, su.data)
+                            {
                                 self.deliver(Packet::unreliable(data, hdr_channel));
                             }
                         }
@@ -161,7 +183,8 @@ impl PeerTask {
                         let throttle = if bl.incoming_bandwidth == 0 {
                             WINDOW_SIZE_MAX
                         } else {
-                            ((bl.incoming_bandwidth / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN).max(WINDOW_SIZE_MIN)
+                            ((bl.incoming_bandwidth / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN)
+                                .max(WINDOW_SIZE_MIN)
                         };
                         self.window_size = throttle.clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
                     }
@@ -169,9 +192,13 @@ impl PeerTask {
             }
             CMD_THROTTLE_CONFIGURE => {
                 if let CommandBody::ThrottleConfigure(tc) = body {
-                    if tc.throttle_interval > 0 { self.throttle_interval = tc.throttle_interval; }
-                    self.throttle_acceleration = tc.throttle_acceleration.min(PACKET_THROTTLE_SCALE);
-                    self.throttle_deceleration = tc.throttle_deceleration.min(PACKET_THROTTLE_SCALE);
+                    if tc.throttle_interval > 0 {
+                        self.throttle_interval = tc.throttle_interval;
+                    }
+                    self.throttle_acceleration =
+                        tc.throttle_acceleration.min(PACKET_THROTTLE_SCALE);
+                    self.throttle_deceleration =
+                        tc.throttle_deceleration.min(PACKET_THROTTLE_SCALE);
                 }
             }
             _ => {}
@@ -180,7 +207,13 @@ impl PeerTask {
 
     // ── CONNECT (server side) ─────────────────────────────────────────────────
 
-    async fn on_connect(&mut self, connect: ConnectCmd, hdr: CommandHeader, sent_time: Option<u16>, now_ms: u32) {
+    async fn on_connect(
+        &mut self,
+        connect: ConnectCmd,
+        hdr: CommandHeader,
+        sent_time: Option<u16>,
+        now_ms: u32,
+    ) {
         if self.state != PeerState::AcknowledgingConnect {
             return;
         }
@@ -212,7 +245,10 @@ impl PeerTask {
             ((self.outgoing_bw.min(connect.incoming_bandwidth) / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN)
                 .max(WINDOW_SIZE_MIN)
         };
-        let window_size = server_window.min(peer_window).min(connect.window_size).clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
+        let window_size = server_window
+            .min(peer_window)
+            .min(connect.window_size)
+            .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
         let ch = connect.channel_count.clamp(1, MAX_CHANNELS) as u8;
 
         // Apply connect state.
@@ -239,23 +275,31 @@ impl PeerTask {
         let throttle_deceleration = self.throttle_deceleration;
         let connect_id = self.connect_id;
 
-        let verify = self.make_reliable(CHANNEL_ID_CONNECTION, crate::protocol::CMD_VERIFY_CONNECT, 0, now_ms, move |buf| {
-            buf.extend_from_slice(&peer_id_wire.to_be_bytes());
-            buf.extend_from_slice(&[out_sess, in_sess]);
-            buf.extend_from_slice(&mtu.to_be_bytes());
-            buf.extend_from_slice(&window_size.to_be_bytes());
-            buf.extend_from_slice(&(ch as u32).to_be_bytes());
-            buf.extend_from_slice(&host_ib.to_be_bytes());
-            buf.extend_from_slice(&host_ob.to_be_bytes());
-            buf.extend_from_slice(&throttle_interval.to_be_bytes());
-            buf.extend_from_slice(&throttle_acceleration.to_be_bytes());
-            buf.extend_from_slice(&throttle_deceleration.to_be_bytes());
-            buf.extend_from_slice(&connect_id.to_be_bytes());
-        });
+        let verify = self.make_reliable(
+            CHANNEL_ID_CONNECTION,
+            crate::protocol::CMD_VERIFY_CONNECT,
+            0,
+            now_ms,
+            move |buf| {
+                buf.extend_from_slice(&peer_id_wire.to_be_bytes());
+                buf.extend_from_slice(&[out_sess, in_sess]);
+                buf.extend_from_slice(&mtu.to_be_bytes());
+                buf.extend_from_slice(&window_size.to_be_bytes());
+                buf.extend_from_slice(&(ch as u32).to_be_bytes());
+                buf.extend_from_slice(&host_ib.to_be_bytes());
+                buf.extend_from_slice(&host_ob.to_be_bytes());
+                buf.extend_from_slice(&throttle_interval.to_be_bytes());
+                buf.extend_from_slice(&throttle_acceleration.to_be_bytes());
+                buf.extend_from_slice(&throttle_deceleration.to_be_bytes());
+                buf.extend_from_slice(&connect_id.to_be_bytes());
+            },
+        );
         self.connect_seq = self.outgoing_reliable_seq;
 
         let mut cmds = Vec::new();
-        if let Some(a) = ack_opt { cmds.push(a); }
+        if let Some(a) = ack_opt {
+            cmds.push(a);
+        }
         cmds.push(verify);
         self.emit(&cmds, now_ms).await;
     }
@@ -279,7 +323,8 @@ impl PeerTask {
 
         // Remove CMD_CONNECT from outstanding (VERIFY_CONNECT implicitly ACKs it).
         let connect_seq = self.connect_seq;
-        self.outgoing_reliable.remove(&(CHANNEL_ID_CONNECTION, connect_seq));
+        self.outgoing_reliable
+            .remove(&(CHANNEL_ID_CONNECTION, connect_seq));
 
         let peer = self.take_peer();
         if let Some(reply) = self.connect_reply.take() {
@@ -312,9 +357,12 @@ impl PeerTask {
 
             if prev_rtt > 0 && self.rtt_initialized {
                 if self.rtt < prev_rtt {
-                    self.packet_throttle = (self.packet_throttle + self.throttle_acceleration).min(PACKET_THROTTLE_SCALE);
+                    self.packet_throttle = (self.packet_throttle + self.throttle_acceleration)
+                        .min(PACKET_THROTTLE_SCALE);
                 } else if self.rtt > prev_rtt.saturating_add(2 * self.rtt_var) {
-                    self.packet_throttle = self.packet_throttle.saturating_sub(self.throttle_deceleration);
+                    self.packet_throttle = self
+                        .packet_throttle
+                        .saturating_sub(self.throttle_deceleration);
                 }
             }
         }
@@ -325,7 +373,8 @@ impl PeerTask {
         let completing_handshake = self.state == PeerState::AcknowledgingConnect
             && channel_id == CHANNEL_ID_CONNECTION
             && seq == self.connect_seq;
-        let disconnect_done = self.state == PeerState::Disconnecting && self.outgoing_reliable.is_empty();
+        let disconnect_done =
+            self.state == PeerState::Disconnecting && self.outgoing_reliable.is_empty();
 
         if completing_handshake {
             self.state = PeerState::Connected;
@@ -359,10 +408,14 @@ impl PeerTask {
             return;
         }
         let frag_end = (sf.fragment_offset as usize).saturating_add(sf.data.len());
-        if frag_end > sf.total_length as usize { return; }
+        if frag_end > sf.total_length as usize {
+            return;
+        }
 
         self.last_receive_time = now_ms;
-        if ch as usize >= self.channels.len() { return; }
+        if ch as usize >= self.channels.len() {
+            return;
+        }
 
         if !reliable {
             if protocol::seq_lt(hdr_seq, self.channels[ch as usize].incoming_reliable_seq) {
@@ -370,13 +423,18 @@ impl PeerTask {
             }
         }
 
-        let is_new = !self.channels[ch as usize].fragment_buffers.contains_key(&sf.start_seq);
+        let is_new = !self.channels[ch as usize]
+            .fragment_buffers
+            .contains_key(&sf.start_seq);
         if is_new {
-            if self.channels[ch as usize].fragment_buffers.len() >= MAX_FRAGMENT_BUFFERS_PER_CHANNEL {
+            if self.channels[ch as usize].fragment_buffers.len() >= MAX_FRAGMENT_BUFFERS_PER_CHANNEL
+            {
                 debug!("fragment buffer limit reached for peer {}", self.addr);
                 return;
             }
-            let new_total = self.fragment_bytes_in_flight.saturating_add(sf.total_length as usize);
+            let new_total = self
+                .fragment_bytes_in_flight
+                .saturating_add(sf.total_length as usize);
             if new_total > MAX_FRAGMENT_BYTES_PER_PEER {
                 debug!("fragment byte budget exceeded for peer {}", self.addr);
                 return;
@@ -386,26 +444,44 @@ impl PeerTask {
 
         let done = {
             let chan = &mut self.channels[ch as usize];
-            let buf = chan.fragment_buffers.entry(sf.start_seq).or_insert_with(|| {
-                FragmentBuffer::new(sf.total_length as usize, sf.fragment_count)
-            });
+            let buf = chan
+                .fragment_buffers
+                .entry(sf.start_seq)
+                .or_insert_with(|| {
+                    FragmentBuffer::new(sf.total_length as usize, sf.fragment_count)
+                });
             buf.receive(sf.fragment_number, sf.fragment_offset as usize, &sf.data)
         };
 
         if done {
-            self.fragment_bytes_in_flight = self.fragment_bytes_in_flight
+            self.fragment_bytes_in_flight = self
+                .fragment_bytes_in_flight
                 .saturating_sub(sf.total_length as usize);
 
             let frag_count = sf.fragment_count;
             let assembled = self.channels[ch as usize]
-                .fragment_buffers.remove(&sf.start_seq).unwrap().finish();
+                .fragment_buffers
+                .remove(&sf.start_seq)
+                .unwrap()
+                .finish();
 
             let packets = if reliable {
-                self.channels[ch as usize].receive_reliable(sf.start_seq, assembled, frag_count)
-                    .into_iter().map(|d| Packet { data: d, channel: ch, mode: SendMode::Reliable }).collect::<Vec<_>>()
+                self.channels[ch as usize]
+                    .receive_reliable(sf.start_seq, assembled, frag_count)
+                    .into_iter()
+                    .map(|d| Packet {
+                        data: d,
+                        channel: ch,
+                        mode: SendMode::Reliable,
+                    })
+                    .collect::<Vec<_>>()
             } else {
                 match self.channels[ch as usize].receive_unreliable(sf.start_seq, assembled) {
-                    Some(d) => vec![Packet { data: d, channel: ch, mode: SendMode::Unreliable }],
+                    Some(d) => vec![Packet {
+                        data: d,
+                        channel: ch,
+                        mode: SendMode::Unreliable,
+                    }],
                     None => vec![],
                 }
             };
@@ -419,7 +495,10 @@ impl PeerTask {
 
     pub(super) fn deliver(&self, pkt: Packet) {
         if let Err(e) = self.to_user_tx.try_send(Ok(pkt)) {
-            warn!("dropping packet for {}: user receive channel full ({})", self.addr, e);
+            warn!(
+                "dropping packet for {}: user receive channel full ({})",
+                self.addr, e
+            );
         }
     }
 }

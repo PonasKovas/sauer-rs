@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
-
+use crate::protocol::{
+    seq_lt, FREE_RELIABLE_WINDOWS, RELIABLE_WINDOW_SIZE, UNSEQUENCED_WINDOW_SIZE,
+};
 use bytes::Bytes;
-
-use crate::protocol::{seq_lt, FREE_RELIABLE_WINDOWS, RELIABLE_WINDOW_SIZE, UNSEQUENCED_WINDOW_SIZE};
+use std::collections::BTreeMap;
 
 /// Maximum number of out-of-order reliable packets buffered per channel.
 /// Caps per-channel memory use and prevents a malicious peer from exhausting
@@ -239,4 +239,3 @@ impl UnsequencedWindow {
         true
     }
 }
-

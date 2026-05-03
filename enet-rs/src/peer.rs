@@ -28,7 +28,11 @@ pub struct PeerSender {
 impl PeerSender {
     pub(crate) fn new(cmd_tx: mpsc::Sender<PeerCmd>, addr: SocketAddr) -> Self {
         let poll_sender = PollSender::new(cmd_tx.clone());
-        Self { cmd_tx, poll_sender, addr }
+        Self {
+            cmd_tx,
+            poll_sender,
+            addr,
+        }
     }
 
     /// The remote address of the peer.
@@ -38,17 +42,22 @@ impl PeerSender {
 
     /// Send a packet, waiting until the internal send buffer has room.
     pub async fn send_packet(&self, pkt: Packet) -> Result<()> {
-        self.cmd_tx.send(PeerCmd::Send(pkt)).await.map_err(|_| Error::ChannelClosed)
+        self.cmd_tx
+            .send(PeerCmd::Send(pkt))
+            .await
+            .map_err(|_| Error::ChannelClosed)
     }
 
     /// Send a packet without blocking.
     ///
     /// Returns `Err(Error::ChannelFull)` if the internal send buffer is at capacity.
     pub fn try_send_packet(&self, pkt: Packet) -> Result<()> {
-        self.cmd_tx.try_send(PeerCmd::Send(pkt)).map_err(|e| match e {
-            tokio::sync::mpsc::error::TrySendError::Full(_) => Error::ChannelFull,
-            tokio::sync::mpsc::error::TrySendError::Closed(_) => Error::ChannelClosed,
-        })
+        self.cmd_tx
+            .try_send(PeerCmd::Send(pkt))
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => Error::ChannelFull,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => Error::ChannelClosed,
+            })
     }
 
     /// Initiate a graceful disconnect without blocking.
@@ -58,7 +67,10 @@ impl PeerSender {
 
     /// Initiate a graceful disconnect.
     pub async fn disconnect(&self, data: u32) -> Result<()> {
-        self.cmd_tx.send(PeerCmd::Disconnect { data }).await.map_err(|_| Error::ChannelClosed)
+        self.cmd_tx
+            .send(PeerCmd::Disconnect { data })
+            .await
+            .map_err(|_| Error::ChannelClosed)
     }
 }
 

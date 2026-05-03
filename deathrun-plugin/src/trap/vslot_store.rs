@@ -1,7 +1,7 @@
-use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use serde::{de::DeserializeOwned, Serialize};
-use std::io::{Read, Write};
 use crate::map_state::MapState;
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
+use serde::{Serialize, de::DeserializeOwned};
+use std::io::{Read, Write};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -18,7 +18,9 @@ fn encode_chunk_name(mut idx: usize) -> Vec<u8> {
         let rem = (idx % 254) as u8;
         name.push(rem + 2); // Avoid 0
         idx /= 254;
-        if idx == 0 { break; }
+        if idx == 0 {
+            break;
+        }
     }
     name
 }
@@ -30,7 +32,9 @@ fn decode_chunk_name(name: &[u8]) -> Option<usize> {
     let mut idx = 0;
     let mut mult = 1;
     for &b in &name[1..] {
-        if b < 2 { return None; }
+        if b < 2 {
+            return None;
+        }
         idx += (b - 2) as usize * mult;
         mult *= 254;
     }
@@ -62,11 +66,13 @@ pub fn encode_payload<T: Serialize>(
     domain_id: u8,
 ) -> Result<Vec<Vec<u8>>, StoreError> {
     let raw = bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
-    
+
     let mut zlib = Vec::new();
     let mut enc = ZlibEncoder::new(&mut zlib, Compression::default());
-    enc.write_all(&raw).map_err(|e| StoreError::Serialise(e.to_string()))?;
-    enc.finish().map_err(|e| StoreError::Serialise(e.to_string()))?;
+    enc.write_all(&raw)
+        .map_err(|e| StoreError::Serialise(e.to_string()))?;
+    enc.finish()
+        .map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut payload = Vec::with_capacity(6 + zlib.len());
     payload.extend_from_slice(b"DR");
@@ -91,7 +97,8 @@ pub fn encode_payload<T: Serialize>(
         current_extra.extend_from_slice(&chunk);
 
         chunks_in_block += 1;
-        if chunks_in_block >= 60 { // Safe maximum per network packet
+        if chunks_in_block >= 60 {
+            // Safe maximum per network packet
             current_extra.push(0xFF);
             extra_data_blocks.push(std::mem::take(&mut current_extra));
             chunks_in_block = 0;
@@ -122,14 +129,18 @@ pub fn read_all<T: DeserializeOwned>(
                 if let Some(idx) = decode_chunk_name(name_bytes) {
                     let mut chunk = [0u8; 16];
                     for i in 0..4 {
-                        chunk[i*4..(i+1)*4].copy_from_slice(&p.values[i].to_le_bytes());
+                        chunk[i * 4..(i + 1) * 4].copy_from_slice(&p.values[i].to_le_bytes());
                     }
                     chunks.insert(idx, chunk);
-                    if idx > max_idx { max_idx = idx; }
+                    if idx > max_idx {
+                        max_idx = idx;
+                    }
                 }
             }
 
-            if chunks.is_empty() { continue; }
+            if chunks.is_empty() {
+                continue;
+            }
 
             let mut payload = Vec::with_capacity((max_idx + 1) * 16);
             let mut valid = true;
@@ -141,13 +152,21 @@ pub fn read_all<T: DeserializeOwned>(
                     break;
                 }
             }
-            
-            if !valid || payload.len() < 6 { continue; }
-            if &payload[0..2] != b"DR" { continue; }
-            if payload[2] != version || payload[3] != domain_id { continue; }
+
+            if !valid || payload.len() < 6 {
+                continue;
+            }
+            if &payload[0..2] != b"DR" {
+                continue;
+            }
+            if payload[2] != version || payload[3] != domain_id {
+                continue;
+            }
 
             let zlib_len = u16::from_le_bytes([payload[4], payload[5]]) as usize;
-            if payload.len() < 6 + zlib_len { continue; }
+            if payload.len() < 6 + zlib_len {
+                continue;
+            }
 
             let zlib_data = &payload[6..6 + zlib_len];
             let mut dec = ZlibDecoder::new(zlib_data);

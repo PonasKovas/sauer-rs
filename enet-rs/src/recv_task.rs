@@ -128,7 +128,10 @@ impl RecvTask {
         );
         tokio::spawn(task.run());
 
-        self.slots[idx] = Some(PeerSlot { addr: from, inbox_tx });
+        self.slots[idx] = Some(PeerSlot {
+            addr: from,
+            inbox_tx,
+        });
         self.addr_map.insert(from, key);
         Some(key)
     }
@@ -172,7 +175,9 @@ impl RecvTask {
         use crate::protocol::ProtocolHeader;
 
         let mut slice = raw;
-        let Some(hdr) = ProtocolHeader::parse(&mut slice) else { return };
+        let Some(hdr) = ProtocolHeader::parse(&mut slice) else {
+            return;
+        };
         if hdr.is_compressed() {
             return;
         }
@@ -194,7 +199,9 @@ impl RecvTask {
                 return;
             }
 
-            let Some(key) = self.spawn_server_peer(from) else { return };
+            let Some(key) = self.spawn_server_peer(from) else {
+                return;
+            };
             if let Some(Some(slot)) = self.slots.get(key.0) {
                 let data = Bytes::copy_from_slice(raw);
                 let _ = slot.inbox_tx.send(InboundMsg::Datagram(data)).await;
@@ -214,7 +221,12 @@ impl RecvTask {
 
         if let Some(Some(slot)) = self.slots.get(key.0) {
             let data = Bytes::copy_from_slice(raw);
-            if slot.inbox_tx.send(InboundMsg::Datagram(data)).await.is_err() {
+            if slot
+                .inbox_tx
+                .send(InboundMsg::Datagram(data))
+                .await
+                .is_err()
+            {
                 self.remove_slot(key);
             }
         }
@@ -246,8 +258,15 @@ impl RecvTask {
         if count == 0 {
             return;
         }
-        let per_peer_ob = if self.outgoing_bw > 0 { self.outgoing_bw / count } else { 0 };
-        let msg = InboundMsg::BandwidthUpdate { incoming_bw: self.incoming_bw, per_peer_ob };
+        let per_peer_ob = if self.outgoing_bw > 0 {
+            self.outgoing_bw / count
+        } else {
+            0
+        };
+        let msg = InboundMsg::BandwidthUpdate {
+            incoming_bw: self.incoming_bw,
+            per_peer_ob,
+        };
         for slot in self.slots.iter().flatten() {
             let _ = slot.inbox_tx.try_send(msg.clone());
         }
@@ -255,8 +274,7 @@ impl RecvTask {
 
     pub async fn run(mut self) {
         let mut buf = vec![0u8; 65536];
-        let mut bw_tick =
-            time::interval(Duration::from_millis(BANDWIDTH_THROTTLE_INTERVAL_MS));
+        let mut bw_tick = time::interval(Duration::from_millis(BANDWIDTH_THROTTLE_INTERVAL_MS));
         bw_tick.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
         // When the Host is dropped (host_cmd_tx dropped), host_gone becomes true.
