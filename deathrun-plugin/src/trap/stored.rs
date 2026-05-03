@@ -1,5 +1,5 @@
 use crate::map_state::{Trap, get_server_state};
-use sauer_proto::{Client, channel1};
+use sauer_proto::Client;
 use sauer_server::Server;
 use serde::{Deserialize, Serialize};
 
@@ -174,36 +174,31 @@ pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
 
     if let Some(map) = state.map.as_mut() {
-        match crate::entity_store::write(
-            &mut map.world,
+        let sel = if let Some(first) = stored_traps.first() {
+            super::placement::get_selections(first.button_pos, first.button_size, first.button_orient).0
+        } else {
+            sauer_map::Selection {
+                o: sauer_proto::data::Vec3 { x: 0, y: 0, z: 0 },
+                s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+                grid: 1,
+                orient: sauer_proto::data::Orient::Left,
+                cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
+            }
+        };
+
+        match crate::trap::vslot_store::write(
+            &sel,
             &stored_traps,
             super::TRAP_STORE_VERSION,
             super::TRAP_DOMAIN,
         ) {
-            Ok(changed) => {
-                let mut batch = Vec::new();
-                for (id, ent) in changed {
-                    let ent_type = ent.ent_type;
-                    batch.push(Client {
+            Ok(packets) => {
+                for pkt in &packets {
+                    map.handle_edit_v_slot(pkt);
+                    server.broadcast_chan1(&Client {
                         client_num: owner_cn,
-                        packet: channel1::EditEnt {
-                            ent_id: id as i32,
-                            pos: sauer_proto::data::Vec3 {
-                                x: ent.position[0],
-                                y: ent.position[1],
-                                z: ent.position[2],
-                            },
-                            type_: ent_type,
-                            attrs: ent.attrs.map(|x| x as i32),
-                        },
+                        packet: pkt.clone(),
                     });
-                    if batch.len() >= 50 {
-                        server.broadcast_chan1(batch.clone());
-                        batch.clear();
-                    }
-                }
-                if !batch.is_empty() {
-                    server.broadcast_chan1(batch);
                 }
             }
             Err(e) => tracing::error!("Failed to save trap store: {}", e),

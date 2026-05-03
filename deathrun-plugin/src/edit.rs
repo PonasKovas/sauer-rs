@@ -413,8 +413,9 @@ impl Plugin for DeathrunEdit {
                 let world_size = state.world.size;
 
                 let mut loaded_traps = Vec::new();
-                match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(
-                    &state.world,
+                let mut loaded_from_entity_store = false;
+                match crate::trap::vslot_store::read::<Vec<crate::trap::StoredTrap>>(
+                    &state,
                     crate::trap::TRAP_STORE_VERSION,
                     crate::trap::TRAP_DOMAIN,
                 ) {
@@ -426,21 +427,72 @@ impl Plugin for DeathrunEdit {
                             .into_iter()
                             .filter_map(|st| st.into_trap())
                             .collect();
-                        info!("Loaded {} traps from map entity store", loaded_traps.len());
+                        info!("Loaded {} traps from map vslot store", loaded_traps.len());
                     }
                     Ok(None) => {}
-                    Err(crate::entity_store::StoreError::VersionMismatch { expected, found }) => {
-                        let msg = format!(
-                            "Trap store version mismatch (map v{found}, server v{expected}). \
-                             Traps not loaded - re-record traps and resave."
-                        );
-                        warn!("{msg}");
-                        ui::broadcast_warn(server, &msg);
-                    }
                     Err(e) => {
-                        let msg = format!("Failed to load trap store: {e}. Traps not loaded.");
+                        let msg = format!("Failed to load vslot trap store: {e}. Trying legacy entity store...");
                         warn!("{msg}");
-                        ui::broadcast_warn(server, &msg);
+                        match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(
+                            &state.world,
+                            crate::trap::TRAP_STORE_VERSION,
+                            crate::trap::TRAP_DOMAIN,
+                        ) {
+                            Ok(Some(stored_traps)) => {
+                                for st in &stored_traps {
+                                    st.apply_reset_to_world(&mut state.world);
+                                }
+                                loaded_traps = stored_traps
+                                    .into_iter()
+                                    .filter_map(|st| st.into_trap())
+                                    .collect();
+                                loaded_from_entity_store = true;
+                                info!("Loaded {} traps from legacy entity store. They will be migrated to vslots on next save.", loaded_traps.len());
+                            }
+                            Ok(None) => {}
+                            Err(crate::entity_store::StoreError::VersionMismatch { expected, found }) => {
+                                let msg = format!(
+                                    "Trap store version mismatch (map v{found}, server v{expected}). \
+                                     Traps not loaded - re-record traps and resave."
+                                );
+                                warn!("{msg}");
+                                ui::broadcast_warn(server, &msg);
+                            }
+                            Err(e) => {
+                                let msg = format!("Failed to load legacy trap store: {e}. Traps not loaded.");
+                                warn!("{msg}");
+                                ui::broadcast_warn(server, &msg);
+                            }
+                        }
+                    }
+                }
+
+                if loaded_from_entity_store {
+                    for eid in crate::entity_store::get_store_entity_ids(&state.world, crate::trap::TRAP_DOMAIN) {
+                        state.world.entities[eid] = ogz_rs::data::Entity {
+                            position: [0.0; 3],
+                            attrs: [0; 5],
+                            ent_type: ogz_rs::data::EntityType::Empty,
+                            extra_data: vec![],
+                        };
+                    }
+                    // Writing the migrated traps immediately guarantees the first broadcasted map will contain vslot stores.
+                    let sel = if let Some(first) = loaded_traps.first() {
+                        crate::trap::placement::get_selections(first.button_pos, first.button_size, first.button_orient).0
+                    } else {
+                        sauer_map::Selection {
+                            o: sauer_proto::data::Vec3 { x: 0, y: 0, z: 0 },
+                            s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
+                            grid: 1,
+                            orient: sauer_proto::data::Orient::Left,
+                            cx: 0, cxs: 1, cy: 0, cys: 1, corner: 0,
+                        }
+                    };
+                    let stored: Vec<crate::trap::StoredTrap> = loaded_traps.iter().map(crate::trap::StoredTrap::from_trap).collect();
+                    if let Ok(packets) = crate::trap::vslot_store::write(&sel, &stored, crate::trap::TRAP_STORE_VERSION, crate::trap::TRAP_DOMAIN) {
+                        for p in &packets {
+                            state.handle_edit_v_slot(p);
+                        }
                     }
                 }
 

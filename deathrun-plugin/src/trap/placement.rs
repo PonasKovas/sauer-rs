@@ -22,7 +22,7 @@ pub(super) fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 
 // ─── Selection helpers ────────────────────────────────────────────────────────
 
-pub(super) fn get_selections(
+pub fn get_selections(
     adj: [i32; 3],
     button_size: i32,
     hit_orient: u8,

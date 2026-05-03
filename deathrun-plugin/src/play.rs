@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use tokio::time::{Duration, Instant, sleep};
-use tracing::{info, warn};
+use tracing::info;
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -97,8 +97,9 @@ impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = MapState::from_bytes(data).map_err(|e| e.to_string())?;
         let mut traps = Vec::new();
-        match crate::entity_store::read::<Vec<StoredTrap>>(
-            &state.world,
+        let mut loaded_from_entity_store = false;
+        match crate::trap::vslot_store::read::<Vec<StoredTrap>>(
+            &state,
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,
         ) {
@@ -107,10 +108,39 @@ impl PlayMaps {
                     st.apply_reset_to_world(&mut state.world);
                 }
                 traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
-                info!("Loaded {} traps from map '{name}'", traps.len());
+                info!("Loaded {} traps from map '{name}' (vslot store)", traps.len());
             }
-            Ok(None) => {}
-            Err(e) => warn!("Could not load traps from map '{name}': {e}"),
+            Ok(None) | Err(_) => {
+                // Fallback to legacy entity store
+                match crate::entity_store::read::<Vec<StoredTrap>>(
+                    &state.world,
+                    TRAP_STORE_VERSION,
+                    crate::trap::TRAP_DOMAIN,
+                ) {
+                    Ok(Some(stored)) => {
+                        for st in &stored {
+                            st.apply_reset_to_world(&mut state.world);
+                        }
+                        traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
+                        loaded_from_entity_store = true;
+                        info!("Loaded {} traps from map '{name}' (legacy entity store)", traps.len());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if loaded_from_entity_store {
+            for id in crate::entity_store::get_store_entity_ids(&state.world, crate::trap::TRAP_DOMAIN) {
+                state.world.entities[id] = ogz_rs::data::Entity {
+                    position: [0.0; 3],
+                    attrs: [0; 5],
+                    ent_type: ogz_rs::data::EntityType::Empty,
+                    extra_data: vec![],
+                };
+            }
+            // Active Traps are not automatically migrated because they are fleeting.
+            // We just let the normal logic clear them out below.
         }
 
         match crate::entity_store::read::<Vec<crate::trap::ActiveTrap>>(
