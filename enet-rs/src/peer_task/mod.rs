@@ -362,7 +362,11 @@ impl PeerTask {
 
         let disconnect_later = if !timed_out {
             if let PeerState::DisconnectLater(data) = self.state {
-                if self.outgoing_reliable.is_empty() { Some(data) } else { None }
+                if self.outgoing_reliable.is_empty() {
+                    Some(data)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -370,7 +374,12 @@ impl PeerTask {
             None
         };
 
-        ServiceActions { timed_out, retransmits, ping_needed, disconnect_later }
+        ServiceActions {
+            timed_out,
+            retransmits,
+            ping_needed,
+            disconnect_later,
+        }
     }
 
     // ── Main run loop ─────────────────────────────────────────────────────────

@@ -5,8 +5,8 @@ use tracing::{debug, warn};
 use crate::channel::FragmentBuffer;
 use crate::protocol::{
     self, AcknowledgeCmd, CommandBody, CommandHeader, ConnectCmd, VerifyConnectCmd,
-    CHANNEL_ID_CONNECTION, CMD_ACKNOWLEDGE, CMD_CONNECT, CMD_DISCONNECT,
-    MAX_CHANNELS, MTU_MAX, MTU_MIN, PACKET_THROTTLE_SCALE, WINDOW_SIZE_MAX, WINDOW_SIZE_MIN,
+    CHANNEL_ID_CONNECTION, CMD_ACKNOWLEDGE, CMD_CONNECT, CMD_DISCONNECT, MAX_CHANNELS, MTU_MAX,
+    MTU_MIN, PACKET_THROTTLE_SCALE, WINDOW_SIZE_MAX, WINDOW_SIZE_MIN,
 };
 use crate::{Packet, SendMode};
 
@@ -123,7 +123,8 @@ impl PeerTask {
                 }
                 if hdr_has_ack {
                     if let Some(st) = sent_time {
-                        self.emit(&[Self::ack(hdr_channel, hdr_seq, st)], now_ms).await;
+                        self.emit(&[Self::ack(hdr_channel, hdr_seq, st)], now_ms)
+                            .await;
                     }
                 }
                 let _ = self.to_user_tx.try_send(Err(Some(d.data)));
@@ -169,9 +170,8 @@ impl PeerTask {
             }
             CommandBody::BandwidthLimit(bl) => {
                 if bl.incoming_bandwidth != 0 || bl.outgoing_bandwidth != 0 {
-                    self.window_size =
-                        window_from_bandwidth(bl.incoming_bandwidth, 0)
-                            .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
+                    self.window_size = window_from_bandwidth(bl.incoming_bandwidth, 0)
+                        .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
                 }
             }
             CommandBody::ThrottleConfigure(tc) => {
@@ -210,7 +210,10 @@ impl PeerTask {
 
         let mtu = connect.mtu.clamp(MTU_MIN, MTU_MAX).min(self.host_mtu);
         let window_size = window_from_bandwidth(self.incoming_bw, 0)
-            .min(window_from_bandwidth(self.outgoing_bw, connect.incoming_bandwidth))
+            .min(window_from_bandwidth(
+                self.outgoing_bw,
+                connect.incoming_bandwidth,
+            ))
             .min(connect.window_size)
             .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
         let ch = connect.channel_count.clamp(1, MAX_CHANNELS) as u8;
@@ -287,7 +290,8 @@ impl PeerTask {
 
         // Remove CMD_CONNECT from outstanding (VERIFY_CONNECT implicitly ACKs it).
         let connect_seq = self.connect_seq;
-        self.outgoing_reliable.remove(&(CHANNEL_ID_CONNECTION, connect_seq));
+        self.outgoing_reliable
+            .remove(&(CHANNEL_ID_CONNECTION, connect_seq));
 
         let peer = self.take_peer();
         if let Some(reply) = self.connect_reply.take() {
@@ -379,8 +383,7 @@ impl PeerTask {
             return;
         }
 
-        if !reliable
-            && protocol::seq_lt(hdr_seq, self.channels[ch as usize].incoming_reliable_seq)
+        if !reliable && protocol::seq_lt(hdr_seq, self.channels[ch as usize].incoming_reliable_seq)
         {
             return;
         }
@@ -408,7 +411,9 @@ impl PeerTask {
             let buf = self.channels[ch as usize]
                 .fragment_buffers
                 .entry(sf.start_seq)
-                .or_insert_with(|| FragmentBuffer::new(sf.total_length as usize, sf.fragment_count));
+                .or_insert_with(|| {
+                    FragmentBuffer::new(sf.total_length as usize, sf.fragment_count)
+                });
             buf.receive(sf.fragment_number, sf.fragment_offset as usize, &sf.data)
         };
 
@@ -430,11 +435,19 @@ impl PeerTask {
                 self.channels[ch as usize]
                     .receive_reliable(sf.start_seq, assembled, frag_count)
                     .into_iter()
-                    .map(|d| Packet { data: d, channel: ch, mode: SendMode::Reliable })
+                    .map(|d| Packet {
+                        data: d,
+                        channel: ch,
+                        mode: SendMode::Reliable,
+                    })
                     .collect::<Vec<_>>()
             } else {
                 match self.channels[ch as usize].receive_unreliable(sf.start_seq, assembled) {
-                    Some(d) => vec![Packet { data: d, channel: ch, mode: SendMode::Unreliable }],
+                    Some(d) => vec![Packet {
+                        data: d,
+                        channel: ch,
+                        mode: SendMode::Unreliable,
+                    }],
                     None => vec![],
                 }
             };
