@@ -430,6 +430,7 @@ impl Plugin for DeathrunEdit {
                     &state,
                     crate::trap::TRAP_STORE_VERSION,
                     crate::trap::TRAP_DOMAIN,
+                    |t| t.button_pos,
                 ) {
                     Ok(stored_traps) if !stored_traps.is_empty() => {
                         for st in &stored_traps {

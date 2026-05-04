@@ -5,7 +5,7 @@ use sauer_proto::{
 };
 use sauer_server::Server;
 
-use super::placement::{get_selections, pack_vslot_bytes};
+use super::placement::pack_vslot_bytes;
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY};
 
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
@@ -414,30 +414,33 @@ pub fn set_button_color(
     actor_id: u64,
     pos: [i32; 3],
     size: i32,
-    orient: u8,
+    _orient: u8,
     color: [f32; 3],
 ) {
     let actor_cn = server.get_cn(actor_id).unwrap_or(0) as i32;
-    let (adj_sel, _) = get_selections(pos, size, orient);
     let color_bytes: Vec<u8> = color.iter().flat_map(|f| f.to_le_bytes()).collect();
+    // delta: 0 explicitly assigns color without destroying scale/scroll, and isolates it from any trap payloads
     let data = pack_vslot_bytes(&[(7, &color_bytes)]);
-    let packet = channel1::EditVSlot {
-        sel: adj_sel,
-        delta: 1, // MUST be 1 to not wipe data params
-        all_faces: true,
-        extra_data: data,
-    };
 
-    if let Ok(mut state) = get_server_state(server).write() {
+    let mut state = get_server_state(server).write().unwrap();
+    
+    for sel in crate::trap::placement::get_outer_face_selections(pos, size) {
+        let packet = channel1::EditVSlot {
+            sel: sel.clone(),
+            delta: 0,
+            all_faces: false,
+            extra_data: data.clone(),
+        };
+
         if let Some(map) = state.map.as_mut() {
             map.handle_edit_v_slot(&packet);
         }
-    }
 
-    server.broadcast_chan1(&Client {
-        client_num: actor_cn,
-        packet,
-    });
+        server.broadcast_chan1(&Client {
+            client_num: actor_cn,
+            packet,
+        });
+    }
 }
 
 pub fn apply_and_broadcast(

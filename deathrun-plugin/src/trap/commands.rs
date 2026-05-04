@@ -1,8 +1,7 @@
 use super::stored::sync_traps_to_map;
-use super::{BUTTON_FRONT_TEX, BUTTON_SIDE_TEX, BUTTON_SIZE, TrapEditState};
+use super::{BUTTON_SIZE, TrapEditState};
 use crate::map_state::{Trap, get_server_state};
 use cube_string::IntoCubeStringLossy;
-use ogz_rs::data::Material;
 use sauer_map::Selection;
 use sauer_proto::{
     Client,
@@ -109,45 +108,25 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         return;
     }
 
-    let sel = Selection {
-        o: Vec3 {
-            x: adj[0],
-            y: adj[1],
-            z: adj[2],
-        },
-        s: Vec3 { x: 1, y: 1, z: 1 },
-        grid: BUTTON_SIZE,
-        orient: sauer_proto::data::Orient::try_from(hit_orient as i32)
-            .unwrap_or(sauer_proto::data::Orient::Left),
-        cx: 0,
-        cxs: 2,
-        cy: 0,
-        cys: 2,
-        corner: 0,
-    };
-    map.world.fill(&sel, true);
-    map.world.set_texture(&sel, BUTTON_SIDE_TEX, true);
-    map.world.set_texture(&sel, BUTTON_FRONT_TEX, false);
-    map.world.set_material(
-        &sel,
-        Material {
-            alpha: true,
-            ..Default::default()
-        },
-    );
-
     let target_cn = cn;
     let (adj_sel, fill_sel) = super::placement::get_selections(adj, BUTTON_SIZE, hit_orient);
 
-    super::placement::apply_internal_vslots(map, &adj_sel);
+    crate::trap::placement::build_button_geometry(map, adj, BUTTON_SIZE, hit_orient);
 
     // Snapshot before corner pushes: clipboard delivers the flat button with
-    // correct vslot indices; corner animation then pushes edges on clients.
+    // correct vslot indices and the internal cavity; corner animation then pushes edges on clients.
     let button_node =
         sauer_map::octree::extract_node_at(&map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
     let (clip_unpack_len, clip_data) =
         sauer_map::clipboard::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
 
+    let sel = Selection {
+        o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        s: Vec3 { x: 1, y: 1, z: 1 },
+        grid: BUTTON_SIZE,
+        orient: sauer_proto::data::Orient::try_from(hit_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
+        cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+    };
     for corner in 0..4 {
         let mut csel = sel.clone();
         csel.corner = corner;

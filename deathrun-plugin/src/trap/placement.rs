@@ -6,7 +6,7 @@ use sauer_proto::{
 };
 use sauer_server::Server;
 
-use super::{BUTTON_COLOR_READY, BUTTON_FRONT_TEX, BUTTON_SIDE_TEX};
+use super::BUTTON_COLOR_READY;
 
 // ─── vslot packing helpers ────────────────────────────────────────────────────
 
@@ -73,43 +73,79 @@ pub fn get_selections(
 
 // ─── vslot application ────────────────────────────────────────────────────────
 
-pub(super) fn apply_internal_vslots(map: &mut crate::map_state::MapState, sel: &SelInfo) {
-    // Apply in the exact same order as build_setup_packets broadcasts to clients,
-    // so the server's vslot indices stay in sync with what clients create locally.
-    // Type bytes: 1=SCALE, 6=ALPHA, 7=COLOR
-    let color_bytes: Vec<u8> = BUTTON_COLOR_READY
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect();
-    let alpha_bytes: Vec<u8> = [0.8f32, 0.8f32]
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect();
-    let scale_bytes: Vec<u8> = 2.0f32.to_le_bytes().to_vec();
+pub fn get_outer_face_selections(adj: [i32; 3], size: i32) -> [SelInfo; 6] {
+    [
+        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]}, s: Vec3{x:1, y:size, z:size}, grid: 1, orient: Orient::Left, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+        SelInfo { o: Vec3{x: adj[0]+size-1, y: adj[1], z: adj[2]}, s: Vec3{x:1, y:size, z:size}, grid: 1, orient: Orient::Right, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]}, s: Vec3{x:size, y:1, z:size}, grid: 1, orient: Orient::Back, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+        SelInfo { o: Vec3{x: adj[0], y: adj[1]+size-1, z: adj[2]}, s: Vec3{x:size, y:1, z:size}, grid: 1, orient: Orient::Front, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]}, s: Vec3{x:size, y:size, z:1}, grid: 1, orient: Orient::Bottom, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]+size-1}, s: Vec3{x:size, y:size, z:1}, grid: 1, orient: Orient::Top, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+    ]
+}
 
-    // Step 1: color, all faces. Delta 0 resets the VSlot completely.
-    map.handle_edit_v_slot(&channel1::EditVSlot {
-        sel: sel.clone(),
-        delta: 0,
-        all_faces: true,
-        extra_data: pack_vslot_bytes(&[(7, &color_bytes)]),
-    });
+pub fn get_cavity_floor_selection(adj: [i32; 3]) -> SelInfo {
+    SelInfo {
+        o: Vec3 { x: adj[0] + 2, y: adj[1] + 2, z: adj[2] },
+        s: Vec3 { x: 2, y: 2, z: 1 },
+        grid: 2,
+        orient: Orient::Top, // Top of the blocks making the floor
+        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+    }
+}
 
-    // Step 2: scale, front face only. Delta 1 adds to the new VSlot.
-    map.handle_edit_v_slot(&channel1::EditVSlot {
-        sel: sel.clone(),
-        delta: 1,
-        all_faces: false,
-        extra_data: pack_vslot_bytes(&[(1, &scale_bytes)]),
-    });
+pub fn build_button_geometry(map: &mut crate::map_state::MapState, adj: [i32; 3], size: i32, orient: u8) {
+    // 1. Fill solid button bounds
+    let sel = SelInfo {
+        o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        s: Vec3 { x: 1, y: 1, z: 1 },
+        grid: size,
+        orient: Orient::try_from(orient as i32).unwrap_or(Orient::Left),
+        cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+    };
+    map.world.fill(&sel, true);
+    map.world.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
+    map.world.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
+    map.world.set_material(&sel, ogz_rs::data::Material { alpha: true, ..Default::default() });
 
-    // Step 3: alpha, all faces. Delta 1 adds to the new VSlot.
-    map.handle_edit_v_slot(&channel1::EditVSlot {
-        sel: sel.clone(),
-        delta: 1,
-        all_faces: true,
-        extra_data: pack_vslot_bytes(&[(6, &alpha_bytes)]),
-    });
+    // 2. Hollow out internal cavity for storing payload safely
+    let cavity_sel = SelInfo {
+        o: Vec3 { x: adj[0] + 2, y: adj[1] + 2, z: adj[2] + 2 },
+        s: Vec3 { x: 2, y: 2, z: 2 },
+        grid: 2,
+        orient: Orient::Top,
+        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+    };
+    map.world.fill(&cavity_sel, false);
+
+    // 3. Apply appearance VSlots strictly to the 6 outer faces
+    let color_bytes = pack_vslot_bytes(&[(7, &crate::trap::BUTTON_COLOR_READY.iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>())]);
+    let scale_bytes = pack_vslot_bytes(&[(1, &2.0f32.to_le_bytes())]);
+    let alpha_bytes = pack_vslot_bytes(&[(6, &[0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>())]);
+    let proto_orient = Orient::try_from(orient as i32).unwrap_or(Orient::Left);
+
+    for outer_sel in get_outer_face_selections(adj, size) {
+        map.handle_edit_v_slot(&channel1::EditVSlot {
+            sel: outer_sel.clone(),
+            delta: 0,
+            all_faces: false,
+            extra_data: color_bytes.clone(),
+        });
+        map.handle_edit_v_slot(&channel1::EditVSlot {
+            sel: outer_sel.clone(),
+            delta: 1,
+            all_faces: false,
+            extra_data: alpha_bytes.clone(),
+        });
+        if outer_sel.orient == proto_orient {
+            map.handle_edit_v_slot(&channel1::EditVSlot {
+                sel: outer_sel.clone(),
+                delta: 1,
+                all_faces: false,
+                extra_data: scale_bytes.clone(),
+            });
+        }
+    }
 }
 
 // ─── Corner-push animation helpers ───────────────────────────────────────────
@@ -151,19 +187,21 @@ pub fn reset_button_colors_by_pos(
     map: &mut crate::map_state::MapState,
     buttons: &[([i32; 3], i32, u8)],
 ) {
-    for &(pos, size, orient) in buttons {
-        let (adj_sel, _) = get_selections(pos, size, orient);
-        let color_bytes: Vec<u8> = BUTTON_COLOR_READY
-            .iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect();
-        let data = pack_vslot_bytes(&[(7, &color_bytes)]);
-        map.handle_edit_v_slot(&sauer_proto::channel1::EditVSlot {
-            sel: adj_sel,
-            delta: 1,
-            all_faces: true,
-            extra_data: data,
-        });
+    let color_bytes: Vec<u8> = BUTTON_COLOR_READY
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect();
+    let data = pack_vslot_bytes(&[(7, &color_bytes)]);
+
+    for &(pos, size, _) in buttons {
+        for sel in get_outer_face_selections(pos, size) {
+            map.handle_edit_v_slot(&sauer_proto::channel1::EditVSlot {
+                sel,
+                delta: 0,
+                all_faces: false,
+                extra_data: data.clone(),
+            });
+        }
     }
 }
 
@@ -174,6 +212,8 @@ pub fn rebuild_all_trap_buttons(
     traps: &[crate::map_state::Trap],
 ) {
     for trap in traps {
+        build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
+        
         let sel = sauer_map::Selection {
             o: sauer_proto::data::Vec3 {
                 x: trap.button_pos[0],
@@ -182,30 +222,9 @@ pub fn rebuild_all_trap_buttons(
             },
             s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
             grid: trap.button_size,
-            orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
-                .unwrap_or(sauer_proto::data::Orient::Left),
-            cx: 0,
-            cxs: 2,
-            cy: 0,
-            cys: 2,
-            corner: 0,
+            orient: sauer_proto::data::Orient::Left,
+            cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
         };
-        map.world.fill(&sel, true);
-        map.world
-            .set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
-        map.world
-            .set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
-        map.world.set_material(
-            &sel,
-            ogz_rs::data::Material {
-                alpha: true,
-                ..Default::default()
-            },
-        );
-
-        let (adj_sel, _) = get_selections(trap.button_pos, trap.button_size, trap.button_orient);
-        apply_internal_vslots(map, &adj_sel);
-
         for corner in 0..4 {
             let mut csel = sel.clone();
             csel.corner = corner;
@@ -304,36 +323,7 @@ pub fn check_and_rebuild_traps(
         let mut clip_data = Vec::new();
 
         if let Some(map) = state.map.as_mut() {
-            let sel = sauer_map::Selection {
-                o: Vec3 {
-                    x: trap.button_pos[0],
-                    y: trap.button_pos[1],
-                    z: trap.button_pos[2],
-                },
-                s: Vec3 { x: 1, y: 1, z: 1 },
-                grid: trap.button_size,
-                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
-                    .unwrap_or(sauer_proto::data::Orient::Left),
-                cx: 0,
-                cxs: 2,
-                cy: 0,
-                cys: 2,
-                corner: 0,
-            };
-            map.world.fill(&sel, true);
-            map.world.set_texture(&sel, BUTTON_SIDE_TEX, true);
-            map.world.set_texture(&sel, BUTTON_FRONT_TEX, false);
-            map.world.set_material(
-                &sel,
-                ogz_rs::data::Material {
-                    alpha: true,
-                    ..Default::default()
-                },
-            );
-
-            let (adj_sel, _) =
-                get_selections(trap.button_pos, trap.button_size, trap.button_orient);
-            apply_internal_vslots(map, &adj_sel);
+            build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
 
             let btn_node = sauer_map::octree::extract_node_at(
                 &map.world.root,
@@ -350,6 +340,17 @@ pub fn check_and_rebuild_traps(
             clip_unpack_len = ul;
             clip_data = d;
 
+            let sel = sauer_map::Selection {
+                o: Vec3 {
+                    x: trap.button_pos[0],
+                    y: trap.button_pos[1],
+                    z: trap.button_pos[2],
+                },
+                s: Vec3 { x: 1, y: 1, z: 1 },
+                grid: trap.button_size,
+                orient: sauer_proto::data::Orient::Left,
+                cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+            };
             for corner in 0..4 {
                 let mut csel = sel.clone();
                 csel.corner = corner;

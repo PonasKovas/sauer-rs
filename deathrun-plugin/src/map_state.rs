@@ -65,6 +65,9 @@ impl MapState {
         let world = World::from_ogz(&ogz);
         let mut state = Self { world, meta: ogz };
 
+        // Aggressive garbage collection wipes out all ghost VSlots from undo/mru buffers
+        state.world.compact_vslots(&mut state.meta.vslots);
+
         while state.world.size < 1024 {
             state.enlarge_empty();
         }

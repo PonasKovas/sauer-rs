@@ -114,6 +114,7 @@ impl PlayMaps {
             &state,
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,
+            |t| t.button_pos,
         ) {
             Ok(stored) if !stored.is_empty() => {
                 for st in &stored {
@@ -345,7 +346,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
                     return None;
                 }
 
-                let mut ent_type = ent.ent_type;
+                let ent_type = ent.ent_type;
                 let mut attrs = ent.attrs;
 
                 if ent_type == EntityType::PlayerStart {
@@ -486,22 +487,16 @@ fn check_win_conditions(
         }
     }
 
-    let mut good_spawned_count = 0;
-    let mut good_alive_count = 0;
-    let mut good_unfinished_alive_count = 0;
-
     for &id in &ids {
         if Some(id) == evil_id {
             continue;
         }
         if lock.spawned_this_round.contains(&id) {
-            good_spawned_count += 1;
             let is_finished = lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
             if let Some(p) = server.players.try_get(id) {
                 if p.client_state == ClientState::Alive {
-                    good_alive_count += 1;
                     if !is_finished {
-                        good_unfinished_alive_count += 1;
+                        // Unfinished alive player found
                     }
                 }
             }
@@ -827,15 +822,15 @@ impl Plugin for DeathrunPlay {
             .unwrap()
             .update_afk_pos(id, [packet.pos.x, packet.pos.y, packet.pos.z]);
 
-        let (mut is_playing, mut is_good, mut not_finished, mut round_start) =
-            (false, false, false, None);
-        {
+        let (is_playing, is_good, not_finished, round_start) = {
             let lock = maps.read().unwrap();
-            is_playing = lock.round_state == RoundState::Playing;
-            is_good = lock.evil_id != Some(id);
-            not_finished = !lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
-            round_start = lock.round_start_time;
-        }
+            (
+                lock.round_state == RoundState::Playing,
+                lock.evil_id != Some(id),
+                !lock.finished_players.iter().any(|(f_id, _)| *f_id == id),
+                lock.round_start_time,
+            )
+        };
 
         if is_playing && is_good && not_finished {
             let mut reached_flag = false;

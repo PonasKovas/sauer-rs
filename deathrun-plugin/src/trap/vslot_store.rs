@@ -105,14 +105,16 @@ pub fn encode_payload<T: Serialize>(
     Ok(extra_data_blocks)
 }
 
-pub fn read_all<T: DeserializeOwned>(
+pub fn read_all<T: DeserializeOwned + Clone>(
     map: &MapState,
     version: u8,
     domain_id: u8,
+    extract_pos: impl Fn(&T) -> [i32; 3],
 ) -> Result<Vec<T>, StoreError> {
-    let mut results = Vec::new();
+    // 1. Decode all active VSlots into a map (vslot_idx -> decoded payload)
+    let mut decoded_vslots = std::collections::HashMap::new();
 
-    for vs_opt in &map.meta.vslots {
+    for (vslot_idx, vs_opt) in map.meta.vslots.iter().enumerate() {
         if let Some(vs) = vs_opt {
             let mut chunks = std::collections::HashMap::new();
             let mut max_idx = 0;
@@ -153,12 +155,59 @@ pub fn read_all<T: DeserializeOwned>(
             let mut dec = ZlibDecoder::new(zlib_data);
             let mut raw = Vec::new();
             if dec.read_to_end(&mut raw).is_ok() {
-                if let Ok(data) = bitcode::deserialize(&raw) {
-                    results.push(data);
+                if let Ok(data) = bitcode::deserialize::<T>(&raw) {
+                    decoded_vslots.insert(vslot_idx as u16, data);
                 }
             }
         }
     }
 
-    Ok(results)
+    // 2. Traverse octree, find physical VSlots, and validate absolute coordinates
+    let mut valid_results = std::collections::HashMap::new();
+
+    fn traverse<T: Clone>(
+        node: &sauer_map::Node,
+        pos: [i32; 3],
+        size: i32,
+        decoded: &std::collections::HashMap<u16, T>,
+        results: &mut std::collections::HashMap<[i32; 3], T>,
+        extract_pos: &impl Fn(&T) -> [i32; 3],
+    ) {
+        match node {
+            sauer_map::Node::Leaf(c) => {
+                if c.is_empty() { return; }
+                for &t in &c.textures {
+                    if let Some(trap) = decoded.get(&t) {
+                        let bpos = extract_pos(trap);
+                        // A physically valid trap data cube must reside inside the button volume
+                        let valid_x = pos[0] >= bpos[0] && pos[0] <= bpos[0] + 8;
+                        let valid_y = pos[1] >= bpos[1] && pos[1] <= bpos[1] + 8;
+                        let valid_z = pos[2] >= bpos[2] && pos[2] <= bpos[2] + 8;
+                        
+                        if valid_x && valid_y && valid_z {
+                            // HashMap keyed by button_pos implicitly deduplicates 
+                            // multiple hits if the cavity floor was subdivided.
+                            results.insert(bpos, trap.clone());
+                        } else {
+                            tracing::warn!("Rejected copied trap payload outside expected bounds at {:?}", pos);
+                        }
+                    }
+                }
+            }
+            sauer_map::Node::Branch(ch) => {
+                let half = size / 2;
+                for i in 0..8 {
+                    let cx = (i & 1) as i32;
+                    let cy = ((i >> 1) & 1) as i32;
+                    let cz = ((i >> 2) & 1) as i32;
+                    let cpos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
+                    traverse(&ch[i], cpos, half, decoded, results, extract_pos);
+                }
+            }
+        }
+    }
+
+    traverse(&map.world.root, [0, 0, 0], map.world.size, &decoded_vslots, &mut valid_results, &extract_pos);
+
+    Ok(valid_results.into_values().collect())
 }

@@ -17,6 +17,86 @@ use ogz_rs::data::VSlot;
 use std::collections::HashSet;
 
 impl World {
+    pub fn compact_vslots(&mut self, vslots: &mut Vec<Option<ogz_rs::data::VSlot>>) {
+        let mut used = std::collections::HashSet::new();
+        fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
+            match node {
+                Node::Leaf(c) => {
+                    if !c.is_empty() {
+                        for &t in &c.textures {
+                            used.insert(t);
+                        }
+                    }
+                }
+                Node::Branch(ch) => {
+                    for c in ch.as_ref() {
+                        collect(c, used);
+                    }
+                }
+            }
+        }
+        collect(&self.root, &mut used);
+
+        let mut to_check: Vec<u16> = used.iter().copied().collect();
+        while let Some(idx) = to_check.pop() {
+            if let Some(Some(vs)) = vslots.get(idx as usize) {
+                if let Some(layer) = vs.layer {
+                    if used.insert(layer as u16) {
+                        to_check.push(layer as u16);
+                    }
+                }
+            }
+        }
+
+        let mut used_vec: Vec<u16> = used.into_iter().collect();
+        used_vec.sort_unstable();
+
+        let mut remap = std::collections::HashMap::new();
+        let mut new_vslots = Vec::new();
+        for &old_idx in &used_vec {
+            remap.insert(old_idx, new_vslots.len() as u16);
+            if let Some(Some(mut vs)) = vslots.get(old_idx as usize).cloned() {
+                vs.prev = -1; // Flatten chains to prevent ghost data from surviving
+                new_vslots.push(Some(vs));
+            } else {
+                new_vslots.push(None);
+            }
+        }
+
+        for vs_opt in &mut new_vslots {
+            if let Some(vs) = vs_opt {
+                if let Some(layer) = vs.layer {
+                    if let Some(&new_layer) = remap.get(&(layer as u16)) {
+                        vs.layer = Some(new_layer as i32);
+                    } else {
+                        vs.layer = None;
+                    }
+                }
+            }
+        }
+
+        fn apply(node: &mut Node, remap: &std::collections::HashMap<u16, u16>) {
+            match node {
+                Node::Leaf(c) => {
+                    for t in &mut c.textures {
+                        if let Some(&new_t) = remap.get(t) {
+                            *t = new_t;
+                        } else {
+                            *t = 0;
+                        }
+                    }
+                }
+                Node::Branch(ch) => {
+                    for c in ch.iter_mut() {
+                        apply(c, remap);
+                    }
+                }
+            }
+        }
+        apply(&mut self.root, &remap);
+        *vslots = new_vslots;
+    }
+
     pub fn new_empty_root() -> Node {
         let solid = Node::Leaf(Cube {
             edges: [0x80; 12],
