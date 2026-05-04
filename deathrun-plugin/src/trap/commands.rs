@@ -157,8 +157,6 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     drop(state);
 
-    sync_traps_to_map(&server, id);
-
     // Broadcast the button using a clipboard so clients install the exact vslot
     // indices already in the server map, regardless of when /getmap is done.
     server.broadcast_chan1(&Client {
@@ -207,6 +205,12 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
                 },
             });
         }
+
+        // Sync traps to map ONLY AFTER corner pushes complete.
+        // This ensures the client map collapses the branch BEFORE we inject 
+        // the VSlot payload, safely subdividing the deformed geometry 
+        // and avoiding payload destruction.
+        crate::trap::stored::sync_traps_to_map(&server, id);
     });
 }
 

@@ -488,12 +488,13 @@ impl Plugin for DeathrunEdit {
                             extra_data: vec![],
                         };
                     }
-                    crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
-                    for trap in &loaded_traps {
-                        let packets = crate::trap::stored::generate_trap_vslot_packets(&crate::trap::StoredTrap::from_trap(trap));
-                        for p in &packets {
-                            state.handle_edit_v_slot(p);
-                        }
+                }
+
+                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
+                for trap in &loaded_traps {
+                    let packets = crate::trap::stored::generate_trap_vslot_packets(&crate::trap::StoredTrap::from_trap(trap));
+                    for p in &packets {
+                        state.handle_edit_v_slot(p);
                     }
                 }
 

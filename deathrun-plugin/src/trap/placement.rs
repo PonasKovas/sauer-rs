@@ -74,13 +74,15 @@ pub fn get_selections(
 // ─── vslot application ────────────────────────────────────────────────────────
 
 pub fn get_outer_face_selections(adj: [i32; 3], size: i32) -> [SelInfo; 6] {
+    let o = Vec3 { x: adj[0], y: adj[1], z: adj[2] };
+    let s = Vec3 { x: 1, y: 1, z: 1 };
     [
-        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]}, s: Vec3{x:1, y:size, z:size}, grid: 1, orient: Orient::Left, cx:0, cxs:0, cy:0, cys:0, corner:0 },
-        SelInfo { o: Vec3{x: adj[0]+size-1, y: adj[1], z: adj[2]}, s: Vec3{x:1, y:size, z:size}, grid: 1, orient: Orient::Right, cx:0, cxs:0, cy:0, cys:0, corner:0 },
-        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]}, s: Vec3{x:size, y:1, z:size}, grid: 1, orient: Orient::Back, cx:0, cxs:0, cy:0, cys:0, corner:0 },
-        SelInfo { o: Vec3{x: adj[0], y: adj[1]+size-1, z: adj[2]}, s: Vec3{x:size, y:1, z:size}, grid: 1, orient: Orient::Front, cx:0, cxs:0, cy:0, cys:0, corner:0 },
-        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]}, s: Vec3{x:size, y:size, z:1}, grid: 1, orient: Orient::Bottom, cx:0, cxs:0, cy:0, cys:0, corner:0 },
-        SelInfo { o: Vec3{x: adj[0], y: adj[1], z: adj[2]+size-1}, s: Vec3{x:size, y:size, z:1}, grid: 1, orient: Orient::Top, cx:0, cxs:0, cy:0, cys:0, corner:0 },
+        SelInfo { o, s, grid: size, orient: Orient::Left, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo { o, s, grid: size, orient: Orient::Right, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo { o, s, grid: size, orient: Orient::Back, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo { o, s, grid: size, orient: Orient::Front, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo { o, s, grid: size, orient: Orient::Bottom, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo { o, s, grid: size, orient: Orient::Top, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
     ]
 }
 
@@ -218,7 +220,7 @@ pub fn rebuild_all_trap_buttons(
             },
             s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
             grid: trap.button_size,
-            orient: sauer_proto::data::Orient::Left,
+            orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
             cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
         };
         for corner in 0..4 {
@@ -368,4 +370,6 @@ pub fn check_and_rebuild_traps(
             clip_data,
         );
     }
+
+    crate::trap::stored::sync_traps_to_map(&server, id);
 }

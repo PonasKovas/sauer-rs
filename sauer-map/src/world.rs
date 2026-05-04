@@ -22,7 +22,6 @@ impl World {
         fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
             match node {
                 Node::Leaf(c) => {
-                    // Sauerbraten expects empty cubes to retain their textures for when they are filled.
                     for &t in &c.textures {
                         used.insert(t);
                     }

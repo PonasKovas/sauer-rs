@@ -281,10 +281,24 @@ pub fn resolve_vslot(
             }
         }
     }
-    if vslots.len() < 0x4000 {
-        vslots.resize(0x4000, None);
+
+    let mut insert_idx = None;
+    for i in 0x4000..vslots.len() {
+        if vslots[i].is_none() {
+            insert_idx = Some(i);
+            break;
+        }
     }
-    let idx = vslots.len();
-    vslots.push(Some(new_vs));
-    idx as u16
+
+    if let Some(idx) = insert_idx {
+        vslots[idx] = Some(new_vs);
+        idx as u16
+    } else {
+        if vslots.len() < 0x4000 {
+            vslots.resize(0x4000, None);
+        }
+        let idx = vslots.len();
+        vslots.push(Some(new_vs));
+        idx as u16
+    }
 }
