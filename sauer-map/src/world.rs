@@ -22,10 +22,9 @@ impl World {
         fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
             match node {
                 Node::Leaf(c) => {
-                    if !c.is_empty() {
-                        for &t in &c.textures {
-                            used.insert(t);
-                        }
+                    // Sauerbraten expects empty cubes to retain their textures for when they are filled.
+                    for &t in &c.textures {
+                        used.insert(t);
                     }
                 }
                 Node::Branch(ch) => {
@@ -45,56 +44,25 @@ impl World {
                         to_check.push(layer as u16);
                     }
                 }
-            }
-        }
-
-        let mut used_vec: Vec<u16> = used.into_iter().collect();
-        used_vec.sort_unstable();
-
-        let mut remap = std::collections::HashMap::new();
-        let mut new_vslots = Vec::new();
-        for &old_idx in &used_vec {
-            remap.insert(old_idx, new_vslots.len() as u16);
-            if let Some(Some(mut vs)) = vslots.get(old_idx as usize).cloned() {
-                vs.prev = -1; // Flatten chains to prevent ghost data from surviving
-                new_vslots.push(Some(vs));
-            } else {
-                new_vslots.push(None);
-            }
-        }
-
-        for vs_opt in &mut new_vslots {
-            if let Some(vs) = vs_opt {
-                if let Some(layer) = vs.layer {
-                    if let Some(&new_layer) = remap.get(&(layer as u16)) {
-                        vs.layer = Some(new_layer as i32);
-                    } else {
-                        vs.layer = None;
+                if vs.prev >= 0 {
+                    if used.insert(vs.prev as u16) {
+                        to_check.push(vs.prev as u16);
                     }
                 }
             }
         }
 
-        fn apply(node: &mut Node, remap: &std::collections::HashMap<u16, u16>) {
-            match node {
-                Node::Leaf(c) => {
-                    for t in &mut c.textures {
-                        if let Some(&new_t) = remap.get(t) {
-                            *t = new_t;
-                        } else {
-                            *t = 0;
-                        }
-                    }
-                }
-                Node::Branch(ch) => {
-                    for c in ch.iter_mut() {
-                        apply(c, remap);
-                    }
-                }
+        // Wipe unreferenced VSlots. We DO NOT remap indices, to preserve base textures.
+        for i in 0..vslots.len() {
+            if !used.contains(&(i as u16)) {
+                vslots[i] = None;
             }
         }
-        apply(&mut self.root, &remap);
-        *vslots = new_vslots;
+
+        // Trim trailing empty slots
+        while vslots.last() == Some(&None) {
+            vslots.pop();
+        }
     }
 
     pub fn new_empty_root() -> Node {

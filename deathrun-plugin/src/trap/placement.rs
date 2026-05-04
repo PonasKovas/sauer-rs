@@ -94,6 +94,37 @@ pub fn get_cavity_floor_selection(adj: [i32; 3]) -> SelInfo {
     }
 }
 
+pub fn get_outer_faces_vslot_packets(adj: [i32; 3], size: i32, orient: u8, color: [f32; 3]) -> Vec<sauer_proto::channel1::EditVSlot> {
+    let color_bytes = color.iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>();
+    let alpha_bytes = [0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>();
+    let scale_bytes = 2.0f32.to_le_bytes().to_vec();
+
+    let mut data_sides = Vec::new();
+    data_sides.push(7); data_sides.extend_from_slice(&color_bytes);
+    data_sides.push(6); data_sides.extend_from_slice(&alpha_bytes);
+    data_sides.push(0xFF);
+
+    let mut data_front = Vec::new();
+    data_front.push(7); data_front.extend_from_slice(&color_bytes);
+    data_front.push(6); data_front.extend_from_slice(&alpha_bytes);
+    data_front.push(1); data_front.extend_from_slice(&scale_bytes);
+    data_front.push(0xFF);
+
+    let proto_orient = Orient::try_from(orient as i32).unwrap_or(Orient::Left);
+
+    let mut packets = Vec::new();
+    for sel in get_outer_face_selections(adj, size) {
+        let extra_data = if sel.orient == proto_orient { data_front.clone() } else { data_sides.clone() };
+        packets.push(sauer_proto::channel1::EditVSlot {
+            sel,
+            delta: 0,
+            all_faces: false,
+            extra_data,
+        });
+    }
+    packets
+}
+
 pub fn build_button_geometry(map: &mut crate::map_state::MapState, adj: [i32; 3], size: i32, orient: u8) {
     // 1. Fill solid button bounds
     let sel = SelInfo {
@@ -119,32 +150,8 @@ pub fn build_button_geometry(map: &mut crate::map_state::MapState, adj: [i32; 3]
     map.world.fill(&cavity_sel, false);
 
     // 3. Apply appearance VSlots strictly to the 6 outer faces
-    let color_bytes = pack_vslot_bytes(&[(7, &crate::trap::BUTTON_COLOR_READY.iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>())]);
-    let scale_bytes = pack_vslot_bytes(&[(1, &2.0f32.to_le_bytes())]);
-    let alpha_bytes = pack_vslot_bytes(&[(6, &[0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>())]);
-    let proto_orient = Orient::try_from(orient as i32).unwrap_or(Orient::Left);
-
-    for outer_sel in get_outer_face_selections(adj, size) {
-        map.handle_edit_v_slot(&channel1::EditVSlot {
-            sel: outer_sel.clone(),
-            delta: 0,
-            all_faces: false,
-            extra_data: color_bytes.clone(),
-        });
-        map.handle_edit_v_slot(&channel1::EditVSlot {
-            sel: outer_sel.clone(),
-            delta: 1,
-            all_faces: false,
-            extra_data: alpha_bytes.clone(),
-        });
-        if outer_sel.orient == proto_orient {
-            map.handle_edit_v_slot(&channel1::EditVSlot {
-                sel: outer_sel.clone(),
-                delta: 1,
-                all_faces: false,
-                extra_data: scale_bytes.clone(),
-            });
-        }
+    for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
+        map.handle_edit_v_slot(&pkt);
     }
 }
 
@@ -187,20 +194,9 @@ pub fn reset_button_colors_by_pos(
     map: &mut crate::map_state::MapState,
     buttons: &[([i32; 3], i32, u8)],
 ) {
-    let color_bytes: Vec<u8> = BUTTON_COLOR_READY
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect();
-    let data = pack_vslot_bytes(&[(7, &color_bytes)]);
-
-    for &(pos, size, _) in buttons {
-        for sel in get_outer_face_selections(pos, size) {
-            map.handle_edit_v_slot(&sauer_proto::channel1::EditVSlot {
-                sel,
-                delta: 0,
-                all_faces: false,
-                extra_data: data.clone(),
-            });
+    for &(pos, size, orient) in buttons {
+        for pkt in get_outer_faces_vslot_packets(pos, size, orient, BUTTON_COLOR_READY) {
+            map.handle_edit_v_slot(&pkt);
         }
     }
 }
