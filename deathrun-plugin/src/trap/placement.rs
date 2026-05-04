@@ -371,5 +371,6 @@ pub fn check_and_rebuild_traps(
         );
     }
 
+    drop(state);
     crate::trap::stored::sync_traps_to_map(&server, id);
 }
