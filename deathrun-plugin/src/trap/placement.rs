@@ -281,15 +281,11 @@ pub fn check_and_rebuild_traps(
     let id = ctx.id();
     let mut state = get_server_state(&server).write().unwrap();
 
-    // Never rebuild the trap currently being recorded — the user is intentionally editing
-    // that area and auto-rebuilds would corrupt the server map state and fight the user.
-    let recording_idx = state.trap_edit.as_ref().map(|e| e.trap_idx);
-
     let to_rebuild: Vec<_> = state
         .traps
         .iter()
         .enumerate()
-        .filter(|(i, t)| intersects(t) && Some(*i) != recording_idx)
+        .filter(|(_, t)| intersects(t))
         .map(|(_, t)| crate::map_state::Trap {
             button_pos: t.button_pos,
             button_size: t.button_size,
@@ -346,7 +342,7 @@ pub fn check_and_rebuild_traps(
                 },
                 s: Vec3 { x: 1, y: 1, z: 1 },
                 grid: trap.button_size,
-                orient: sauer_proto::data::Orient::Left,
+                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
                 cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
             };
             for corner in 0..4 {

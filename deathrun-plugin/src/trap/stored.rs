@@ -165,6 +165,19 @@ impl StoredTrap {
                 world.entities[*id] = stored_ent.clone().into_entity();
             }
         }
+        for added_ent in &self.trigger_entities_add {
+            let ent = added_ent.clone().into_entity();
+            if let Some(idx) = world.entities.iter().position(|e| {
+                e.ent_type == ent.ent_type && e.position == ent.position && e.attrs == ent.attrs
+            }) {
+                world.entities[idx] = ogz_rs::data::Entity {
+                    position: [0.0; 3],
+                    attrs: [0; 5],
+                    ent_type: ogz_rs::data::EntityType::Empty,
+                    extra_data: vec![],
+                };
+            }
+        }
     }
 }
 
