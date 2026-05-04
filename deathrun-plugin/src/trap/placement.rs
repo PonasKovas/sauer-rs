@@ -22,11 +22,7 @@ pub fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
 
 // ─── Selection helpers ────────────────────────────────────────────────────────
 
-pub fn get_selections(
-    adj: [i32; 3],
-    button_size: i32,
-    hit_orient: u8,
-) -> (SelInfo, SelInfo) {
+pub fn get_selections(adj: [i32; 3], button_size: i32, hit_orient: u8) -> (SelInfo, SelInfo) {
     let d = (hit_orient >> 1) as usize;
     let dc = (hit_orient & 1) as usize;
     let mut editf_o = adj;
@@ -74,49 +70,141 @@ pub fn get_selections(
 // ─── vslot application ────────────────────────────────────────────────────────
 
 pub fn get_outer_face_selections(adj: [i32; 3], size: i32) -> [SelInfo; 6] {
-    let o = Vec3 { x: adj[0], y: adj[1], z: adj[2] };
+    let o = Vec3 {
+        x: adj[0],
+        y: adj[1],
+        z: adj[2],
+    };
     let s = Vec3 { x: 1, y: 1, z: 1 };
     [
-        SelInfo { o, s, grid: size, orient: Orient::Left, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s, grid: size, orient: Orient::Right, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s, grid: size, orient: Orient::Back, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s, grid: size, orient: Orient::Front, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s, grid: size, orient: Orient::Bottom, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s, grid: size, orient: Orient::Top, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo {
+            o,
+            s,
+            grid: size,
+            orient: Orient::Left,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s,
+            grid: size,
+            orient: Orient::Right,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s,
+            grid: size,
+            orient: Orient::Back,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s,
+            grid: size,
+            orient: Orient::Front,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s,
+            grid: size,
+            orient: Orient::Bottom,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s,
+            grid: size,
+            orient: Orient::Top,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
     ]
 }
 
 pub fn get_cavity_floor_selection(adj: [i32; 3]) -> SelInfo {
     SelInfo {
-        o: Vec3 { x: adj[0] + 2, y: adj[1] + 2, z: adj[2] },
+        o: Vec3 {
+            x: adj[0] + 2,
+            y: adj[1] + 2,
+            z: adj[2],
+        },
         s: Vec3 { x: 2, y: 2, z: 1 },
         grid: 2,
         orient: Orient::Top, // Top of the blocks making the floor
-        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+        cx: 0,
+        cxs: 0,
+        cy: 0,
+        cys: 0,
+        corner: 0,
     }
 }
 
-pub fn get_outer_faces_vslot_packets(adj: [i32; 3], size: i32, orient: u8, color: [f32; 3]) -> Vec<sauer_proto::channel1::EditVSlot> {
-    let color_bytes = color.iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>();
-    let alpha_bytes = [0.8f32, 0.8f32].iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>();
+pub fn get_outer_faces_vslot_packets(
+    adj: [i32; 3],
+    size: i32,
+    orient: u8,
+    color: [f32; 3],
+) -> Vec<sauer_proto::channel1::EditVSlot> {
+    let color_bytes = color
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect::<Vec<u8>>();
+    let alpha_bytes = [0.8f32, 0.8f32]
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect::<Vec<u8>>();
     let scale_bytes = 2.0f32.to_le_bytes().to_vec();
 
     let mut data_sides = Vec::new();
-    data_sides.push(7); data_sides.extend_from_slice(&color_bytes);
-    data_sides.push(6); data_sides.extend_from_slice(&alpha_bytes);
+    data_sides.push(7);
+    data_sides.extend_from_slice(&color_bytes);
+    data_sides.push(6);
+    data_sides.extend_from_slice(&alpha_bytes);
     data_sides.push(0xFF);
 
     let mut data_front = Vec::new();
-    data_front.push(7); data_front.extend_from_slice(&color_bytes);
-    data_front.push(6); data_front.extend_from_slice(&alpha_bytes);
-    data_front.push(1); data_front.extend_from_slice(&scale_bytes);
+    data_front.push(7);
+    data_front.extend_from_slice(&color_bytes);
+    data_front.push(6);
+    data_front.extend_from_slice(&alpha_bytes);
+    data_front.push(1);
+    data_front.extend_from_slice(&scale_bytes);
     data_front.push(0xFF);
 
     let proto_orient = Orient::try_from(orient as i32).unwrap_or(Orient::Left);
 
     let mut packets = Vec::new();
     for sel in get_outer_face_selections(adj, size) {
-        let extra_data = if sel.orient == proto_orient { data_front.clone() } else { data_sides.clone() };
+        let extra_data = if sel.orient == proto_orient {
+            data_front.clone()
+        } else {
+            data_sides.clone()
+        };
         packets.push(sauer_proto::channel1::EditVSlot {
             sel,
             delta: 0,
@@ -127,27 +215,56 @@ pub fn get_outer_faces_vslot_packets(adj: [i32; 3], size: i32, orient: u8, color
     packets
 }
 
-pub fn build_button_geometry(map: &mut crate::map_state::MapState, adj: [i32; 3], size: i32, orient: u8) {
+pub fn build_button_geometry(
+    map: &mut crate::map_state::MapState,
+    adj: [i32; 3],
+    size: i32,
+    orient: u8,
+) {
     // 1. Fill solid button bounds
     let sel = SelInfo {
-        o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        o: Vec3 {
+            x: adj[0],
+            y: adj[1],
+            z: adj[2],
+        },
         s: Vec3 { x: 1, y: 1, z: 1 },
         grid: size,
         orient: Orient::try_from(orient as i32).unwrap_or(Orient::Left),
-        cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+        cx: 0,
+        cxs: 2,
+        cy: 0,
+        cys: 2,
+        corner: 0,
     };
     map.world.fill(&sel, true);
-    map.world.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
-    map.world.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
-    map.world.set_material(&sel, ogz_rs::data::Material { alpha: true, ..Default::default() });
+    map.world
+        .set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
+    map.world
+        .set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
+    map.world.set_material(
+        &sel,
+        ogz_rs::data::Material {
+            alpha: true,
+            ..Default::default()
+        },
+    );
 
     // 2. Hollow out internal cavity for storing payload safely
     let cavity_sel = SelInfo {
-        o: Vec3 { x: adj[0] + 2, y: adj[1] + 2, z: adj[2] + 2 },
+        o: Vec3 {
+            x: adj[0] + 2,
+            y: adj[1] + 2,
+            z: adj[2] + 2,
+        },
         s: Vec3 { x: 2, y: 2, z: 2 },
         grid: 2,
         orient: Orient::Top,
-        cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+        cx: 0,
+        cxs: 0,
+        cy: 0,
+        cys: 0,
+        corner: 0,
     };
     map.world.fill(&cavity_sel, false);
 
@@ -211,7 +328,7 @@ pub fn rebuild_all_trap_buttons(
 ) {
     for trap in traps {
         build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
-        
+
         let sel = sauer_map::Selection {
             o: sauer_proto::data::Vec3 {
                 x: trap.button_pos[0],
@@ -220,8 +337,13 @@ pub fn rebuild_all_trap_buttons(
             },
             s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
             grid: trap.button_size,
-            orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
-            cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+            orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
+                .unwrap_or(sauer_proto::data::Orient::Left),
+            cx: 0,
+            cxs: 2,
+            cy: 0,
+            cys: 2,
+            corner: 0,
         };
         for corner in 0..4 {
             let mut csel = sel.clone();
@@ -342,8 +464,13 @@ pub fn check_and_rebuild_traps(
                 },
                 s: Vec3 { x: 1, y: 1, z: 1 },
                 grid: trap.button_size,
-                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
-                cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
+                    .unwrap_or(sauer_proto::data::Orient::Left),
+                cx: 0,
+                cxs: 2,
+                cy: 0,
+                cys: 2,
+                corner: 0,
             };
             for corner in 0..4 {
                 let mut csel = sel.clone();

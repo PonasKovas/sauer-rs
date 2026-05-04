@@ -121,11 +121,20 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         sauer_map::clipboard::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
 
     let sel = Selection {
-        o: Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        o: Vec3 {
+            x: adj[0],
+            y: adj[1],
+            z: adj[2],
+        },
         s: Vec3 { x: 1, y: 1, z: 1 },
         grid: BUTTON_SIZE,
-        orient: sauer_proto::data::Orient::try_from(hit_orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
-        cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
+        orient: sauer_proto::data::Orient::try_from(hit_orient as i32)
+            .unwrap_or(sauer_proto::data::Orient::Left),
+        cx: 0,
+        cxs: 2,
+        cy: 0,
+        cys: 2,
+        corner: 0,
     };
     for corner in 0..4 {
         let mut csel = sel.clone();
@@ -207,8 +216,8 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         }
 
         // Sync traps to map ONLY AFTER corner pushes complete.
-        // This ensures the client map collapses the branch BEFORE we inject 
-        // the VSlot payload, safely subdividing the deformed geometry 
+        // This ensures the client map collapses the branch BEFORE we inject
+        // the VSlot payload, safely subdividing the deformed geometry
         // and avoiding payload destruction.
         crate::trap::stored::sync_traps_to_map(&server, id);
     });

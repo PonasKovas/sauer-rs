@@ -390,7 +390,11 @@ pub fn track_vslot_edits(server: &Server, count: usize) {
         let new_count = old_count + count;
         *entry = new_count;
         if new_count >= 50000 && old_count < 50000 {
-            crate::ui::send_warn(server, id, "\x0C3[WARNING] Your game memory is approaching the engine limit due to heavy editing. Please /savemap and /reconnect to prevent visual corruption.");
+            crate::ui::send_warn(
+                server,
+                id,
+                "\x0C3[WARNING] Your game memory is approaching the engine limit due to heavy editing. Please /savemap and /reconnect to prevent visual corruption.",
+            );
         }
     }
 }

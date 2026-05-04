@@ -419,7 +419,7 @@ pub fn set_button_color(
 ) {
     let actor_cn = server.get_cn(actor_id).unwrap_or(0) as i32;
     let mut state = get_server_state(server).write().unwrap();
-    
+
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
         if let Some(map) = state.map.as_mut() {
             map.handle_edit_v_slot(&packet);

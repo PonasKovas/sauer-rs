@@ -184,15 +184,21 @@ impl StoredTrap {
 pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channel1::EditVSlot> {
     let sel = crate::trap::placement::get_cavity_floor_selection(trap.button_pos);
     let mut packets = Vec::new();
-    
+
     let data_blocks = crate::trap::vslot_store::encode_payload(
         trap,
         crate::trap::TRAP_STORE_VERSION,
         crate::trap::TRAP_DOMAIN,
-    ).unwrap_or_default();
-    
+    )
+    .unwrap_or_default();
+
     for block in data_blocks {
-        packets.push(sauer_proto::channel1::EditVSlot { sel: sel.clone(), delta: 1, all_faces: false, extra_data: block });
+        packets.push(sauer_proto::channel1::EditVSlot {
+            sel: sel.clone(),
+            delta: 1,
+            all_faces: false,
+            extra_data: block,
+        });
     }
 
     packets

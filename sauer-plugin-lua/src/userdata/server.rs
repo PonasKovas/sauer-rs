@@ -86,9 +86,7 @@ impl UserData for LuaServer {
                 .unwrap_or_default())
         });
 
-        methods.add_method("get_cn", |_lua, this, id: u64| {
-            Ok(this.inner.get_cn(id))
-        });
+        methods.add_method("get_cn", |_lua, this, id: u64| Ok(this.inner.get_cn(id)));
 
         methods.add_method(
             "register_command",
