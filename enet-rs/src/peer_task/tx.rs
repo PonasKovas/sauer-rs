@@ -1,11 +1,11 @@
 /// PeerTask send path: outgoing datagrams, reliability tracking, disconnect.
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use tracing::warn;
 
 use crate::protocol::{
-    self, CHANNEL_ID_CONNECTION, CMD_CONNECT, CMD_DISCONNECT, CMD_SEND_FRAGMENT, CMD_SEND_RELIABLE,
-    CMD_SEND_UNRELIABLE, CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED,
-    COMMAND_FLAG_ACKNOWLEDGE, COMMAND_FLAG_UNSEQUENCED, FREE_RELIABLE_WINDOWS,
+    self, CHANNEL_ID_CONNECTION, CMD_BANDWIDTH_LIMIT, CMD_CONNECT, CMD_DISCONNECT,
+    CMD_SEND_FRAGMENT, CMD_SEND_RELIABLE, CMD_SEND_UNRELIABLE, CMD_SEND_UNRELIABLE_FRAGMENT,
+    CMD_SEND_UNSEQUENCED, COMMAND_FLAG_ACKNOWLEDGE, COMMAND_FLAG_UNSEQUENCED, FREE_RELIABLE_WINDOWS,
     HEADER_FLAG_SENT_TIME, HEADER_SESSION_SHIFT, PACKET_THROTTLE_SCALE, RELIABLE_WINDOW_SIZE,
     THROTTLE_ACCELERATION, THROTTLE_DECELERATION, THROTTLE_INTERVAL_MS, WINDOW_SIZE_MAX,
     WINDOW_SIZE_MIN,
@@ -23,8 +23,9 @@ fn encode_command(
     body_writer: impl FnOnce(&mut BytesMut),
 ) -> Bytes {
     let mut buf = BytesMut::with_capacity(64);
-    buf.extend_from_slice(&[cmd_type | flags, channel_id]);
-    buf.extend_from_slice(&reliable_seq.to_be_bytes());
+    buf.put_u8(cmd_type | flags);
+    buf.put_u8(channel_id);
+    buf.put_u16(reliable_seq);
     body_writer(&mut buf);
     buf.freeze()
 }
@@ -40,12 +41,12 @@ impl PeerTask {
         let peer_id_raw = HEADER_FLAG_SENT_TIME
             | ((self.outgoing_session_id as u16 & 0x3) << HEADER_SESSION_SHIFT)
             | (self.outgoing_peer_id & 0x0FFF);
-        buf.extend_from_slice(&peer_id_raw.to_be_bytes());
-        buf.extend_from_slice(&(now_ms as u16).to_be_bytes());
+        buf.put_u16(peer_id_raw);
+        buf.put_u16(now_ms as u16);
 
         if self.use_checksum {
             let ck_offset = buf.len();
-            buf.extend_from_slice(&self.connect_id.to_be_bytes());
+            buf.put_u32(self.connect_id);
             for c in cmds {
                 buf.extend_from_slice(c);
             }
@@ -110,13 +111,7 @@ impl PeerTask {
             self.channels[idx].next_reliable_seq()
         };
 
-        let cmd = encode_command(
-            cmd_type,
-            COMMAND_FLAG_ACKNOWLEDGE | extra_flags,
-            channel_id,
-            seq,
-            body,
-        );
+        let cmd = encode_command(cmd_type, COMMAND_FLAG_ACKNOWLEDGE | extra_flags, channel_id, seq, body);
         let timeout = self.initial_rtt_timeout();
 
         self.outgoing_reliable.insert(
@@ -136,8 +131,8 @@ impl PeerTask {
 
     pub(super) fn ack(channel_id: u8, seq: u16, sent_time: u16) -> Bytes {
         encode_command(crate::protocol::CMD_ACKNOWLEDGE, 0, channel_id, 0, |buf| {
-            buf.extend_from_slice(&seq.to_be_bytes());
-            buf.extend_from_slice(&sent_time.to_be_bytes());
+            buf.put_u16(seq);
+            buf.put_u16(sent_time);
         })
     }
 
@@ -152,18 +147,19 @@ impl PeerTask {
         let peer_id_wire = self.key.0 as u16;
 
         let cmd = self.make_reliable(CHANNEL_ID_CONNECTION, CMD_CONNECT, 0, now_ms, move |buf| {
-            buf.extend_from_slice(&peer_id_wire.to_be_bytes());
-            buf.extend_from_slice(&[0xFF, 0xFF]); // fresh session IDs
-            buf.extend_from_slice(&host_mtu.to_be_bytes());
-            buf.extend_from_slice(&WINDOW_SIZE_MAX.to_be_bytes());
-            buf.extend_from_slice(&channel_count.to_be_bytes());
-            buf.extend_from_slice(&incoming_bw.to_be_bytes());
-            buf.extend_from_slice(&outgoing_bw.to_be_bytes());
-            buf.extend_from_slice(&THROTTLE_INTERVAL_MS.to_be_bytes());
-            buf.extend_from_slice(&THROTTLE_ACCELERATION.to_be_bytes());
-            buf.extend_from_slice(&THROTTLE_DECELERATION.to_be_bytes());
-            buf.extend_from_slice(&connect_id.to_be_bytes());
-            buf.extend_from_slice(&user_data.to_be_bytes());
+            buf.put_u16(peer_id_wire);
+            buf.put_u8(0xFF); // incoming_session_id: fresh
+            buf.put_u8(0xFF); // outgoing_session_id: fresh
+            buf.put_u32(host_mtu);
+            buf.put_u32(WINDOW_SIZE_MAX);
+            buf.put_u32(channel_count);
+            buf.put_u32(incoming_bw);
+            buf.put_u32(outgoing_bw);
+            buf.put_u32(THROTTLE_INTERVAL_MS);
+            buf.put_u32(THROTTLE_ACCELERATION);
+            buf.put_u32(THROTTLE_DECELERATION);
+            buf.put_u32(connect_id);
+            buf.put_u32(user_data);
         });
         self.connect_seq = self.outgoing_reliable_seq;
         cmd
@@ -182,10 +178,7 @@ impl PeerTask {
 
         match pkt.mode {
             SendMode::Reliable => self.send_reliable(pkt, ch, mtu, hdr_overhead, now_ms).await,
-            SendMode::Unreliable => {
-                self.send_unreliable(pkt, ch, mtu, hdr_overhead, now_ms)
-                    .await
-            }
+            SendMode::Unreliable => self.send_unreliable(pkt, ch, mtu, hdr_overhead, now_ms).await,
             SendMode::Unsequenced => self.send_unsequenced(pkt, ch, now_ms).await,
         }
     }
@@ -234,8 +227,8 @@ impl PeerTask {
             let data = pkt.data;
             let data_len = data.len() as u16;
             let cmd = self.make_reliable(ch, CMD_SEND_RELIABLE, 0, now_ms, move |buf| {
-                buf.extend_from_slice(&data_len.to_be_bytes());
-                buf.extend_from_slice(&data);
+                buf.put_u16(data_len);
+                buf.put_slice(&data);
             });
             self.emit(&[cmd], now_ms).await;
         } else {
@@ -260,10 +253,8 @@ impl PeerTask {
 
         for i in 0..frag_count {
             let offset = i * frag_payload;
-            let end = (offset + frag_payload).min(total);
-            let frag = data.slice(offset..end);
+            let frag = data.slice(offset..(offset + frag_payload).min(total));
             let frag_len = frag.len() as u16;
-
             let seq = if i == 0 {
                 start_seq
             } else {
@@ -271,17 +262,14 @@ impl PeerTask {
             };
             let timeout = self.initial_rtt_timeout();
 
-            let cmd = encode_command(CMD_SEND_FRAGMENT, COMMAND_FLAG_ACKNOWLEDGE, ch, seq, {
-                let frag = frag.clone();
-                move |buf| {
-                    buf.extend_from_slice(&start_seq.to_be_bytes());
-                    buf.extend_from_slice(&frag_len.to_be_bytes());
-                    buf.extend_from_slice(&(frag_count as u32).to_be_bytes());
-                    buf.extend_from_slice(&(i as u32).to_be_bytes());
-                    buf.extend_from_slice(&(total as u32).to_be_bytes());
-                    buf.extend_from_slice(&(offset as u32).to_be_bytes());
-                    buf.extend_from_slice(&frag);
-                }
+            let cmd = encode_command(CMD_SEND_FRAGMENT, COMMAND_FLAG_ACKNOWLEDGE, ch, seq, move |buf| {
+                buf.put_u16(start_seq);
+                buf.put_u16(frag_len);
+                buf.put_u32(frag_count as u32);
+                buf.put_u32(i as u32);
+                buf.put_u32(total as u32);
+                buf.put_u32(offset as u32);
+                buf.put_slice(&frag);
             });
             self.outgoing_reliable.insert(
                 (ch, seq),
@@ -314,14 +302,14 @@ impl PeerTask {
         let max_payload = mtu as usize - hdr_overhead - 4 - 4; // cmd_hdr=4, fields=4
 
         if pkt.data.len() <= max_payload {
-            let u = self.channels[ch as usize].next_unreliable_seq();
-            let r = self.channels[ch as usize].outgoing_reliable_seq;
+            let unreliable_seq = self.channels[ch as usize].next_unreliable_seq();
+            let reliable_seq = self.channels[ch as usize].outgoing_reliable_seq;
             let data = pkt.data;
             let data_len = data.len() as u16;
-            let cmd = encode_command(CMD_SEND_UNRELIABLE, 0, ch, r, move |buf| {
-                buf.extend_from_slice(&u.to_be_bytes());
-                buf.extend_from_slice(&data_len.to_be_bytes());
-                buf.extend_from_slice(&data);
+            let cmd = encode_command(CMD_SEND_UNRELIABLE, 0, ch, reliable_seq, move |buf| {
+                buf.put_u16(unreliable_seq);
+                buf.put_u16(data_len);
+                buf.put_slice(&data);
             });
             self.emit(&[cmd], now_ms).await;
         } else {
@@ -347,24 +335,17 @@ impl PeerTask {
 
         for i in 0..frag_count {
             let offset = i * frag_payload;
-            let end = (offset + frag_payload).min(total);
-            let frag = data.slice(offset..end);
+            let frag = data.slice(offset..(offset + frag_payload).min(total));
             let frag_len = frag.len() as u16;
-            let cmd = encode_command(
-                CMD_SEND_UNRELIABLE_FRAGMENT,
-                0,
-                ch,
-                reliable_seq,
-                move |buf| {
-                    buf.extend_from_slice(&start_seq.to_be_bytes());
-                    buf.extend_from_slice(&frag_len.to_be_bytes());
-                    buf.extend_from_slice(&(frag_count as u32).to_be_bytes());
-                    buf.extend_from_slice(&(i as u32).to_be_bytes());
-                    buf.extend_from_slice(&(total as u32).to_be_bytes());
-                    buf.extend_from_slice(&(offset as u32).to_be_bytes());
-                    buf.extend_from_slice(&frag);
-                },
-            );
+            let cmd = encode_command(CMD_SEND_UNRELIABLE_FRAGMENT, 0, ch, reliable_seq, move |buf| {
+                buf.put_u16(start_seq);
+                buf.put_u16(frag_len);
+                buf.put_u32(frag_count as u32);
+                buf.put_u32(i as u32);
+                buf.put_u32(total as u32);
+                buf.put_u32(offset as u32);
+                buf.put_slice(&frag);
+            });
             cmds.push(cmd);
         }
         self.flush_batch(cmds, now_ms).await;
@@ -390,27 +371,18 @@ impl PeerTask {
         let group = chan.next_unsequenced_group();
         let data = pkt.data;
         let data_len = data.len() as u16;
-        let cmd = encode_command(
-            CMD_SEND_UNSEQUENCED,
-            COMMAND_FLAG_UNSEQUENCED,
-            ch,
-            0,
-            move |buf| {
-                buf.extend_from_slice(&group.to_be_bytes());
-                buf.extend_from_slice(&data_len.to_be_bytes());
-                buf.extend_from_slice(&data);
-            },
-        );
+        let cmd = encode_command(CMD_SEND_UNSEQUENCED, COMMAND_FLAG_UNSEQUENCED, ch, 0, move |buf| {
+            buf.put_u16(group);
+            buf.put_u16(data_len);
+            buf.put_slice(&data);
+        });
         self.emit(&[cmd], now_ms).await;
     }
 
     // ── Disconnect ────────────────────────────────────────────────────────────
 
     pub(super) async fn begin_disconnect(&mut self, data: u32, now_ms: u32) {
-        if matches!(
-            self.state,
-            PeerState::Disconnecting | PeerState::DisconnectLater(_)
-        ) {
+        if matches!(self.state, PeerState::Disconnecting | PeerState::DisconnectLater(_)) {
             return;
         }
         if self.state == PeerState::AcknowledgingConnect {
@@ -421,26 +393,15 @@ impl PeerTask {
             return;
         }
         self.state = PeerState::Disconnecting;
-        let cmd = self.make_reliable(
-            CHANNEL_ID_CONNECTION,
-            CMD_DISCONNECT,
-            0,
-            now_ms,
-            move |buf| {
-                buf.extend_from_slice(&data.to_be_bytes());
-            },
-        );
+        let cmd = self.make_reliable(CHANNEL_ID_CONNECTION, CMD_DISCONNECT, 0, now_ms, |buf| {
+            buf.put_u32(data);
+        });
         self.emit(&[cmd], now_ms).await;
     }
 
     // ── Bandwidth update from host ────────────────────────────────────────────
 
-    pub(super) async fn apply_bw_update(
-        &mut self,
-        incoming_bw: u32,
-        per_peer_ob: u32,
-        now_ms: u32,
-    ) {
+    pub(super) async fn apply_bw_update(&mut self, incoming_bw: u32, per_peer_ob: u32, now_ms: u32) {
         if self.state != PeerState::Connected {
             return;
         }
@@ -452,16 +413,10 @@ impl PeerTask {
         }
         let ib = incoming_bw;
         let ob = per_peer_ob;
-        let cmd = self.make_reliable(
-            CHANNEL_ID_CONNECTION,
-            crate::protocol::CMD_BANDWIDTH_LIMIT,
-            0,
-            now_ms,
-            move |buf| {
-                buf.extend_from_slice(&ib.to_be_bytes());
-                buf.extend_from_slice(&ob.to_be_bytes());
-            },
-        );
+        let cmd = self.make_reliable(CHANNEL_ID_CONNECTION, CMD_BANDWIDTH_LIMIT, 0, now_ms, move |buf| {
+            buf.put_u32(ib);
+            buf.put_u32(ob);
+        });
         self.emit(&[cmd], now_ms).await;
     }
 }

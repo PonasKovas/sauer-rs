@@ -101,12 +101,10 @@ impl RecvTask {
     }
 
     fn remove_slot(&mut self, key: PeerKey) {
-        if let Some(Some(slot)) = self.slots.get(key.0) {
-            self.addr_map.remove(&slot.addr);
-        }
-        if let Some(s) = self.slots.get_mut(key.0) {
-            *s = None;
-        }
+        let Some(slot) = self.slots.get_mut(key.0).and_then(|s| s.take()) else {
+            return;
+        };
+        self.addr_map.remove(&slot.addr);
     }
 
     fn spawn_server_peer(&mut self, from: SocketAddr) -> Option<PeerKey> {

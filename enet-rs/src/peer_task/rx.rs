@@ -1,12 +1,11 @@
 /// PeerTask receive path: parse incoming datagrams and dispatch protocol commands.
+use bytes::BufMut;
 use tracing::{debug, warn};
 
 use crate::channel::FragmentBuffer;
 use crate::protocol::{
     self, AcknowledgeCmd, CommandBody, CommandHeader, ConnectCmd, VerifyConnectCmd,
-    CHANNEL_ID_CONNECTION, CMD_ACKNOWLEDGE, CMD_BANDWIDTH_LIMIT, CMD_CONNECT, CMD_DISCONNECT,
-    CMD_PING, CMD_SEND_FRAGMENT, CMD_SEND_RELIABLE, CMD_SEND_UNRELIABLE,
-    CMD_SEND_UNRELIABLE_FRAGMENT, CMD_SEND_UNSEQUENCED, CMD_THROTTLE_CONFIGURE, CMD_VERIFY_CONNECT,
+    CHANNEL_ID_CONNECTION, CMD_ACKNOWLEDGE, CMD_CONNECT, CMD_DISCONNECT,
     MAX_CHANNELS, MTU_MAX, MTU_MIN, PACKET_THROTTLE_SCALE, WINDOW_SIZE_MAX, WINDOW_SIZE_MIN,
 };
 use crate::{Packet, SendMode};
@@ -16,9 +15,26 @@ use super::{PeerState, PeerTask};
 const MAX_FRAGMENT_BUFFERS_PER_CHANNEL: usize = 64;
 const MAX_FRAGMENT_BYTES_PER_PEER: usize = 16 * 1024 * 1024;
 
-impl PeerTask {
-    // ── Datagram entry point ──────────────────────────────────────────────────
+// ── Window size helpers ───────────────────────────────────────────────────────
 
+/// Compute the window size from two bandwidth values.
+///
+/// If both are zero the link is unconstrained. When one side is zero, we use
+/// the other side's value. When both are non-zero we take the minimum (the
+/// tighter constraint). The result is additionally clamped by the caller.
+fn window_from_bandwidth(own_bw: u32, peer_bw: u32) -> u32 {
+    let effective = match (own_bw, peer_bw) {
+        (0, 0) => return WINDOW_SIZE_MAX,
+        (0, p) => p,
+        (o, 0) => o,
+        (o, p) => o.min(p),
+    };
+    ((effective / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN).max(WINDOW_SIZE_MIN)
+}
+
+// ── Datagram dispatch ─────────────────────────────────────────────────────────
+
+impl PeerTask {
     pub(super) async fn on_datagram(&mut self, raw: &[u8], now_ms: u32) {
         let mut slice = raw;
         let Some(hdr) = protocol::ProtocolHeader::parse(&mut slice) else {
@@ -46,7 +62,7 @@ impl PeerTask {
             let hdr_len = raw.len() - slice.len();
             let mut scratch = Vec::with_capacity(raw.len());
             scratch.extend_from_slice(&raw[..hdr_len]);
-            scratch.extend_from_slice(&self.connect_id.to_be_bytes());
+            scratch.put_u32(self.connect_id);
             scratch.extend_from_slice(&slice[4..]);
             if protocol::crc32(&scratch) != stored {
                 return;
@@ -64,21 +80,15 @@ impl PeerTask {
             let hdr_channel = cmd.header.channel_id;
             let hdr_seq = cmd.header.reliable_seq;
 
+            // Auto-ACK everything except CONNECT, DISCONNECT, and ACKNOWLEDGE
+            // (DISCONNECT ACKs itself manually; the others don't need ACKs).
             if hdr_has_ack && !matches!(cmd_type, CMD_CONNECT | CMD_DISCONNECT | CMD_ACKNOWLEDGE) {
                 if let Some(st) = sent_time {
                     pending_acks.push(Self::ack(hdr_channel, hdr_seq, st));
                 }
             }
 
-            self.dispatch(
-                cmd_type,
-                cmd.header,
-                cmd.body,
-                sent_time,
-                now_ms,
-                &mut pending_acks,
-            )
-            .await;
+            self.dispatch(cmd.header, cmd.body, sent_time, now_ms).await;
         }
 
         if !pending_acks.is_empty() {
@@ -88,120 +98,89 @@ impl PeerTask {
 
     async fn dispatch(
         &mut self,
-        cmd_type: u8,
         hdr: CommandHeader,
         body: CommandBody,
         sent_time: Option<u16>,
         now_ms: u32,
-        _pending_acks: &mut Vec<bytes::Bytes>,
     ) {
-        let hdr_has_ack = hdr.has_ack_flag();
         let hdr_channel = hdr.channel_id;
         let hdr_seq = hdr.reliable_seq;
+        let hdr_has_ack = hdr.has_ack_flag();
 
-        match cmd_type {
-            CMD_CONNECT => {
-                if let CommandBody::Connect(c) = body {
-                    self.on_connect(c, hdr, sent_time, now_ms).await;
-                }
+        match body {
+            CommandBody::Connect(c) => {
+                self.on_connect(c, hdr, sent_time, now_ms).await;
             }
-            CMD_VERIFY_CONNECT => {
-                if let CommandBody::VerifyConnect(vc) = body {
-                    self.on_verify_connect(vc, hdr, now_ms).await;
-                }
+            CommandBody::VerifyConnect(vc) => {
+                self.on_verify_connect(vc, now_ms).await;
             }
-            CMD_ACKNOWLEDGE => {
-                if let CommandBody::Acknowledge(ack) = body {
-                    self.on_ack(hdr_channel, ack, now_ms).await;
-                }
+            CommandBody::Acknowledge(ack) => {
+                self.on_ack(hdr_channel, ack, now_ms).await;
             }
-            CMD_DISCONNECT => {
-                if let CommandBody::Disconnect(d) = body {
-                    if self.state != PeerState::AcknowledgingConnect {
-                        if hdr_has_ack {
-                            if let Some(st) = sent_time {
-                                let a = Self::ack(hdr_channel, hdr_seq, st);
-                                self.emit(&[a], now_ms).await;
-                            }
-                        }
-                        let _ = self.to_user_tx.try_send(Err(Some(d.data)));
-                        self.removed = true;
+            CommandBody::Disconnect(d) => {
+                if self.state == PeerState::AcknowledgingConnect {
+                    return;
+                }
+                if hdr_has_ack {
+                    if let Some(st) = sent_time {
+                        self.emit(&[Self::ack(hdr_channel, hdr_seq, st)], now_ms).await;
                     }
                 }
+                let _ = self.to_user_tx.try_send(Err(Some(d.data)));
+                self.removed = true;
             }
-            CMD_PING => {
+            CommandBody::Ping => {
                 self.last_receive_time = now_ms;
             }
-            CMD_SEND_RELIABLE => {
-                if let CommandBody::SendReliable(sr) = body {
-                    self.last_receive_time = now_ms;
-                    if (hdr_channel as usize) < self.channels.len() {
-                        let ready = self.channels[hdr_channel as usize]
-                            .receive_reliable(hdr_seq, sr.data, 1);
-                        for data in ready {
-                            self.deliver(Packet::reliable(data, hdr_channel));
-                        }
+            CommandBody::SendReliable(sr) => {
+                self.last_receive_time = now_ms;
+                let ch = hdr_channel as usize;
+                if ch < self.channels.len() {
+                    let ready = self.channels[ch].receive_reliable(hdr_seq, sr.data, 1);
+                    for data in ready {
+                        self.deliver(Packet::reliable(data, hdr_channel));
                     }
                 }
             }
-            CMD_SEND_UNRELIABLE => {
-                if let CommandBody::SendUnreliable(su) = body {
-                    self.last_receive_time = now_ms;
-                    let ch = hdr_channel as usize;
-                    if ch < self.channels.len() {
-                        if !protocol::seq_lt(hdr_seq, self.channels[ch].incoming_reliable_seq) {
-                            if let Some(data) =
-                                self.channels[ch].receive_unreliable(su.unreliable_seq, su.data)
-                            {
-                                self.deliver(Packet::unreliable(data, hdr_channel));
-                            }
-                        }
+            CommandBody::SendUnreliable(su) => {
+                self.last_receive_time = now_ms;
+                let ch = hdr_channel as usize;
+                if ch < self.channels.len()
+                    && !protocol::seq_lt(hdr_seq, self.channels[ch].incoming_reliable_seq)
+                {
+                    if let Some(data) =
+                        self.channels[ch].receive_unreliable(su.unreliable_seq, su.data)
+                    {
+                        self.deliver(Packet::unreliable(data, hdr_channel));
                     }
                 }
             }
-            CMD_SEND_FRAGMENT => {
-                if let CommandBody::SendFragment(sf) = body {
-                    self.on_fragment(hdr_channel, sf, true, hdr_seq, now_ms);
+            CommandBody::SendFragment(sf) => {
+                self.on_fragment(hdr_channel, sf, true, hdr_seq, now_ms);
+            }
+            CommandBody::SendUnreliableFragment(sf) => {
+                self.on_fragment(hdr_channel, sf, false, hdr_seq, now_ms);
+            }
+            CommandBody::SendUnsequenced(su) => {
+                self.last_receive_time = now_ms;
+                if self.unsequenced_window.check_and_set(su.unsequenced_group) {
+                    self.deliver(Packet::unsequenced(su.data));
                 }
             }
-            CMD_SEND_UNRELIABLE_FRAGMENT => {
-                if let CommandBody::SendUnreliableFragment(sf) = body {
-                    self.on_fragment(hdr_channel, sf, false, hdr_seq, now_ms);
+            CommandBody::BandwidthLimit(bl) => {
+                if bl.incoming_bandwidth != 0 || bl.outgoing_bandwidth != 0 {
+                    self.window_size =
+                        window_from_bandwidth(bl.incoming_bandwidth, 0)
+                            .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
                 }
             }
-            CMD_SEND_UNSEQUENCED => {
-                if let CommandBody::SendUnsequenced(su) = body {
-                    self.last_receive_time = now_ms;
-                    if self.unsequenced_window.check_and_set(su.unsequenced_group) {
-                        self.deliver(Packet::unsequenced(su.data));
-                    }
+            CommandBody::ThrottleConfigure(tc) => {
+                if tc.throttle_interval > 0 {
+                    self.throttle_interval = tc.throttle_interval;
                 }
+                self.throttle_acceleration = tc.throttle_acceleration.min(PACKET_THROTTLE_SCALE);
+                self.throttle_deceleration = tc.throttle_deceleration.min(PACKET_THROTTLE_SCALE);
             }
-            CMD_BANDWIDTH_LIMIT => {
-                if let CommandBody::BandwidthLimit(bl) = body {
-                    if bl.incoming_bandwidth != 0 || bl.outgoing_bandwidth != 0 {
-                        let throttle = if bl.incoming_bandwidth == 0 {
-                            WINDOW_SIZE_MAX
-                        } else {
-                            ((bl.incoming_bandwidth / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN)
-                                .max(WINDOW_SIZE_MIN)
-                        };
-                        self.window_size = throttle.clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
-                    }
-                }
-            }
-            CMD_THROTTLE_CONFIGURE => {
-                if let CommandBody::ThrottleConfigure(tc) = body {
-                    if tc.throttle_interval > 0 {
-                        self.throttle_interval = tc.throttle_interval;
-                    }
-                    self.throttle_acceleration =
-                        tc.throttle_acceleration.min(PACKET_THROTTLE_SCALE);
-                    self.throttle_deceleration =
-                        tc.throttle_deceleration.min(PACKET_THROTTLE_SCALE);
-                }
-            }
-            _ => {}
         }
     }
 
@@ -230,28 +209,12 @@ impl PeerTask {
         };
 
         let mtu = connect.mtu.clamp(MTU_MIN, MTU_MAX).min(self.host_mtu);
-
-        let server_window = if self.incoming_bw == 0 {
-            WINDOW_SIZE_MAX
-        } else {
-            ((self.incoming_bw / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN).max(WINDOW_SIZE_MIN)
-        };
-        let peer_window = if self.outgoing_bw == 0 && connect.incoming_bandwidth == 0 {
-            WINDOW_SIZE_MAX
-        } else if self.outgoing_bw == 0 || connect.incoming_bandwidth == 0 {
-            ((self.outgoing_bw.max(connect.incoming_bandwidth) / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN)
-                .max(WINDOW_SIZE_MIN)
-        } else {
-            ((self.outgoing_bw.min(connect.incoming_bandwidth) / WINDOW_SIZE_MAX) * WINDOW_SIZE_MIN)
-                .max(WINDOW_SIZE_MIN)
-        };
-        let window_size = server_window
-            .min(peer_window)
+        let window_size = window_from_bandwidth(self.incoming_bw, 0)
+            .min(window_from_bandwidth(self.outgoing_bw, connect.incoming_bandwidth))
             .min(connect.window_size)
             .clamp(WINDOW_SIZE_MIN, WINDOW_SIZE_MAX);
         let ch = connect.channel_count.clamp(1, MAX_CHANNELS) as u8;
 
-        // Apply connect state.
         self.outgoing_peer_id = connect.outgoing_peer_id;
         self.connect_id = connect.connect_id;
         self.incoming_session_id = in_sess;
@@ -281,17 +244,18 @@ impl PeerTask {
             0,
             now_ms,
             move |buf| {
-                buf.extend_from_slice(&peer_id_wire.to_be_bytes());
-                buf.extend_from_slice(&[out_sess, in_sess]);
-                buf.extend_from_slice(&mtu.to_be_bytes());
-                buf.extend_from_slice(&window_size.to_be_bytes());
-                buf.extend_from_slice(&(ch as u32).to_be_bytes());
-                buf.extend_from_slice(&host_ib.to_be_bytes());
-                buf.extend_from_slice(&host_ob.to_be_bytes());
-                buf.extend_from_slice(&throttle_interval.to_be_bytes());
-                buf.extend_from_slice(&throttle_acceleration.to_be_bytes());
-                buf.extend_from_slice(&throttle_deceleration.to_be_bytes());
-                buf.extend_from_slice(&connect_id.to_be_bytes());
+                buf.put_u16(peer_id_wire);
+                buf.put_u8(out_sess);
+                buf.put_u8(in_sess);
+                buf.put_u32(mtu);
+                buf.put_u32(window_size);
+                buf.put_u32(ch as u32);
+                buf.put_u32(host_ib);
+                buf.put_u32(host_ob);
+                buf.put_u32(throttle_interval);
+                buf.put_u32(throttle_acceleration);
+                buf.put_u32(throttle_deceleration);
+                buf.put_u32(connect_id);
             },
         );
         self.connect_seq = self.outgoing_reliable_seq;
@@ -306,7 +270,7 @@ impl PeerTask {
 
     // ── VERIFY_CONNECT (client side) ──────────────────────────────────────────
 
-    async fn on_verify_connect(&mut self, vc: VerifyConnectCmd, _hdr: CommandHeader, now_ms: u32) {
+    async fn on_verify_connect(&mut self, vc: VerifyConnectCmd, now_ms: u32) {
         if self.state != PeerState::Connecting || vc.connect_id != self.connect_id {
             return;
         }
@@ -323,8 +287,7 @@ impl PeerTask {
 
         // Remove CMD_CONNECT from outstanding (VERIFY_CONNECT implicitly ACKs it).
         let connect_seq = self.connect_seq;
-        self.outgoing_reliable
-            .remove(&(CHANNEL_ID_CONNECTION, connect_seq));
+        self.outgoing_reliable.remove(&(CHANNEL_ID_CONNECTION, connect_seq));
 
         let peer = self.take_peer();
         if let Some(reply) = self.connect_reply.take() {
@@ -381,7 +344,6 @@ impl PeerTask {
             let peer = self.take_peer();
             if let Some(tx) = &self.accept_tx {
                 if tx.send(peer).await.is_err() {
-                    // Host dropped — clean shutdown.
                     self.removed = true;
                 }
             }
@@ -417,10 +379,10 @@ impl PeerTask {
             return;
         }
 
-        if !reliable {
-            if protocol::seq_lt(hdr_seq, self.channels[ch as usize].incoming_reliable_seq) {
-                return;
-            }
+        if !reliable
+            && protocol::seq_lt(hdr_seq, self.channels[ch as usize].incoming_reliable_seq)
+        {
+            return;
         }
 
         let is_new = !self.channels[ch as usize]
@@ -443,13 +405,10 @@ impl PeerTask {
         }
 
         let done = {
-            let chan = &mut self.channels[ch as usize];
-            let buf = chan
+            let buf = self.channels[ch as usize]
                 .fragment_buffers
                 .entry(sf.start_seq)
-                .or_insert_with(|| {
-                    FragmentBuffer::new(sf.total_length as usize, sf.fragment_count)
-                });
+                .or_insert_with(|| FragmentBuffer::new(sf.total_length as usize, sf.fragment_count));
             buf.receive(sf.fragment_number, sf.fragment_offset as usize, &sf.data)
         };
 
@@ -471,19 +430,11 @@ impl PeerTask {
                 self.channels[ch as usize]
                     .receive_reliable(sf.start_seq, assembled, frag_count)
                     .into_iter()
-                    .map(|d| Packet {
-                        data: d,
-                        channel: ch,
-                        mode: SendMode::Reliable,
-                    })
+                    .map(|d| Packet { data: d, channel: ch, mode: SendMode::Reliable })
                     .collect::<Vec<_>>()
             } else {
                 match self.channels[ch as usize].receive_unreliable(sf.start_seq, assembled) {
-                    Some(d) => vec![Packet {
-                        data: d,
-                        channel: ch,
-                        mode: SendMode::Unreliable,
-                    }],
+                    Some(d) => vec![Packet { data: d, channel: ch, mode: SendMode::Unreliable }],
                     None => vec![],
                 }
             };

@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use rand::Rng;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
@@ -62,6 +62,13 @@ pub(crate) struct OutstandingReliable {
 }
 
 // ── PeerTask ──────────────────────────────────────────────────────────────────
+
+struct ServiceActions {
+    timed_out: bool,
+    retransmits: Vec<Bytes>,
+    ping_needed: bool,
+    disconnect_later: Option<u32>,
+}
 
 pub(crate) struct PeerTask {
     // Identity
@@ -284,20 +291,19 @@ impl PeerTask {
     // ── Service (retransmit / ping / deferred disconnect) ─────────────────────
 
     pub(super) async fn service(&mut self, now_ms: u32) {
-        let (timed_out, retransmits, ping_needed, disconnect_later) =
-            self.collect_service_actions(now_ms);
+        let actions = self.collect_service_actions(now_ms);
 
-        if timed_out {
+        if actions.timed_out {
             let _ = self.to_user_tx.try_send(Err(None));
             self.removed = true;
             return;
         }
 
-        if !retransmits.is_empty() {
-            self.flush_batch(retransmits, now_ms).await;
+        if !actions.retransmits.is_empty() {
+            self.flush_batch(actions.retransmits, now_ms).await;
         }
 
-        if ping_needed {
+        if actions.ping_needed {
             let ping = self.make_reliable(
                 crate::protocol::CHANNEL_ID_CONNECTION,
                 crate::protocol::CMD_PING,
@@ -308,14 +314,14 @@ impl PeerTask {
             self.emit(&[ping], now_ms).await;
         }
 
-        if let Some(data) = disconnect_later {
+        if let Some(data) = actions.disconnect_later {
             self.state = PeerState::Disconnecting;
             let cmd = self.make_reliable(
                 crate::protocol::CHANNEL_ID_CONNECTION,
                 crate::protocol::CMD_DISCONNECT,
                 0,
                 now_ms,
-                move |buf| buf.extend_from_slice(&data.to_be_bytes()),
+                move |buf| buf.put_u32(data),
             );
             self.emit(&[cmd], now_ms).await;
         }
@@ -327,7 +333,7 @@ impl PeerTask {
         }
     }
 
-    fn collect_service_actions(&mut self, now_ms: u32) -> (bool, Vec<Bytes>, bool, Option<u32>) {
+    fn collect_service_actions(&mut self, now_ms: u32) -> ServiceActions {
         let mut timed_out = false;
         let mut retransmits = Vec::new();
 
@@ -356,11 +362,7 @@ impl PeerTask {
 
         let disconnect_later = if !timed_out {
             if let PeerState::DisconnectLater(data) = self.state {
-                if self.outgoing_reliable.is_empty() {
-                    Some(data)
-                } else {
-                    None
-                }
+                if self.outgoing_reliable.is_empty() { Some(data) } else { None }
             } else {
                 None
             }
@@ -368,7 +370,7 @@ impl PeerTask {
             None
         };
 
-        (timed_out, retransmits, ping_needed, disconnect_later)
+        ServiceActions { timed_out, retransmits, ping_needed, disconnect_later }
     }
 
     // ── Main run loop ─────────────────────────────────────────────────────────
