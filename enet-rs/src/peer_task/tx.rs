@@ -102,7 +102,12 @@ impl PeerTask {
         let seq = if channel_id == CHANNEL_ID_CONNECTION {
             self.next_connect_seq()
         } else {
-            self.channels[channel_id as usize].next_reliable_seq()
+            let idx = channel_id as usize;
+            if idx >= self.channels.len() {
+                warn!("make_reliable: channel_id {channel_id} out of range");
+                return Bytes::new();
+            }
+            self.channels[idx].next_reliable_seq()
         };
 
         let cmd = encode_command(
@@ -369,6 +374,19 @@ impl PeerTask {
         let Some(chan) = self.channels.get_mut(ch as usize) else {
             return;
         };
+        // ENet unsequenced sends are never fragmented; reject oversized data before
+        // the length field silently truncates and corrupts the receiver's parser.
+        let max_payload = self.mtu as usize
+            - (4 + if self.use_checksum { 4 } else { 0 })
+            - 4  // cmd_hdr
+            - 4; // unsequenced_group + data_len fields
+        if pkt.data.len() > max_payload {
+            warn!(
+                "dropping oversized unsequenced packet ({} > {max_payload})",
+                pkt.data.len()
+            );
+            return;
+        }
         let group = chan.next_unsequenced_group();
         let data = pkt.data;
         let data_len = data.len() as u16;

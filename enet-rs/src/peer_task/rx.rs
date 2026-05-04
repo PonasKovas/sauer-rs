@@ -454,16 +454,18 @@ impl PeerTask {
         };
 
         if done {
-            self.fragment_bytes_in_flight = self
-                .fragment_bytes_in_flight
-                .saturating_sub(sf.total_length as usize);
-
             let frag_count = sf.fragment_count;
             let assembled = self.channels[ch as usize]
                 .fragment_buffers
                 .remove(&sf.start_seq)
-                .unwrap()
+                .expect("fragment buffer must exist when done")
                 .finish();
+            // Use the buffer's actual allocated size for the budget decrement; a
+            // malicious peer could have sent fragments with inconsistent total_length
+            // values for the same start_seq.
+            self.fragment_bytes_in_flight = self
+                .fragment_bytes_in_flight
+                .saturating_sub(assembled.len());
 
             let packets = if reliable {
                 self.channels[ch as usize]
