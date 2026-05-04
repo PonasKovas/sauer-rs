@@ -10,38 +10,51 @@ pub(crate) fn setup_plugin_env(lua: &Lua, env: &Table, name: &str) -> Result<(),
         lua.create_function(move |lua, args: Variadic<Value>| log(level, &n, lua, args))
     };
 
+    /// Log a message at INFO level, tagged with the plugin name. Accepts multiple args separated by tabs.
     env.set("print", make_log(Level::INFO)?)?;
+    /// Log at TRACE level, tagged with the plugin name.
     env.set("trace", make_log(Level::TRACE)?)?;
+    /// Log at DEBUG level, tagged with the plugin name.
     env.set("debug", make_log(Level::DEBUG)?)?;
+    /// Log at INFO level, tagged with the plugin name.
     env.set("info", make_log(Level::INFO)?)?;
+    /// Log at WARN level, tagged with the plugin name.
     env.set("warn", make_log(Level::WARN)?)?;
+    /// Log at ERROR level, tagged with the plugin name.
     env.set("error", make_log(Level::ERROR)?)?;
 
+    /// Protocol version integer this server implements.
     env.set("PROTOCOL_VERSION", sauer_proto::PROTOCOL_VERSION)?;
 
     let ui_table = lua.create_table()?;
+    /// Format text as a bold header for server messages.
     ui_table.set(
         "header",
         lua.create_function(|lua, text: String| sauer_server::ui::header(&text).into_lua(lua))?,
     )?;
+    /// Format text as body text for server messages.
     ui_table.set(
         "body",
         lua.create_function(|lua, text: String| sauer_server::ui::body(&text).into_lua(lua))?,
     )?;
+    /// Format a command tip with a command name and description.
     ui_table.set(
         "tip",
         lua.create_function(|lua, (cmd, desc): (String, String)| {
             sauer_server::ui::tip(&cmd, &desc).into_lua(lua)
         })?,
     )?;
+    /// Format text as a warning message.
     ui_table.set(
         "warn_msg",
         lua.create_function(|lua, text: String| sauer_server::ui::warn_msg(&text).into_lua(lua))?,
     )?;
+    /// Format text as a section header.
     ui_table.set(
         "section",
         lua.create_function(|lua, text: String| sauer_server::ui::section(&text).into_lua(lua))?,
     )?;
+    /// Return a horizontal separator string.
     ui_table.set(
         "sep",
         lua.create_function(|lua, ()| sauer_server::ui::sep().into_lua(lua))?,

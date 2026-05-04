@@ -12,6 +12,7 @@ impl EventUD {
 
 impl UserData for EventUD {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        /// Cancel this event, preventing default server processing and stopping further plugin handlers.
         methods.add_method_mut("cancel", |_lua, this, _: ()| {
             this.cancelled = true;
 

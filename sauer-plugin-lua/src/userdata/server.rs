@@ -73,11 +73,13 @@ impl UserData for LuaServer {
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        /// Disconnect a client by peer ID.
         methods.add_method("disconnect", |_lua, this, id: u64| {
             this.inner.disconnect(id);
             Ok(())
         });
 
+        /// Return the remote socket address of a client as a string (e.g. `"1.2.3.4:5678"`), or an empty string if not found.
         methods.add_method("peer_address", |_lua, this, id: u64| {
             Ok(this
                 .inner
@@ -86,8 +88,10 @@ impl UserData for LuaServer {
                 .unwrap_or_default())
         });
 
+        /// Return the client number (cn) assigned to a peer ID, or nil if not connected.
         methods.add_method("get_cn", |_lua, this, id: u64| Ok(this.inner.get_cn(id)));
 
+        /// Register a server command visible in `/help`. `usage` is optional.
         methods.add_method(
             "register_command",
             |_lua, this, (name, desc, usage): (String, String, Option<String>)| {
@@ -97,6 +101,7 @@ impl UserData for LuaServer {
             },
         );
 
+        /// Send a pre-built server query response table to a UDP address string.
         methods.add_method(
             "send_server_query",
             |_lua, this, (addr_str, table): (String, Table)| {
@@ -188,9 +193,7 @@ impl UserData for LuaServer {
             },
         );
 
-        // Spawn a background tokio task that calls `func()` every
-        // `interval_ms` milliseconds.  Returns a `TaskHandle` with a
-        // `cancel()` method.
+        /// Spawn a background task that calls `func` every `interval_ms` milliseconds. Returns a `TaskHandle`.
         methods.add_method(
             "set_interval",
             |_lua, _this, (interval_ms, func): (u64, mlua::Function)| {
@@ -209,9 +212,7 @@ impl UserData for LuaServer {
             },
         );
 
-        // Spawn a background tokio task that calls `func()` after
-        // `interval_ms` milliseconds.  Returns a `TaskHandle` with a
-        // `cancel()` method.
+        /// Spawn a background task that calls `func` once after `timeout_ms` milliseconds. Returns a `TaskHandle`.
         methods.add_method(
             "set_timeout",
             |_lua, _this, (timeout_ms, func): (u64, mlua::Function)| {
