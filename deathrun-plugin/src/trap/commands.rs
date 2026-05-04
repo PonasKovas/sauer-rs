@@ -615,6 +615,20 @@ pub fn cmd_endtrap(ctx: &Context) {
         &mut trigger_cells,
     );
 
+    // Completely filter out any cells that intersect the button's bounds!
+    // This ensures the button geometry and payload are INDESTRUCTIBLE by the trap itself.
+    let trap_pos = state.traps[edit_state.trap_idx].button_pos;
+    let trap_size = state.traps[edit_state.trap_idx].button_size;
+    let b_min = trap_pos;
+    let b_max = [b_min[0] + trap_size, b_min[1] + trap_size, b_min[2] + trap_size];
+
+    trigger_cells.retain(|&(pos, size, _)| {
+        let c_min = pos;
+        let c_max = [pos[0] + size, pos[1] + size, pos[2] + size];
+        let intersects = (0..3).all(|i| c_min[i] < b_max[i] && c_max[i] > b_min[i]);
+        !intersects
+    });
+
     if trigger_cells.is_empty() && edit_state.affected_entities.is_empty() {
         server.broadcast_chan1(&ServMsg {
             text: "Trap edit ended with no changes detected.".lossy_cubestring(),

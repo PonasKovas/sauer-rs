@@ -146,16 +146,16 @@ pub fn get_outer_face_selections(adj: [i32; 3], size: i32) -> [SelInfo; 6] {
     ]
 }
 
-pub fn get_cavity_floor_selection(adj: [i32; 3]) -> SelInfo {
+pub fn get_payload_selection(adj: [i32; 3]) -> SelInfo {
     SelInfo {
         o: Vec3 {
-            x: adj[0] + 2,
-            y: adj[1] + 2,
-            z: adj[2],
+            x: adj[0] + 1,
+            y: adj[1] + 1,
+            z: adj[2] + 1,
         },
-        s: Vec3 { x: 2, y: 2, z: 1 },
-        grid: 2,
-        orient: Orient::Top, // Top of the blocks making the floor
+        s: Vec3 { x: 1, y: 1, z: 1 },
+        grid: 1, // 1-cube wide selection forces subdivision into an internal invisible face
+        orient: Orient::Top,
         cx: 0,
         cxs: 0,
         cy: 0,
@@ -250,25 +250,7 @@ pub fn build_button_geometry(
         },
     );
 
-    // 2. Hollow out internal cavity for storing payload safely
-    let cavity_sel = SelInfo {
-        o: Vec3 {
-            x: adj[0] + 2,
-            y: adj[1] + 2,
-            z: adj[2] + 2,
-        },
-        s: Vec3 { x: 2, y: 2, z: 2 },
-        grid: 2,
-        orient: Orient::Top,
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
-    };
-    map.world.fill(&cavity_sel, false);
-
-    // 3. Apply appearance VSlots strictly to the 6 outer faces
+    // 2. Apply appearance VSlots strictly to the 6 outer faces
     for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
         map.handle_edit_v_slot(&pkt);
     }

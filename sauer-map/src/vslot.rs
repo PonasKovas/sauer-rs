@@ -283,7 +283,8 @@ pub fn resolve_vslot(
     }
 
     let mut insert_idx = None;
-    for i in 0x4000..vslots.len() {
+    let min_safe_idx = 1704;
+    for i in min_safe_idx..vslots.len() {
         if vslots[i].is_none() {
             insert_idx = Some(i);
             break;
@@ -294,8 +295,8 @@ pub fn resolve_vslot(
         vslots[idx] = Some(new_vs);
         idx as u16
     } else {
-        if vslots.len() < 0x4000 {
-            vslots.resize(0x4000, None);
+        if vslots.len() < min_safe_idx {
+            vslots.resize(min_safe_idx, None);
         }
         let idx = vslots.len();
         vslots.push(Some(new_vs));
