@@ -1,8 +1,8 @@
+use crate::protocol::{
+    seq_lt, FREE_RELIABLE_WINDOWS, RELIABLE_WINDOW_SIZE, UNSEQUENCED_WINDOW_SIZE,
+};
+use bytes::Bytes;
 use std::collections::BTreeMap;
-
-use bytes::{Bytes, BytesMut};
-
-use crate::protocol::{seq_lt, FREE_RELIABLE_WINDOWS, RELIABLE_WINDOW_SIZE};
 
 /// Maximum number of out-of-order reliable packets buffered per channel.
 /// Caps per-channel memory use and prevents a malicious peer from exhausting
@@ -13,11 +13,11 @@ const MAX_INCOMING_RELIABLE_QUEUE: usize = 4096;
 
 #[derive(Debug)]
 pub struct FragmentBuffer {
-    pub fragment_count: u32,
-    pub received: u32,
-    pub buf: Vec<u8>,
+    pub(crate) fragment_count: u32,
+    pub(crate) received: u32,
+    pub(crate) buf: Vec<u8>,
     /// Bitmask: bit i set = fragment i arrived.
-    pub mask: Vec<u64>,
+    pub(crate) mask: Vec<u64>,
 }
 
 impl FragmentBuffer {
@@ -76,24 +76,24 @@ impl FragmentBuffer {
 #[derive(Debug)]
 pub struct Channel {
     // Outgoing
-    pub outgoing_reliable_seq: u16,
-    pub outgoing_unreliable_seq: u16,
-    pub outgoing_unsequenced_group: u16,
+    pub(crate) outgoing_reliable_seq: u16,
+    pub(crate) outgoing_unreliable_seq: u16,
+    pub(crate) outgoing_unsequenced_group: u16,
 
     // Incoming reliable
-    pub incoming_reliable_seq: u16,
+    pub(crate) incoming_reliable_seq: u16,
     /// Reliable commands held waiting for an earlier seq to arrive.
-    pub incoming_reliable_queue: BTreeMap<u16, (Bytes, u32)>,
+    pub(crate) incoming_reliable_queue: BTreeMap<u16, (Bytes, u32)>,
 
     // Incoming unreliable
-    pub incoming_unreliable_seq: u16,
+    pub(crate) incoming_unreliable_seq: u16,
 
     // Reliable fragment reassembly: start_seq -> buffer
-    pub fragment_buffers: BTreeMap<u16, FragmentBuffer>,
+    pub(crate) fragment_buffers: BTreeMap<u16, FragmentBuffer>,
 }
 
-impl Channel {
-    pub fn new() -> Self {
+impl Default for Channel {
+    fn default() -> Self {
         Self {
             outgoing_reliable_seq: 0,
             outgoing_unreliable_seq: 0,
@@ -103,6 +103,12 @@ impl Channel {
             incoming_unreliable_seq: 0,
             fragment_buffers: BTreeMap::new(),
         }
+    }
+}
+
+impl Channel {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Advance and return the next outgoing reliable sequence number.
@@ -135,8 +141,8 @@ impl Channel {
             loop {
                 let next = self.incoming_reliable_seq.wrapping_add(1);
                 if let Some(d) = self.incoming_reliable_queue.remove(&next) {
-                    // Advance by buffered frag_count and reset unreliable sequence
-                    self.incoming_reliable_seq = next.wrapping_add((frag_count.max(1) - 1) as u16);
+                    // Advance by buffered frag_count (d.1) and reset unreliable sequence
+                    self.incoming_reliable_seq = next.wrapping_add((d.1.max(1) - 1) as u16);
                     self.incoming_unreliable_seq = 0;
                     out.push(d.0);
                 } else {
@@ -174,16 +180,22 @@ impl Channel {
 // ── Unsequenced duplicate detection ──────────────────────────────────────────
 
 pub struct UnsequencedWindow {
-    pub window: [u32; 32],
-    pub group: u16,
+    pub(crate) window: [u32; 32],
+    pub(crate) group: u16,
 }
 
-impl UnsequencedWindow {
-    pub fn new() -> Self {
+impl Default for UnsequencedWindow {
+    fn default() -> Self {
         Self {
             window: [0u32; 32],
             group: 0,
         }
+    }
+}
+
+impl UnsequencedWindow {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns true if the packet with this group is new (not a duplicate).
@@ -196,14 +208,14 @@ impl UnsequencedWindow {
         if diff > 0 {
             // This group is ahead of the current high-water mark — advance.
             let advance = diff as u16;
-            if advance >= 1024 {
+            if advance >= UNSEQUENCED_WINDOW_SIZE as u16 {
                 // More than the full window ahead: reset everything.
                 self.window = [0u32; 32];
             } else {
                 // Slide forward: clear the bits for positions being recycled.
                 for i in 1..=advance {
                     let pos = self.group.wrapping_add(i);
-                    let idx = pos as usize % 1024;
+                    let idx = pos as usize % UNSEQUENCED_WINDOW_SIZE as usize;
                     self.window[idx / 32] &= !(1u32 << (idx % 32));
                 }
             }
@@ -211,13 +223,13 @@ impl UnsequencedWindow {
         } else if diff < 0 {
             // This group is behind the high-water mark.
             let behind = (-(diff as i32)) as u16;
-            if behind >= 1024 {
+            if behind >= UNSEQUENCED_WINDOW_SIZE as u16 {
                 return false; // Too old — outside the dedup window.
             }
         }
         // diff == 0: same as current high-water mark; bit should already be set.
 
-        let idx = group as usize % 1024;
+        let idx = group as usize % UNSEQUENCED_WINDOW_SIZE as usize;
         let word = idx / 32;
         let bit = 1u32 << (idx % 32);
         if self.window[word] & bit != 0 {
@@ -226,19 +238,4 @@ impl UnsequencedWindow {
         self.window[word] |= bit;
         true
     }
-}
-
-/// Encode a command into bytes (without the datagram header).
-pub fn encode_command(
-    cmd_type: u8,
-    flags: u8,
-    channel_id: u8,
-    reliable_seq: u16,
-    body_writer: impl FnOnce(&mut BytesMut),
-) -> Bytes {
-    let mut buf = BytesMut::with_capacity(64);
-    buf.extend_from_slice(&[cmd_type | flags, channel_id]);
-    buf.extend_from_slice(&reliable_seq.to_be_bytes());
-    body_writer(&mut buf);
-    buf.freeze()
 }

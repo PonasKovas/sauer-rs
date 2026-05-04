@@ -241,4 +241,5 @@ pub fn read_all<T: DeserializeOwned + Clone>(
     );
 
     Ok(valid_results.into_values().collect())
+
 }

@@ -47,22 +47,18 @@
 mod channel;
 mod error;
 mod peer;
+mod peer_task;
 mod protocol;
-mod task;
+mod recv_task;
 
 pub use error::{Error, Result};
 pub use peer::{Peer, PeerReceiver, PeerSender};
-pub use task::PeerKey;
 
 use bytes::Bytes;
-use std::{
-    net::{SocketAddr, ToSocketAddrs},
-    sync::Arc,
-    time::Duration,
-};
+use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 use tokio::{net::UdpSocket, sync::mpsc, time::timeout};
 
-use task::{HostTask, PeerMsg, ToTask};
+use recv_task::{HostCmd, RecvTask};
 
 // ── Packet ────────────────────────────────────────────────────────────────────
 
@@ -150,17 +146,16 @@ impl Default for HostConfig {
 
 /// An ENet host (server or client-side connection manager).
 ///
-/// Spawns an internal tokio task that drives all protocol logic. User code
+/// Spawns a lightweight routing task and one async task per peer. User code
 /// interacts via async channels — no manual event loops required.
 pub struct Host {
-    /// Receives newly accepted [`Peer`] connections.
-    accept_rx: mpsc::Receiver<(PeerKey, SocketAddr, mpsc::Receiver<PeerMsg>)>,
-    /// Sends control messages to the background task.
-    task_tx: mpsc::Sender<ToTask>,
+    accept_rx: mpsc::Receiver<Peer>,
+    /// Held to keep RecvTask alive; dropped when Host is dropped, causing RecvTask to exit.
+    _host_cmd_tx: mpsc::Sender<HostCmd>,
 }
 
 impl Host {
-    /// Bind a server host to `addr` and start the background task.
+    /// Bind a server host to `addr` and start the background tasks.
     pub async fn bind(addr: impl ToSocketAddrs, config: HostConfig) -> Result<Self> {
         let addr = addr
             .to_socket_addrs()
@@ -169,14 +164,13 @@ impl Host {
             .ok_or_else(|| Error::Io(std::io::Error::other("no address")))?;
 
         let socket = Arc::new(UdpSocket::bind(addr).await?);
-
         let (accept_tx, accept_rx) = mpsc::channel(64);
-        let (task_tx, task_rx) = mpsc::channel(1024);
+        let (host_cmd_tx, host_cmd_rx) = mpsc::channel(256);
 
-        let task = HostTask::new(
+        let task = RecvTask::new(
             socket,
             accept_tx,
-            task_rx,
+            host_cmd_rx,
             config.max_peers,
             config.use_checksum,
             config.incoming_bandwidth,
@@ -184,23 +178,20 @@ impl Host {
         );
         tokio::spawn(task.run());
 
-        Ok(Self { accept_rx, task_tx })
+        Ok(Self {
+            accept_rx,
+            _host_cmd_tx: host_cmd_tx,
+        })
     }
 
     /// Wait for the next incoming [`Peer`] connection.
     ///
     /// Returns `None` when the host task has shut down.
     pub async fn accept(&mut self) -> Option<Peer> {
-        let (key, addr, rx) = self.accept_rx.recv().await?;
-        Some(Peer::new(key, self.task_tx.clone(), rx, addr))
+        self.accept_rx.recv().await
     }
 
     /// Connect to a remote ENet server.
-    ///
-    /// Opens an ephemeral UDP socket, performs the ENet handshake, and returns
-    /// a [`Peer`] when the connection is established.
-    ///
-    /// `channel_count` is the number of channels to negotiate (≥ 1).
     pub async fn connect(addr: impl ToSocketAddrs, channel_count: u8) -> Result<Peer> {
         Self::connect_with_timeout(addr, channel_count, Duration::from_secs(5)).await
     }
@@ -217,21 +208,16 @@ impl Host {
             .next()
             .ok_or_else(|| Error::Io(std::io::Error::other("no address")))?;
 
-        // Bind to a random local port
         let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+        let (accept_tx, _) = mpsc::channel(1);
+        let (host_cmd_tx, host_cmd_rx) = mpsc::channel(4);
 
-        let (accept_tx, _accept_rx) = mpsc::channel(1); // unused for client
-        let (task_tx, task_rx) = mpsc::channel(1024);
-        let task = HostTask::new(
-            socket, accept_tx, task_rx, 1, // only one peer
-            false, 0, // no incoming bandwidth limit for client
-            0, // no outgoing bandwidth limit for client
-        );
+        let task = RecvTask::new(socket, accept_tx, host_cmd_rx, 1, false, 0, 0);
         tokio::spawn(task.run());
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        task_tx
-            .send(ToTask::Connect {
+        host_cmd_tx
+            .send(HostCmd::Connect {
                 addr,
                 channel_count,
                 data: 0,
@@ -240,13 +226,10 @@ impl Host {
             .await
             .map_err(|_| Error::ChannelClosed)?;
 
-        // Unwrap the three layers: timeout, oneshot cancellation, inner Result.
-        let (key, addr, rx) = match timeout(connect_timeout, reply_rx).await {
-            Err(_elapsed) => return Err(Error::TimedOut),
-            Ok(Err(_canceled)) => return Err(Error::ChannelClosed),
-            Ok(Ok(result)) => result?,
-        };
-
-        Ok(Peer::new(key, task_tx, rx, addr))
+        match timeout(connect_timeout, reply_rx).await {
+            Err(_elapsed) => Err(Error::TimedOut),
+            Ok(Err(_canceled)) => Err(Error::ChannelClosed),
+            Ok(Ok(result)) => result,
+        }
     }
 }

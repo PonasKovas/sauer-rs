@@ -1,3 +1,5 @@
+#![allow(unused_doc_comments)]
+
 use crate::{
     callbacks::{Callbacks, add_callbacks_from_env},
     error::LuaPluginErrorExt,
