@@ -151,7 +151,7 @@ pub fn get_payload_selection(adj: [i32; 3], orient: u8) -> SelInfo {
     let dc = orient & 1;
 
     let mut offset = [1, 1, 1];
-    if dc == 1 {
+    if dc == 0 {
         offset[d] = 7;
     }
 

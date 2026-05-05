@@ -5,7 +5,6 @@ use sauer_proto::{
 };
 use sauer_server::Server;
 
-use super::placement::pack_vslot_bytes;
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY};
 
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {

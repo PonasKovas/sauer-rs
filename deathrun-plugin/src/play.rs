@@ -1,5 +1,5 @@
 use crate::map_state::{DeathrunState, MapState, Trap, get_server_state};
-use crate::trap::{StoredTrap, TRAP_DOMAIN, TRAP_STORE_VERSION};
+use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use ogz_rs::data::MapConfig;
