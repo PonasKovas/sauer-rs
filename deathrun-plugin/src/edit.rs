@@ -1,5 +1,5 @@
 use crate::map_state::{
-    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to, with_map_state_mut,
+    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to_async, with_map_state_mut,
 };
 use crate::trap::{
     check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
@@ -428,68 +428,71 @@ impl Plugin for DeathrunEdit {
         tokio::task::yield_now().await;
 
         let data_clone = data.clone();
-        let parse_result = tokio::task::spawn_blocking(move || {
-            MapState::from_bytes(&data_clone)
-        }).await.expect("Map parsing panicked");
+        let parse_result = tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let mut state = MapState::from_bytes(&data_clone).map_err(|e| e.to_string())?;
+            let world_size = state.world.size;
 
-        match parse_result {
-            Ok(mut state) => {
-                let world_size = state.world.size;
-
-                for ent in &mut state.world.entities {
-                    if ent.ent_type == ogz_rs::data::EntityType::Particles
-                        && ent.attrs[3] == 1337
-                        && ent.attrs[4] == 7331
-                    {
-                        ent.ent_type = ogz_rs::data::EntityType::Empty;
-                        ent.attrs = [0; 5];
-                    }
-                }
-
-                let mut loaded_traps = Vec::new();
-                if let Ok(stored_traps) =
-                    crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
-                        &state,
-                        crate::trap::TRAP_STORE_VERSION,
-                        crate::trap::TRAP_DOMAIN,
-                        |t| t.button_pos,
-                    )
+            for ent in &mut state.world.entities {
+                if ent.ent_type == ogz_rs::data::EntityType::Particles
+                    && ent.attrs[3] == 1337
+                    && ent.attrs[4] == 7331
                 {
-                    for st in &stored_traps {
-                        st.apply_reset_to_world(&mut state.world);
-                    }
-                    loaded_traps = stored_traps
-                        .into_iter()
-                        .filter_map(|st| st.into_trap())
-                        .collect();
-                    info!("Loaded {} traps from map vslot store", loaded_traps.len());
+                    ent.ent_type = ogz_rs::data::EntityType::Empty;
+                    ent.attrs = [0; 5];
                 }
+            }
 
-                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
-                for trap in &loaded_traps {
-                    let packets = crate::trap::stored::generate_trap_vslot_packets(
-                        &crate::trap::StoredTrap::from_trap(trap),
-                    );
-                    for p in &packets {
-                        state.handle_edit_v_slot(p);
-                    }
+            let mut loaded_traps = Vec::new();
+            if let Ok(stored_traps) =
+                crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
+                    &state,
+                    crate::trap::TRAP_STORE_VERSION,
+                    crate::trap::TRAP_DOMAIN,
+                    |t| t.button_pos,
+                )
+            {
+                for st in &stored_traps {
+                    st.apply_reset_to_world(&mut state.world);
                 }
+                loaded_traps = stored_traps
+                    .into_iter()
+                    .filter_map(|st| st.into_trap())
+                    .collect();
+            }
 
-                state.update_server_items(server);
+            crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
+            for trap in &loaded_traps {
+                let packets = crate::trap::stored::generate_trap_vslot_packets(
+                    &crate::trap::StoredTrap::from_trap(trap),
+                );
+                for p in &packets {
+                    state.handle_edit_v_slot(p);
+                }
+            }
 
-                let mut trap_params_count = 0;
-                let mut trap_data_bytes = 0;
-                for vs_opt in &state.meta.vslots {
-                    if let Some(vs) = vs_opt {
-                        for p in &vs.params {
-                            let name_bytes = p.name.as_bytes();
-                            if !name_bytes.is_empty() && name_bytes[0] == 1 {
-                                trap_params_count += 1;
-                                trap_data_bytes += 2 + name_bytes.len() + 16;
-                            }
+            let mut trap_params_count = 0;
+            let mut trap_data_bytes = 0;
+            for vs_opt in &state.meta.vslots {
+                if let Some(vs) = vs_opt {
+                    for p in &vs.params {
+                        let name_bytes = p.name.as_bytes();
+                        if !name_bytes.is_empty() && name_bytes[0] == 1 {
+                            trap_params_count += 1;
+                            trap_data_bytes += 2 + name_bytes.len() + 16;
                         }
                     }
                 }
+            }
+
+            // Compress the fully prepared map back to Bytes here in the background
+            let out_bytes = state.to_ogz_bytes().map_err(|e| e.to_string())?;
+
+            Ok((state, loaded_traps, out_bytes, world_size, trap_params_count, trap_data_bytes))
+        }).await.expect("Map parsing panicked");
+
+        match parse_result {
+            Ok((state, loaded_traps, out_bytes, world_size, trap_params_count, trap_data_bytes)) => {
+                state.update_server_items(server);
 
                 let total_bytes = data.len();
                 let trap_kb = trap_data_bytes as f64 / 1024.0;
@@ -521,18 +524,11 @@ impl Plugin for DeathrunEdit {
                     ).lossy_cubestring()
                 });
 
-                // Push the corrected map to every connected client, including the uploader
-                // so they see the reset trap geometry instead of the triggered state they sent.
+                // Instantly blast the pre-compressed bytes to all clients without blocking!
+                let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
                 for client_id in server.client_ids() {
-                    send_map_to(server, client_id);
+                    server.send_chan2(client_id, &pkt);
                 }
-
-                server.set_spectator(id, false);
-                ui::send(
-                    server,
-                    id,
-                    ui::body("Map received. You can now spawn and edit freely."),
-                );
             }
             Err(e) => warn!("id {id} sent an invalid map: {e}"),
         }
@@ -551,18 +547,16 @@ impl Plugin for DeathrunEdit {
             server.set_privilege(id, Privilege::Master);
             server.set_spectator(id, false);
         }
-        if send_map_to(server, id) {
-            info!("sent map state to id {id} after welcome");
-        }
+        crate::map_state::send_map_to_async(ctx.server(), id);
+        info!("sent map state to id {id} after welcome");
         ui::send_welcome_edit(server, id);
     }
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
         let id = ctx.id();
-        if send_map_to(ctx.server(), id) {
-            info!("sent map state to id {id} on N_GETMAP");
-            ctx.cancel();
-        }
+        crate::map_state::send_map_to_async(ctx.server(), id);
+        info!("sent map state to id {id} on N_GETMAP");
+        ctx.cancel();
     }
 
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
@@ -806,7 +800,7 @@ impl Plugin for DeathrunEdit {
 
         if get_server_state(server).read().unwrap().trap_edit.is_some() {
             ui::send_warn(server, id, "Cannot use newmap while editing a trap.");
-            crate::map_state::send_map_to(server, id);
+            crate::map_state::send_map_to_async(ctx.server(), id);
             ctx.cancel();
             return;
         }

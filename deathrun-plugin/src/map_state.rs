@@ -416,20 +416,27 @@ where
     }
 }
 
-pub(crate) fn send_map_to(server: &Server, id: u64) -> bool {
-    let bytes = {
-        let lock = get_server_state(server).read().unwrap();
-        match lock.map.as_ref() {
-            None => return false,
-            Some(state) => match state.to_ogz_bytes() {
-                Ok(b) => b,
+pub(crate) fn send_map_to_async(server: &std::sync::Arc<Server>, id: u64) {
+    let server_clone = std::sync::Arc::clone(server);
+    tokio::spawn(async move {
+        let state_opt = {
+            let lock = get_server_state(&server_clone).read().unwrap();
+            lock.map.clone()
+        };
+
+        if let Some(state) = state_opt {
+            let out_bytes = tokio::task::spawn_blocking(move || {
+                state.to_ogz_bytes()
+            }).await.expect("to_ogz_bytes panicked");
+
+            match out_bytes {
+                Ok(bytes) => {
+                    server_clone.send_chan2(id, &channel2::SendMap { data: bytes });
+                }
                 Err(e) => {
                     error!("failed to serialize map state: {e}");
-                    return false;
                 }
-            },
+            }
         }
-    };
-    server.send_chan2(id, &channel2::SendMap { data: bytes });
-    true
+    });
 }
