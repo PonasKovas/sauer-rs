@@ -6,7 +6,10 @@ use std::io::Read;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Convert an OGZ map with legacy entity_store traps to vslot_store")]
+#[command(
+    version,
+    about = "Convert an OGZ map with legacy entity_store traps to vslot_store"
+)]
 struct Args {
     #[arg(help = "The input .ogz file")]
     input: PathBuf,
@@ -76,15 +79,14 @@ fn main() {
 
     let refs: Vec<_> = store_ents.iter().map(|(_, e)| *e).collect();
     let (_, compressed) = unpack(&refs).expect("Failed to unpack legacy entities");
-    let stored_traps: Vec<StoredTrap> = decompress(&compressed).expect("Failed to deserialize legacy traps");
+    let stored_traps: Vec<StoredTrap> =
+        decompress(&compressed).expect("Failed to deserialize legacy traps");
 
     println!("Found {} legacy traps.", stored_traps.len());
 
     // 1. Clear legacy trap data (domain 1 and 2, plus generic negative coords)
     for ent in &mut map_state.world.entities {
-        if is_store_entity(ent, TRAP_DOMAIN)
-            || is_store_entity(ent, 2)
-            || ent.position[2] < -9000.0
+        if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0
         {
             ent.ent_type = ogz_rs::data::EntityType::Empty;
             ent.attrs = [0; 5];

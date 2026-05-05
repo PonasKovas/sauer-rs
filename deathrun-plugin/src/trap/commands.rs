@@ -620,7 +620,11 @@ pub fn cmd_endtrap(ctx: &Context) {
     let trap_pos = state.traps[edit_state.trap_idx].button_pos;
     let trap_size = state.traps[edit_state.trap_idx].button_size;
     let b_min = trap_pos;
-    let b_max = [b_min[0] + trap_size, b_min[1] + trap_size, b_min[2] + trap_size];
+    let b_max = [
+        b_min[0] + trap_size,
+        b_min[1] + trap_size,
+        b_min[2] + trap_size,
+    ];
 
     trigger_cells.retain(|&(pos, size, _)| {
         let c_min = pos;

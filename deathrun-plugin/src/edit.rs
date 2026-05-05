@@ -74,7 +74,6 @@ impl Plugin for DeathrunEdit {
             "set trap timeout (default 20 000ms)",
             "<ms>",
         );
-        server.register_command("#debugvslot", "spawn particles at vslot locations", "");
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
@@ -195,7 +194,6 @@ impl Plugin for DeathrunEdit {
             && cmd != "#endtrap"
             && cmd != "#traptime"
             && cmd != "#traptimeout"
-            && cmd != "#debugvslot"
         {
             return;
         }
@@ -205,58 +203,6 @@ impl Plugin for DeathrunEdit {
 
         if cmd == "#endtrap" {
             crate::trap::cmd_endtrap(ctx);
-            return;
-        }
-
-        if cmd == "#debugvslot" {
-            let mut state = get_server_state(&server).write().unwrap();
-            let mut packets = Vec::new();
-
-            let traps = state.traps.clone();
-            if let Some(map) = state.map.as_mut() {
-                for trap in traps {
-                    let sel = crate::trap::placement::get_payload_selection(trap.button_pos, trap.button_orient);
-                    let px = sel.o.x as f32 + 0.5;
-                    let py = sel.o.y as f32 + 0.5;
-                    let pz = sel.o.z as f32 + 0.5;
-
-                    let ent_id = map
-                        .world
-                        .entities
-                        .iter()
-                        .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
-                        .unwrap_or_else(|| {
-                            let idx = map.world.entities.len();
-                            map.world.entities.push(ogz_rs::data::Entity {
-                                position: [0.0; 3],
-                                attrs: [0; 5],
-                                ent_type: ogz_rs::data::EntityType::Empty,
-                                extra_data: vec![],
-                            });
-                            idx
-                        });
-
-                    if let Some(ent) = map.world.entities.get_mut(ent_id) {
-                        ent.position = [px, py, pz];
-                        ent.ent_type = ogz_rs::data::EntityType::Particles;
-                        ent.attrs = [0, 150, 0, 0, 0];
-                    }
-
-                    packets.push(sauer_proto::Client {
-                        client_num: server.get_cn(id).unwrap_or(0) as i32,
-                        packet: sauer_proto::channel1::EditEnt {
-                            ent_id: ent_id as i32,
-                            pos: sauer_proto::data::Vec3 { x: px, y: py, z: pz },
-                            type_: sauer_proto::data::EntityType::Particles,
-                            attrs: [0, 150, 0, 0, 0],
-                        },
-                    });
-                }
-            }
-            drop(state);
-            for p in packets {
-                server.broadcast_chan1(&p);
-            }
             return;
         }
 
@@ -478,12 +424,14 @@ impl Plugin for DeathrunEdit {
                 }
 
                 let mut loaded_traps = Vec::new();
-                if let Ok(stored_traps) = crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
-                    &state,
-                    crate::trap::TRAP_STORE_VERSION,
-                    crate::trap::TRAP_DOMAIN,
-                    |t| t.button_pos,
-                ) {
+                if let Ok(stored_traps) =
+                    crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
+                        &state,
+                        crate::trap::TRAP_STORE_VERSION,
+                        crate::trap::TRAP_DOMAIN,
+                        |t| t.button_pos,
+                    )
+                {
                     for st in &stored_traps {
                         st.apply_reset_to_world(&mut state.world);
                     }
@@ -501,7 +449,6 @@ impl Plugin for DeathrunEdit {
                     );
                     for p in &packets {
                         state.handle_edit_v_slot(p);
-
                     }
                 }
 
@@ -577,19 +524,25 @@ impl Plugin for DeathrunEdit {
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditTex(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_tex(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            intersects_sel(&packet.sel, trap)
+        });
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditMat(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_mat(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            intersects_sel(&packet.sel, trap)
+        });
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
         intercept_packet(ctx, crate::trap::RecordedPacket::DelCube(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_del_cube(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            intersects_sel(&packet.sel, trap)
+        });
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
@@ -625,17 +578,23 @@ impl Plugin for DeathrunEdit {
         crate::map_state::track_vslot_edits(ctx.server(), 1);
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            intersects_sel(&packet.sel, trap)
+        });
     }
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Flip(packet.clone()));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            intersects_sel(&packet.sel, trap)
+        });
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Rotate(packet.clone()));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            intersects_sel(&packet.sel, trap)
+        });
     }
 
     async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
