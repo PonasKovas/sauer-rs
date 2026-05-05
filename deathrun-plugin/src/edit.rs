@@ -443,96 +443,93 @@ impl Plugin for DeathrunEdit {
                     }
                 }
 
-                let mut loaded_traps = Vec::new();
-                if let Ok(stored_traps) =
-                    crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
-                        &state,
-                        crate::trap::TRAP_STORE_VERSION,
-                        crate::trap::TRAP_DOMAIN,
-                        |t| t.button_pos,
-                    )
-                {
-                    for st in &stored_traps {
-                        st.apply_reset_to_world(&mut state.world);
-                    }
-                    loaded_traps = stored_traps
-                        .into_iter()
-                        .filter_map(|st| st.into_trap())
-                        .collect();
+            let mut loaded_traps = Vec::new();
+            let mut store_stats = crate::trap::vslot_store::StoreStats::default();
+
+            if let Ok((stored_traps, stats)) =
+                crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
+                    &state,
+                    crate::trap::TRAP_STORE_VERSION,
+                    crate::trap::TRAP_DOMAIN,
+                    |t| t.button_pos,
+                )
+            {
+                store_stats = stats;
+                for st in &stored_traps {
+                    st.apply_reset_to_world(&mut state.world);
                 }
-
-                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
-                for trap in &loaded_traps {
-                    let packets = crate::trap::stored::generate_trap_vslot_packets(
-                        &crate::trap::StoredTrap::from_trap(trap),
-                    );
-                    for p in &packets {
-                        state.handle_edit_v_slot(p);
-                    }
-                }
-
-                let mut trap_params_count = 0;
-                let mut trap_data_bytes = 0;
-                for vs_opt in &state.meta.vslots {
-                    if let Some(vs) = vs_opt {
-                        for p in &vs.params {
-                            let name_bytes = p.name.as_bytes();
-                            if !name_bytes.is_empty() && name_bytes[0] == 1 {
-                                trap_params_count += 1;
-                                trap_data_bytes += 2 + name_bytes.len() + 16;
-                            }
-                        }
-                    }
-                }
-
-                // Compress the fully prepared map back to Bytes here in the background
-                let out_bytes = state.to_ogz_bytes().map_err(|e| e.to_string())?;
-
-                Ok((state, loaded_traps, out_bytes, world_size, trap_params_count, trap_data_bytes))
-            }).await.expect("Map parsing panicked");
-
-            match parse_result {
-                Ok((state, loaded_traps, out_bytes, world_size, trap_params_count, trap_data_bytes)) => {
-                    state.update_server_items(&server_clone);
-
-                    let trap_kb = trap_data_bytes as f64 / 1024.0;
-                    let percent = if total_bytes > 0 {
-                        (trap_data_bytes as f64 / total_bytes as f64) * 100.0
-                    } else {
-                        0.0
-                    };
-
-                    let loaded_traps_len = loaded_traps.len();
-
-                    {
-                        let mut s = get_server_state(&server_clone).write().unwrap();
-                        s.map = Some(state);
-                        s.traps = loaded_traps;
-                        s.waiting_for_map = false;
-                        s.trap_edit = None;
-                        s.active_traps.clear();
-                    }
-                    info!("id {id} uploaded a map (world_size={world_size}); state loaded");
-
-                    server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
-                        text: format!(
-                            "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps. Overhead: \x0C2{:.1} KB\x0C7 (\x0C2{:.1}%\x0C7 of OGZ, \x0C2{}\x0C7 VSlot chunks).",
-                            loaded_traps_len,
-                            trap_kb,
-                            percent,
-                            trap_params_count
-                        ).lossy_cubestring()
-                    });
-
-                    // Instantly blast the pre-compressed bytes to all clients without blocking!
-                    let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
-                    for client_id in server_clone.client_ids() {
-                        server_clone.send_chan2(client_id, &pkt);
-                    }
-                }
-                Err(e) => warn!("id {id} sent an invalid map: {e}"),
+                loaded_traps = stored_traps
+                    .into_iter()
+                    .filter_map(|st| st.into_trap())
+                    .collect();
             }
-        });
+
+            crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
+            for trap in &loaded_traps {
+                let packets = crate::trap::stored::generate_trap_vslot_packets(
+                    &crate::trap::StoredTrap::from_trap(trap),
+                );
+                for p in &packets {
+                    state.handle_edit_v_slot(p);
+                }
+            }
+
+            // Compress the fully prepared map back to Bytes here in the background
+            let out_bytes = state.to_ogz_bytes().map_err(|e| e.to_string())?;
+
+            Ok((state, loaded_traps, out_bytes, world_size, store_stats))
+        }).await.expect("Map parsing panicked");
+
+        match parse_result {
+            Ok((state, loaded_traps, out_bytes, world_size, stats)) => {
+                state.update_server_items(&server_clone);
+
+                let comp_kb = stats.payload_compressed as f64 / 1024.0;
+                let uncomp_kb = stats.payload_uncompressed as f64 / 1024.0;
+                let percent = if total_bytes > 0 {
+                    (stats.payload_compressed as f64 / total_bytes as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                let loaded_traps_len = loaded_traps.len();
+
+                {
+                    let mut s = get_server_state(&server_clone).write().unwrap();
+                    s.map = Some(state);
+                    s.traps = loaded_traps;
+                    s.waiting_for_map = false;
+                    s.trap_edit = None;
+                    s.active_traps.clear();
+                }
+                info!("id {id} uploaded a map (world_size={world_size}); state loaded");
+
+                server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+                    text: format!(
+                        "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps. Size: \x0C2{:.1} KB\x0C7 comp / \x0C2{:.1} KB\x0C7 uncomp (\x0C2{:.1}%\x0C7 of OGZ).",
+                        loaded_traps_len,
+                        comp_kb,
+                        uncomp_kb,
+                        percent
+                    ).lossy_cubestring()
+                });
+
+                // Instantly blast the pre-compressed bytes to all clients without blocking!
+                let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
+                for client_id in server_clone.client_ids() {
+                    server_clone.send_chan2(client_id, &pkt);
+                }
+
+                server_clone.set_spectator(id, false);
+                ui::send(
+                    &server_clone,
+                    id,
+                    ui::body("Map received. You can now spawn and edit freely."),
+                );
+            }
+            Err(e) => warn!("id {id} sent an invalid map: {e}"),
+        }
+    });
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {

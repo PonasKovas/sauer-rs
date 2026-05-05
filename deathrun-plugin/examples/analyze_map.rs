@@ -34,57 +34,38 @@ fn main() {
     println!("Entities: {}", raw_ogz.entities.len());
     println!("Total VSlot Array Size: {}", raw_ogz.vslots.len());
 
-    let mut trap_vslots = 0;
-    let mut trap_params = 0;
-    let mut trap_bytes = 0;
     let mut empty_vslots = 0;
-
     for vs_opt in &raw_ogz.vslots {
-        match vs_opt {
-            Some(vs) => {
-                let mut has_trap = false;
-                for p in &vs.params {
-                    let name_bytes = p.name.as_bytes();
-                    // Magic prefix 1 indicates a trap chunk
-                    if !name_bytes.is_empty() && name_bytes[0] == 1 {
-                        has_trap = true;
-                        trap_params += 1;
-                        trap_bytes += 2 + name_bytes.len() + 16;
-                    }
-                }
-                if has_trap {
-                    trap_vslots += 1;
-                }
-            }
-            None => {
-                empty_vslots += 1;
-            }
+        if vs_opt.is_none() {
+            empty_vslots += 1;
         }
     }
 
-    println!("\n=== VSlot Store (Trap) Stats ===");
-    println!("Empty VSlot indices: {}", empty_vslots);
-    println!("VSlots containing trap data: {}", trap_vslots);
-    println!("Total trap chunks (params): {}", trap_params);
-    
-    let trap_mb = trap_bytes as f64 / 1024.0 / 1024.0;
-    let percent = if data.len() > 0 {
-        (trap_bytes as f64 / data.len() as f64) * 100.0
-    } else {
-        0.0
-    };
-    
-    println!("Trap Data Overhead: {:.2} MB ({:.1}% of file)", trap_mb, percent);
-
     // Load state to evaluate *valid* traps vs ghost bloat
     if let Ok(mut state) = MapState::from_bytes(&data) {
-        if let Ok(stored) = deathrun_plugin::trap::vslot_store::read_all::<StoredTrap>(
+        if let Ok((stored, stats)) = deathrun_plugin::trap::vslot_store::read_all::<StoredTrap>(
             &state,
             TRAP_STORE_VERSION,
             TRAP_DOMAIN,
             |t| t.button_pos,
         ) {
+            println!("\n=== VSlot Store (Trap) Stats ===");
+            println!("Empty VSlot indices: {}", empty_vslots);
             println!("Valid (Active/Loadable) Traps: {}", stored.len());
+            println!("Total trap chunks (params): {}", stats.chunks);
+            
+            let comp_kb = stats.payload_compressed as f64 / 1024.0;
+            let uncomp_kb = stats.payload_uncompressed as f64 / 1024.0;
+            let overhead_mb = stats.structural_bytes as f64 / 1024.0 / 1024.0;
+            let percent = if data.len() > 0 {
+                (stats.payload_compressed as f64 / data.len() as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            println!("Uncompressed Bitcode Size: {:.2} KB", uncomp_kb);
+            println!("Compressed Zlib Size: {:.2} KB ({:.1}% of OGZ file)", comp_kb, percent);
+            println!("VSlot Structural Memory Overhead: {:.2} MB", overhead_mb);
         }
 
         let compacted_data = state.to_ogz_bytes().expect("Failed to serialize map");

@@ -108,7 +108,7 @@ impl PlayMaps {
             }
         }
 
-        if let Ok(stored) = crate::trap::vslot_store::read_all::<StoredTrap>(
+        if let Ok((stored, _stats)) = crate::trap::vslot_store::read_all::<StoredTrap>(
             &state,
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,

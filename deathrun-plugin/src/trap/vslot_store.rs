@@ -112,12 +112,21 @@ pub fn encode_payload<T: Serialize>(
     Ok(extra_data_blocks)
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct StoreStats {
+    pub chunks: usize,
+    pub structural_bytes: usize,
+    pub payload_compressed: usize,
+    pub payload_uncompressed: usize,
+}
+
 pub fn read_all<T: DeserializeOwned + Clone>(
     map: &MapState,
     version: u8,
     domain_id: u8,
     extract_pos: impl Fn(&T) -> [i32; 3],
-) -> Result<Vec<T>, StoreError> {
+) -> Result<(Vec<T>, StoreStats), StoreError> {
+    let mut stats = StoreStats::default();
     // 1. Decode all active VSlots into a map (vslot_idx -> decoded payload)
     let mut decoded_vslots = std::collections::HashMap::new();
 
@@ -129,6 +138,8 @@ pub fn read_all<T: DeserializeOwned + Clone>(
             for p in &vs.params {
                 let name_bytes = p.name.as_bytes();
                 if let Some(idx) = decode_chunk_name(name_bytes) {
+                    stats.chunks += 1;
+                    stats.structural_bytes += 2 + name_bytes.len() + 16;
                     let mut chunk = [0u8; 16];
                     for i in 0..4 {
                         chunk[i * 4..(i + 1) * 4].copy_from_slice(&p.values[i].to_le_bytes());
@@ -171,9 +182,11 @@ pub fn read_all<T: DeserializeOwned + Clone>(
             }
 
             let zlib_data = &payload[6..6 + zlib_len];
+            stats.payload_compressed += zlib_len;
             let mut dec = ZlibDecoder::new(zlib_data);
             let mut raw = Vec::new();
             if dec.read_to_end(&mut raw).is_ok() {
+                stats.payload_uncompressed += raw.len();
                 if let Ok(data) = bitcode::deserialize::<T>(&raw) {
                     decoded_vslots.insert(vslot_idx as u16, data);
                 }
@@ -237,5 +250,5 @@ pub fn read_all<T: DeserializeOwned + Clone>(
         &extract_pos,
     );
 
-    Ok(valid_results.into_values().collect())
+    Ok((valid_results.into_values().collect(), stats))
 }
