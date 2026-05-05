@@ -11,7 +11,7 @@ pub enum StoreError {
     Corrupt(String),
 }
 
-fn encode_chunk_name(mut idx: usize) -> Vec<u8> {
+pub fn encode_chunk_name(mut idx: usize) -> Vec<u8> {
     let mut name = Vec::new();
     name.push(1); // Magic prefix to guarantee no collision with real shader params
     loop {

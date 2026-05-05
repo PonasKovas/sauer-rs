@@ -135,6 +135,7 @@ pub fn send_welcome_edit(server: &Server, id: u64) {
             ),
             tip("#edittrap", "enter edit mode for a trap without resetting"),
             tip("#endtrap", "finish editing the trap"),
+            tip("#trapinfo", "print info about the trap (size, overhead)"),
             tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
             tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
             tip("#help", "list all server commands"),

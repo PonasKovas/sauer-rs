@@ -8,7 +8,7 @@ pub mod trigger;
 pub mod vslot_store;
 
 pub use commands::{
-    cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_traptime,
+    cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_trapinfo, cmd_traptime,
     cmd_traptime_print, cmd_traptimeout, cmd_traptimeout_print,
 };
 pub use intersect::{intersects_bounds, intersects_edit_face, intersects_sel};

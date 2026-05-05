@@ -379,6 +379,70 @@ pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
     );
 }
 
+pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
+    let id = ctx.id();
+    let server = ctx.server();
+    let state = get_server_state(server).read().unwrap();
+
+    let trap_idx = state.traps.iter().position(|t| {
+        (0..3).all(|ax| {
+            hit_pt[ax] >= t.button_pos[ax] as f32
+                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
+        })
+    });
+
+    let trap_idx = match trap_idx {
+        None => {
+            server.send_chan1(
+                id,
+                &ServMsg {
+                    text: "Not looking at a trap.".lossy_cubestring(),
+                },
+            );
+            return;
+        }
+        Some(i) => i,
+    };
+
+    let trap = &state.traps[trap_idx];
+    let stored = crate::trap::StoredTrap::from_trap(trap);
+    let raw_bytes = bitcode::serialize(&stored).unwrap_or_default();
+    let uncompressed_size = raw_bytes.len();
+
+    let mut zlib = Vec::new();
+    {
+        use std::io::Write;
+        let mut enc = flate2::write::ZlibEncoder::new(&mut zlib, flate2::Compression::default());
+        let _ = enc.write_all(&raw_bytes);
+        let _ = enc.finish();
+    }
+    let payload_len = zlib.len() + 6;
+
+    let total_chunks = (payload_len + 15) / 16;
+
+    let mut size_on_disk = 0;
+    let mut size_in_mem = 0;
+    for idx in 0..total_chunks {
+        let name_len = crate::trap::vslot_store::encode_chunk_name(idx).len();
+        size_on_disk += 1 + 1 + name_len + 16;
+        size_in_mem += 32 + name_len;
+    }
+
+    let mut msg = format!("\x0C1[Trap {} Info]\n", trap_idx);
+    msg.push_str(&format!("\x0C7Uncompressed bitcode: \x0C2{} bytes\n", uncompressed_size));
+    msg.push_str(&format!("\x0C7Compressed payload: \x0C2{} bytes\n", payload_len));
+    msg.push_str(&format!("\x0C7VSlot params (chunks): \x0C2{}\n", total_chunks));
+    msg.push_str(&format!("\x0C7Est. Disk Size: \x0C2{} bytes\n", size_on_disk));
+    msg.push_str(&format!("\x0C7Est. Memory Size: \x0C2{} bytes", size_in_mem));
+
+    server.send_chan1(
+        id,
+        &ServMsg {
+            text: msg.lossy_cubestring(),
+        },
+    );
+}
+
 pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();

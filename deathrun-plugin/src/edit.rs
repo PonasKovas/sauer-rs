@@ -68,6 +68,7 @@ impl Plugin for DeathrunEdit {
             "",
         );
         server.register_command("#endtrap", "finish editing the trap", "");
+        server.register_command("#trapinfo", "print info about the trap (size, overhead)", "");
         server.register_command("#traptime", "extend duration (default 2 000ms)", "<ms>");
         server.register_command(
             "#traptimeout",
@@ -192,6 +193,7 @@ impl Plugin for DeathrunEdit {
             && cmd != "#settrap"
             && cmd != "#edittrap"
             && cmd != "#endtrap"
+            && cmd != "#trapinfo"
             && cmd != "#traptime"
             && cmd != "#traptimeout"
         {
@@ -282,6 +284,8 @@ impl Plugin for DeathrunEdit {
             crate::trap::cmd_settrap(ctx, hit_pt);
         } else if cmd == "#edittrap" {
             crate::trap::cmd_edittrap(ctx, hit_pt);
+        } else if cmd == "#trapinfo" {
+            crate::trap::cmd_trapinfo(ctx, hit_pt);
         } else if cmd == "#traptime" {
             let time = args
                 .get(1)
@@ -409,7 +413,26 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        match MapState::from_bytes(data) {
+        let size_kb = data.len() / 1024;
+        let player_name = server
+            .players
+            .try_get(id)
+            .map(|p| p.name.strip_colors().to_utf8())
+            .unwrap_or_else(|| "Someone".to_string());
+
+        server.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+            text: format!("\x0C1[MAP] \x0C7Receiving map from \x0C5{}\x0C7 ({} KB). Processing...", player_name, size_kb).lossy_cubestring(),
+        });
+
+        // Yield to ensure the message gets flushed to clients before we block the thread
+        tokio::task::yield_now().await;
+
+        let data_clone = data.clone();
+        let parse_result = tokio::task::spawn_blocking(move || {
+            MapState::from_bytes(&data_clone)
+        }).await.expect("Map parsing panicked");
+
+        match parse_result {
             Ok(mut state) => {
                 let world_size = state.world.size;
 
