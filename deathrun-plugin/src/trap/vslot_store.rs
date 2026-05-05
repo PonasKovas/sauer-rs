@@ -194,9 +194,6 @@ pub fn read_all<T: DeserializeOwned + Clone>(
     ) {
         match node {
             sauer_map::Node::Leaf(c) => {
-                if c.is_empty() {
-                    return;
-                }
                 for &t in &c.textures {
                     if let Some(trap) = decoded.get(&t) {
                         let bpos = extract_pos(trap);
