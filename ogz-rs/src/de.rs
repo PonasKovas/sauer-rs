@@ -276,9 +276,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
             if changed & (1 << 0) != 0 {
                 let params = cursor.read_u16::<LittleEndian>()?;
-                if params > 1024 {
-                    return Err(OgzError::LimitExceeded("vslot params"));
-                }
+
                 for _ in 0..params {
                     let nlen = cursor.read_u16::<LittleEndian>()?;
                     let mut nbuf = vec![0u8; nlen as usize];

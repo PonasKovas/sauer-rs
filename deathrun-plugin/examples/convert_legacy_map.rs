@@ -87,6 +87,7 @@ fn main() {
             if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0 {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
+                ent.position = [0.0; 3];
             }
         }
     } else {
@@ -103,6 +104,7 @@ fn main() {
             {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
+                ent.position = [0.0; 3];
             }
         }
 
