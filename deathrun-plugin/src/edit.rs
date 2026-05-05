@@ -589,25 +589,25 @@ impl Plugin for DeathrunEdit {
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditTex(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_tex(packet));
-        check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditMat(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_mat(packet));
-        check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
         intercept_packet(ctx, crate::trap::RecordedPacket::DelCube(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_del_cube(packet));
-        check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Replace(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_replace(packet));
-        check_and_rebuild_traps(ctx, |trap| {
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             if packet.in_sel == 0 {
                 true
             } else {
@@ -619,7 +619,7 @@ impl Plugin for DeathrunEdit {
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditFace(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_face(packet));
-        check_and_rebuild_traps(ctx, |trap| {
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             intersects_edit_face(&packet.sel, packet.dir, trap)
         });
     }
@@ -637,17 +637,17 @@ impl Plugin for DeathrunEdit {
         crate::map_state::track_vslot_edits(ctx.server(), 1);
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
-        check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Flip(packet.clone()));
-        check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Rotate(packet.clone()));
-        check_and_rebuild_traps(ctx, |trap| intersects_sel(&packet.sel, trap));
+        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| intersects_sel(&packet.sel, trap));
     }
 
     async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
@@ -768,14 +768,14 @@ impl Plugin for DeathrunEdit {
                         min[1] + cb_sel.s[1] * packet.sel.grid,
                         min[2] + cb_sel.s[2] * packet.sel.grid,
                     ];
-                    crate::trap::check_and_rebuild_traps(ctx, |trap| {
+                    crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
                         crate::trap::intersects_bounds(min, max, trap)
                     });
                     return;
                 }
             }
         }
-        crate::trap::check_and_rebuild_traps(ctx, |_| true);
+        crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
@@ -787,11 +787,11 @@ impl Plugin for DeathrunEdit {
                 sel.o.y + sel.s.y * sel.grid,
                 sel.o.z + sel.s.z * sel.grid,
             ];
-            crate::trap::check_and_rebuild_traps(ctx, |trap| {
+            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
                 crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
             });
         } else {
-            crate::trap::check_and_rebuild_traps(ctx, |_| true);
+            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
         }
     }
 
@@ -843,11 +843,11 @@ impl Plugin for DeathrunEdit {
                 sel.o.y + sel.s.y * sel.grid,
                 sel.o.z + sel.s.z * sel.grid,
             ];
-            crate::trap::check_and_rebuild_traps(ctx, |trap| {
+            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
                 crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
             });
         } else {
-            crate::trap::check_and_rebuild_traps(ctx, |_| true);
+            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
         }
     }
 }

@@ -378,12 +378,12 @@ pub(super) fn send_atomic_rebuild(
 // ─── check_and_rebuild_traps ──────────────────────────────────────────────────
 
 pub fn check_and_rebuild_traps(
-    ctx: &sauer_server::plugin::Context,
+    server: &Server,
+    actor_id: u64,
     intersects: impl Fn(&crate::map_state::Trap) -> bool,
 ) {
-    let server = ctx.server().clone();
-    let id = ctx.id();
-    let mut state = get_server_state(&server).write().unwrap();
+    let id = actor_id;
+    let mut state = get_server_state(server).write().unwrap();
 
     let to_rebuild: Vec<_> = state
         .traps
@@ -466,7 +466,7 @@ pub fn check_and_rebuild_traps(
         }
 
         send_atomic_rebuild(
-            &server,
+            server,
             id,
             trap.button_pos,
             trap.button_size,
@@ -477,5 +477,5 @@ pub fn check_and_rebuild_traps(
     }
 
     drop(state);
-    crate::trap::stored::sync_traps_to_map(&server, id);
+    crate::trap::stored::sync_traps_to_map(server, id);
 }

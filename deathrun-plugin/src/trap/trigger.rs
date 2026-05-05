@@ -521,5 +521,9 @@ pub fn apply_and_broadcast(
         server.broadcast_chan1(batch);
     }
 
+    crate::trap::placement::check_and_rebuild_traps(server, actor_id, |trap| {
+        crate::trap::intersects_sel(sel, trap)
+    });
+
     assigned_ids
 }
