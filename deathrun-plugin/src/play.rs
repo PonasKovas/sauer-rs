@@ -97,12 +97,8 @@ impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = MapState::from_bytes(data).map_err(|e| e.to_string())?;
         let mut traps = Vec::new();
-        // Universal cleanup of ANY legacy entity store entities at negative coords and magic active traps
+        // Universal cleanup of magic active trap particles
         for ent in &mut state.world.entities {
-            if ent.position[2] < -9000.0 {
-                ent.ent_type = ogz_rs::data::EntityType::Empty;
-                ent.attrs = [0; 5];
-            }
             if ent.ent_type == ogz_rs::data::EntityType::Particles
                 && ent.attrs[3] == 1337
                 && ent.attrs[4] == 7331
@@ -112,55 +108,18 @@ impl PlayMaps {
             }
         }
 
-        let mut loaded_from_entity_store = false;
-        match crate::trap::vslot_store::read_all::<StoredTrap>(
+        if let Ok(stored) = crate::trap::vslot_store::read_all::<StoredTrap>(
             &state,
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,
             |t| t.button_pos,
         ) {
-            Ok(stored) if !stored.is_empty() => {
-                for st in &stored {
-                    st.apply_reset_to_world(&mut state.world);
-                }
-                traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
-                info!(
-                    "Loaded {} traps from map '{name}' (vslot store)",
-                    traps.len()
-                );
+            for st in &stored {
+                st.apply_reset_to_world(&mut state.world);
             }
-            _ => {
-                match crate::entity_store::read::<Vec<StoredTrap>>(
-                    &state.world,
-                    TRAP_STORE_VERSION,
-                    crate::trap::TRAP_DOMAIN,
-                ) {
-                    Ok(Some(stored)) => {
-                        for st in &stored {
-                            st.apply_reset_to_world(&mut state.world);
-                        }
-                        traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
-                        loaded_from_entity_store = true;
-                        info!(
-                            "Loaded {} traps from map '{name}' (legacy entity store)",
-                            traps.len()
-                        );
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        if loaded_from_entity_store {
-            for id in
-                crate::entity_store::get_store_entity_ids(&state.world, crate::trap::TRAP_DOMAIN)
-            {
-                state.world.entities[id] = ogz_rs::data::Entity {
-                    position: [0.0; 3],
-                    attrs: [0; 5],
-                    ent_type: ogz_rs::data::EntityType::Empty,
-                    extra_data: vec![],
-                };
+            traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
+            if !traps.is_empty() {
+                info!("Loaded {} traps from map '{name}'", traps.len());
             }
         }
 
@@ -260,7 +219,7 @@ impl DeathrunPlay {
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
-    let (world_size, root, entities, vslots, variables, store_ids, my_epoch) = {
+    let (world_size, root, entities, vslots, variables, my_epoch) = {
         let mut lock = maps.write().unwrap();
         if lock.rotation.is_empty() {
             return;
@@ -285,13 +244,6 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         let state_lock = get_server_state(&server);
         let state_read = state_lock.read().unwrap();
         let map = state_read.map.as_ref().unwrap();
-        let mut store_ids = crate::entity_store::get_store_entity_ids(&map.world, TRAP_DOMAIN)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        store_ids.extend(crate::entity_store::get_store_entity_ids(
-            &map.world,
-            crate::trap::ACTIVE_TRAP_DOMAIN,
-        ));
         let variables = match &map.meta.config {
             MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],
@@ -302,7 +254,6 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             map.world.entities.clone(),
             map.meta.vslots.clone(),
             variables,
-            store_ids,
             epoch,
         )
     };
@@ -360,11 +311,8 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             4,
             20,
             true,
-            move |id, i, ent| {
+            move |id, _i, ent| {
                 let is_evil = Some(id) == evil_id;
-                if store_ids.contains(&i) {
-                    return None;
-                }
 
                 let ent_type = ent.ent_type;
                 let mut attrs = ent.attrs;
@@ -614,7 +562,7 @@ fn send_map_to_client(
     maps: &Arc<RwLock<PlayMaps>>,
     welcome: bool,
 ) -> bool {
-    let (world_size, root, entities, vslots, variables, store_ids, evil_id) = {
+    let (world_size, root, entities, vslots, variables, evil_id) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -624,14 +572,6 @@ fn send_map_to_client(
             Some(m) => m,
             None => return false,
         };
-        let mut store_ids =
-            crate::entity_store::get_store_entity_ids(&loaded.state.world, TRAP_DOMAIN)
-                .into_iter()
-                .collect::<HashSet<_>>();
-        store_ids.extend(crate::entity_store::get_store_entity_ids(
-            &loaded.state.world,
-            crate::trap::ACTIVE_TRAP_DOMAIN,
-        ));
         let variables = match &loaded.state.meta.config {
             MapConfig::Modern { variables } => variables.clone(),
             _ => vec![],
@@ -642,7 +582,6 @@ fn send_map_to_client(
             loaded.state.world.entities.clone(),
             loaded.state.meta.vslots.clone(),
             variables,
-            store_ids,
             lock.evil_id,
         )
     };
@@ -662,11 +601,8 @@ fn send_map_to_client(
             4,
             20,
             true,
-            |id, i, ent| {
+            |id, _i, ent| {
                 let is_evil = Some(id) == evil_id;
-                if store_ids.contains(&i) {
-                    return None;
-                }
 
                 let ent_type = ent.ent_type;
                 let mut attrs = ent.attrs;

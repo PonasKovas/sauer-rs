@@ -414,10 +414,6 @@ impl Plugin for DeathrunEdit {
                 let world_size = state.world.size;
 
                 for ent in &mut state.world.entities {
-                    if ent.position[2] < -9000.0 {
-                        ent.ent_type = ogz_rs::data::EntityType::Empty;
-                        ent.attrs = [0; 5];
-                    }
                     if ent.ent_type == ogz_rs::data::EntityType::Particles
                         && ent.attrs[3] == 1337
                         && ent.attrs[4] == 7331
@@ -428,82 +424,20 @@ impl Plugin for DeathrunEdit {
                 }
 
                 let mut loaded_traps = Vec::new();
-                let mut loaded_from_entity_store = false;
-                match crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
+                if let Ok(stored_traps) = crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
                     &state,
                     crate::trap::TRAP_STORE_VERSION,
                     crate::trap::TRAP_DOMAIN,
                     |t| t.button_pos,
                 ) {
-                    Ok(stored_traps) if !stored_traps.is_empty() => {
-                        for st in &stored_traps {
-                            st.apply_reset_to_world(&mut state.world);
-                        }
-                        loaded_traps = stored_traps
-                            .into_iter()
-                            .filter_map(|st| st.into_trap())
-                            .collect();
-                        info!("Loaded {} traps from map vslot store", loaded_traps.len());
+                    for st in &stored_traps {
+                        st.apply_reset_to_world(&mut state.world);
                     }
-                    _ => {
-                        let msg = format!(
-                            "Failed to load vslot trap store. Trying legacy entity store..."
-                        );
-                        warn!("{msg}");
-                        match crate::entity_store::read::<Vec<crate::trap::StoredTrap>>(
-                            &state.world,
-                            crate::trap::TRAP_STORE_VERSION,
-                            crate::trap::TRAP_DOMAIN,
-                        ) {
-                            Ok(Some(stored_traps)) => {
-                                for st in &stored_traps {
-                                    st.apply_reset_to_world(&mut state.world);
-                                }
-                                loaded_traps = stored_traps
-                                    .into_iter()
-                                    .filter_map(|st| st.into_trap())
-                                    .collect();
-                                loaded_from_entity_store = true;
-                                info!(
-                                    "Loaded {} traps from legacy entity store. They will be migrated to vslots on next save.",
-                                    loaded_traps.len()
-                                );
-                            }
-                            Ok(None) => {}
-                            Err(crate::entity_store::StoreError::VersionMismatch {
-                                expected,
-                                found,
-                            }) => {
-                                let msg = format!(
-                                    "Trap store version mismatch (map v{found}, server v{expected}). \
-                                     Traps not loaded - re-record traps and resave."
-                                );
-                                warn!("{msg}");
-                                ui::broadcast_warn(server, &msg);
-                            }
-                            Err(e) => {
-                                let msg = format!(
-                                    "Failed to load legacy trap store: {e}. Traps not loaded."
-                                );
-                                warn!("{msg}");
-                                ui::broadcast_warn(server, &msg);
-                            }
-                        }
-                    }
-                }
-
-                if loaded_from_entity_store {
-                    for eid in crate::entity_store::get_store_entity_ids(
-                        &state.world,
-                        crate::trap::TRAP_DOMAIN,
-                    ) {
-                        state.world.entities[eid] = ogz_rs::data::Entity {
-                            position: [0.0; 3],
-                            attrs: [0; 5],
-                            ent_type: ogz_rs::data::EntityType::Empty,
-                            extra_data: vec![],
-                        };
-                    }
+                    loaded_traps = stored_traps
+                        .into_iter()
+                        .filter_map(|st| st.into_trap())
+                        .collect();
+                    info!("Loaded {} traps from map vslot store", loaded_traps.len());
                 }
 
                 crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
