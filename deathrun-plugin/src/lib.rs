@@ -8,3 +8,5 @@ pub mod ui;
 
 pub use edit::DeathrunEdit;
 pub use play::DeathrunPlay;
+
+pub const SERVER_BOT_CN: u8 = 0;

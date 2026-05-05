@@ -99,7 +99,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             id
         };
 
-        let actor_cn = server_clone.get_cn(actor_id).unwrap_or(0) as i32;
+        let actor_cn = crate::SERVER_BOT_CN as i32;
 
         let target_ids = {
             let is_play_mode =
@@ -416,7 +416,7 @@ pub fn set_button_color(
     orient: u8,
     color: [f32; 3],
 ) {
-    let actor_cn = server.get_cn(actor_id).unwrap_or(0) as i32;
+    let actor_cn = crate::SERVER_BOT_CN as i32;
     let mut state = get_server_state(server).write().unwrap();
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
@@ -488,7 +488,7 @@ pub fn apply_and_broadcast(
     map.update_server_items(server);
     drop(state);
 
-    let actor_cn = server.get_cn(actor_id).unwrap_or(0) as i32;
+    let actor_cn = crate::SERVER_BOT_CN as i32;
 
     if !data.is_empty() {
         server.broadcast_chan1(&Client {

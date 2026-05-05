@@ -298,7 +298,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
 
-        let author_cn = ids.first().and_then(|&id| server.get_cn(id)).unwrap_or(0) as i32;
+        let author_cn = crate::SERVER_BOT_CN as i32;
         crate::recreate::visual_rebuild_map(
             &server,
             &ids,
@@ -588,7 +588,7 @@ fn send_map_to_client(
 
     let maps_arc = Arc::clone(maps);
     tokio::spawn(async move {
-        let author_cn = server.get_cn(target_id).unwrap_or(0) as i32;
+        let author_cn = crate::SERVER_BOT_CN as i32;
         crate::recreate::visual_rebuild_map(
             &server,
             &[target_id],
@@ -719,6 +719,7 @@ impl Plugin for DeathrunPlay {
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::TeamPlay;
         *server.master_mode.write().unwrap() = MasterMode::Veto;
+        server.reserve_cn(crate::SERVER_BOT_CN);
 
         let (_, state) = self.maps.read().unwrap().make_active_state();
         server.extra.insert(RwLock::new(state));
@@ -741,6 +742,23 @@ impl Plugin for DeathrunPlay {
         let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+
+        server.send_chan1(
+            id,
+            &sauer_proto::channel1::InitClient {
+                client_num: crate::SERVER_BOT_CN as i32,
+                name: "Server".lossy_cubestring(),
+                player_model: sauer_proto::data::PlayerModel::MrFixit,
+                team: "".lossy_cubestring(),
+            },
+        );
+        server.send_chan1(
+            id,
+            &sauer_proto::channel1::SpectatorServer {
+                client_num: crate::SERVER_BOT_CN as i32,
+                is_spectator: true,
+            },
+        );
 
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read().unwrap();
@@ -904,7 +922,7 @@ impl Plugin for DeathrunPlay {
                             drop(state);
 
                             if let (Some(id1), Some(id2)) = ent_ids {
-                                let actor_cn = server.get_cn(id).unwrap_or(0) as i32;
+                                let actor_cn = crate::SERVER_BOT_CN as i32;
                                 for client_id in server.client_ids() {
                                     server.send_chan1(
                                         client_id,

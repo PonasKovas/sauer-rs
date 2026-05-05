@@ -63,7 +63,7 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let (adj_sel, _) =
         super::placement::get_selections(trap.button_pos, trap.button_size, trap.button_orient);
     server.broadcast_chan1(&Client {
-        client_num: cn,
+        client_num: crate::SERVER_BOT_CN as i32,
         packet: channel1::DelCube { sel: adj_sel },
     });
 }
@@ -108,7 +108,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         return;
     }
 
-    let target_cn = cn;
+    let target_cn = crate::SERVER_BOT_CN as i32;
     let (adj_sel, fill_sel) = super::placement::get_selections(adj, BUTTON_SIZE, hit_orient);
 
     crate::trap::placement::build_button_geometry(map, adj, BUTTON_SIZE, hit_orient);
@@ -646,7 +646,7 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     if let Some(ent_id) = state.trap_edit_particle_ent.take() {
         server.broadcast_chan1(&Client {
-            client_num: cn,
+            client_num: crate::SERVER_BOT_CN as i32,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
                 pos: sauer_proto::data::Vec3 {
@@ -863,7 +863,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         trap.reset_entities_mod = reset_entities_mod;
     }
 
-    let target_cn = cn;
+    let target_cn = crate::SERVER_BOT_CN as i32;
     let region_sel = SelInfo {
         o: sauer_proto::data::Vec3 {
             x: clip_pos[0],

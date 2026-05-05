@@ -55,6 +55,7 @@ impl Plugin for DeathrunEdit {
     async fn init(&self, server: &mut Server) {
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::CoopEdit;
+        server.reserve_cn(crate::SERVER_BOT_CN);
         let mut state = DeathrunState::default();
         state.map = Some(MapState::default_empty());
         server.extra.insert(RwLock::new(state));
@@ -170,7 +171,7 @@ impl Plugin for DeathrunEdit {
             }
         };
 
-        let cn = server.get_cn(id).unwrap_or(0) as i32;
+        let cn = crate::SERVER_BOT_CN as i32;
 
         let ent = Client {
             client_num: cn,
@@ -545,6 +546,24 @@ impl Plugin for DeathrunEdit {
             server.set_privilege(id, Privilege::Master);
             server.set_spectator(id, false);
         }
+
+        server.send_chan1(
+            id,
+            &sauer_proto::channel1::InitClient {
+                client_num: crate::SERVER_BOT_CN as i32,
+                name: "Server".lossy_cubestring(),
+                player_model: sauer_proto::data::PlayerModel::MrFixit,
+                team: "".lossy_cubestring(),
+            },
+        );
+        server.send_chan1(
+            id,
+            &sauer_proto::channel1::SpectatorServer {
+                client_num: crate::SERVER_BOT_CN as i32,
+                is_spectator: true,
+            },
+        );
+
         crate::map_state::send_map_to_async(ctx.server(), id);
         info!("sent map state to id {id} after welcome");
         ui::send_welcome_edit(server, id);

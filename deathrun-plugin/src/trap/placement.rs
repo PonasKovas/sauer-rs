@@ -357,7 +357,7 @@ pub(super) fn send_atomic_rebuild(
     clip_unpack_len: i32,
     clip_data: Vec<u8>,
 ) {
-    let target_cn = server.get_cn(owner_id).unwrap_or(0) as i32;
+    let target_cn = crate::SERVER_BOT_CN as i32;
     let (adj_sel, fill_sel) = get_selections(adj, button_size, hit_orient);
 
     server.broadcast_chan1(&Client {

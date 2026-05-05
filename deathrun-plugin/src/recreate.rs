@@ -255,7 +255,7 @@ pub fn spawn_recreate_map(server: Arc<Server>, id: u64, divisions: i32, delay_ms
         });
 
         let ids = server.client_ids();
-        let author_cn = server.get_cn(id).unwrap_or(0) as i32;
+        let author_cn = crate::SERVER_BOT_CN as i32;
 
         visual_rebuild_map(
             &server,

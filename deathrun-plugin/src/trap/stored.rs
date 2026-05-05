@@ -206,7 +206,7 @@ pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channe
 
 pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
-    let owner_cn = server.get_cn(owner_id).unwrap_or(0) as i32;
+    let owner_cn = crate::SERVER_BOT_CN as i32;
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
 
     let mut packets_to_send = Vec::new();
