@@ -733,19 +733,71 @@ pub fn cmd_endtrap(ctx: &Context) {
         })
         .collect();
 
-    let trap = &mut state.traps[edit_state.trap_idx];
-    trap.trigger_clipboard = trigger_compressed;
-    trap.trigger_unpack_len = trigger_unpack_len;
-    trap.trigger_cells = trigger_cells.clone();
-    trap.trigger_entities_mod = trigger_entities_mod;
-    trap.trigger_entities_add = trigger_entities_add;
-    trap.clip_pos = clip_pos;
-    trap.clip_s = clip_s;
-    trap.clip_grid = clip_grid;
-    trap.reset_clipboard = restore_compressed.clone();
-    trap.reset_unpack_len = restore_unpack_len;
-    trap.reset_cells = reset_cells;
-    trap.reset_entities_mod = reset_entities_mod;
+    let stored_candidate = crate::trap::StoredTrap {
+        button_pos: state.traps[edit_state.trap_idx].button_pos,
+        button_size: state.traps[edit_state.trap_idx].button_size,
+        button_orient: state.traps[edit_state.trap_idx].button_orient,
+        trigger_clipboard: trigger_compressed.clone(),
+        trigger_unpack_len,
+        trigger_cells: trigger_cells.iter().map(|(pos, size, node)| {
+            let mut packed = Vec::new();
+            sauer_map::clipboard::pack_cube(node, &mut packed);
+            (*pos, *size, packed)
+        }).collect(),
+        trigger_entities_mod: trigger_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
+        trigger_entities_add: trigger_entities_add.iter().map(|e| crate::trap::stored::StoredEntity::from(e)).collect(),
+        clip_pos,
+        clip_s,
+        clip_grid,
+        time: state.traps[edit_state.trap_idx].time,
+        timeout: state.traps[edit_state.trap_idx].timeout,
+        reset_clipboard: restore_compressed.clone(),
+        reset_unpack_len: restore_unpack_len,
+        reset_cells: reset_cells.iter().map(|(pos, size, node)| {
+            let mut packed = Vec::new();
+            sauer_map::clipboard::pack_cube(node, &mut packed);
+            (*pos, *size, packed)
+        }).collect(),
+        reset_entities_mod: reset_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
+    };
+
+    let raw_bytes = bitcode::serialize(&stored_candidate).unwrap_or_default();
+    let mut zlib = Vec::new();
+    {
+        use std::io::Write;
+        let mut enc = flate2::write::ZlibEncoder::new(&mut zlib, flate2::Compression::default());
+        let _ = enc.write_all(&raw_bytes);
+        let _ = enc.finish();
+    }
+    let payload_len = zlib.len() + 6;
+
+    let mut is_too_large = false;
+    if payload_len > 1_000_000 {
+        is_too_large = true;
+        server.send_chan1(id, &ServMsg {
+            text: format!("\x0C3[ERROR]\x0C7 Trap edit discarded! Payload size ({} KB) exceeds the 1MB engine limit. Please make smaller edits.", payload_len / 1024).lossy_cubestring(),
+        });
+    } else {
+        if payload_len > 600_000 {
+            server.send_chan1(id, &ServMsg {
+                text: format!("\x0C6[WARNING]\x0C7 Trap payload size is {} KB. Values over 1000 KB will be rejected to prevent map corruption.", payload_len / 1024).lossy_cubestring(),
+            });
+        }
+        
+        let trap = &mut state.traps[edit_state.trap_idx];
+        trap.trigger_clipboard = trigger_compressed;
+        trap.trigger_unpack_len = trigger_unpack_len;
+        trap.trigger_cells = trigger_cells.clone();
+        trap.trigger_entities_mod = trigger_entities_mod;
+        trap.trigger_entities_add = trigger_entities_add;
+        trap.clip_pos = clip_pos;
+        trap.clip_s = clip_s;
+        trap.clip_grid = clip_grid;
+        trap.reset_clipboard = restore_compressed.clone();
+        trap.reset_unpack_len = restore_unpack_len;
+        trap.reset_cells = reset_cells;
+        trap.reset_entities_mod = reset_entities_mod;
+    }
 
     let target_cn = cn;
     let region_sel = SelInfo {
@@ -832,7 +884,13 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     sync_traps_to_map(server, id);
 
-    server.broadcast_chan1(&ServMsg {
-        text: "Trap recorded and area reverted successfully.".lossy_cubestring(),
-    });
+    if !is_too_large {
+        server.broadcast_chan1(&ServMsg {
+            text: "Trap recorded and area reverted successfully.".lossy_cubestring(),
+        });
+    } else {
+        server.broadcast_chan1(&ServMsg {
+            text: "Area reverted. Trap changes were discarded due to payload size limits.".lossy_cubestring(),
+        });
+    }
 }

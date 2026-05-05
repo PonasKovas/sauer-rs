@@ -16,6 +16,9 @@ struct Args {
 
     #[arg(help = "The output .ogz file")]
     output: PathBuf,
+
+    #[arg(long, help = "Purge legacy traps without attempting to convert them (useful for corrupt files)")]
+    purge_only: bool,
 }
 
 fn decompress<T: serde::de::DeserializeOwned>(compressed: &[u8]) -> Result<T, String> {
@@ -77,40 +80,51 @@ fn main() {
     // Sort to extract in correct order
     store_ents.sort_by_key(|&(i, _)| i);
 
-    let refs: Vec<_> = store_ents.iter().map(|(_, e)| *e).collect();
-    let (_, compressed) = unpack(&refs).expect("Failed to unpack legacy entities");
-    let stored_traps: Vec<StoredTrap> =
-        decompress(&compressed).expect("Failed to deserialize legacy traps");
-
-    println!("Found {} legacy traps.", stored_traps.len());
-
-    // 1. Clear legacy trap data (domain 1 and 2, plus generic negative coords)
-    for ent in &mut map_state.world.entities {
-        if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0
-        {
-            ent.ent_type = ogz_rs::data::EntityType::Empty;
-            ent.attrs = [0; 5];
+    if args.purge_only {
+        println!("Purging {} legacy trap entities without converting.", store_ents.len());
+        
+        for ent in &mut map_state.world.entities {
+            if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0 {
+                ent.ent_type = ogz_rs::data::EntityType::Empty;
+                ent.attrs = [0; 5];
+            }
         }
-    }
+    } else {
+        let refs: Vec<_> = store_ents.iter().map(|(_, e)| *e).collect();
+        let (_, compressed) = unpack(&refs).expect("Failed to unpack legacy entities");
+        let stored_traps: Vec<StoredTrap> =
+            decompress(&compressed).expect("Failed to deserialize legacy traps");
 
-    // 2. Restore map to clean state (in case it was saved active)
-    for st in &stored_traps {
-        st.apply_reset_to_world(&mut map_state.world);
-    }
+        println!("Found {} legacy traps.", stored_traps.len());
 
-    let loaded_traps: Vec<_> = stored_traps
-        .into_iter()
-        .filter_map(|st| st.into_trap())
-        .collect();
+        // 1. Clear legacy trap data (domain 1 and 2, plus generic negative coords)
+        for ent in &mut map_state.world.entities {
+            if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0
+            {
+                ent.ent_type = ogz_rs::data::EntityType::Empty;
+                ent.attrs = [0; 5];
+            }
+        }
 
-    // 3. Rebuild trap geometries and bake them into VSlots
-    deathrun_plugin::trap::placement::rebuild_all_trap_buttons(&mut map_state, &loaded_traps);
+        // 2. Restore map to clean state (in case it was saved active)
+        for st in &stored_traps {
+            st.apply_reset_to_world(&mut map_state.world);
+        }
 
-    for trap in &loaded_traps {
-        let st = deathrun_plugin::trap::StoredTrap::from_trap(trap);
-        let packets = deathrun_plugin::trap::stored::generate_trap_vslot_packets(&st);
-        for p in &packets {
-            map_state.handle_edit_v_slot(p);
+        let loaded_traps: Vec<_> = stored_traps
+            .into_iter()
+            .filter_map(|st| st.into_trap())
+            .collect();
+
+        // 3. Rebuild trap geometries and bake them into VSlots
+        deathrun_plugin::trap::placement::rebuild_all_trap_buttons(&mut map_state, &loaded_traps);
+
+        for trap in &loaded_traps {
+            let st = deathrun_plugin::trap::StoredTrap::from_trap(trap);
+            let packets = deathrun_plugin::trap::stored::generate_trap_vslot_packets(&st);
+            for p in &packets {
+                map_state.handle_edit_v_slot(p);
+            }
         }
     }
 
@@ -118,5 +132,5 @@ fn main() {
     let out_data = map_state.to_ogz_bytes().expect("Failed to serialize map");
     std::fs::write(&args.output, out_data).expect("Failed to write output file");
 
-    println!("Conversion successful! Wrote to {:?}", args.output);
+    println!("Operation successful! Wrote to {:?}", args.output);
 }
