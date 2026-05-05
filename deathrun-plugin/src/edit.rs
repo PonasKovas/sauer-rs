@@ -476,6 +476,31 @@ impl Plugin for DeathrunEdit {
                 }
 
                 state.update_server_items(server);
+
+                let mut trap_params_count = 0;
+                let mut trap_data_bytes = 0;
+                for vs_opt in &state.meta.vslots {
+                    if let Some(vs) = vs_opt {
+                        for p in &vs.params {
+                            let name_bytes = p.name.as_bytes();
+                            if !name_bytes.is_empty() && name_bytes[0] == 1 {
+                                trap_params_count += 1;
+                                trap_data_bytes += 2 + name_bytes.len() + 16;
+                            }
+                        }
+                    }
+                }
+
+                let total_bytes = data.len();
+                let trap_kb = trap_data_bytes as f64 / 1024.0;
+                let percent = if total_bytes > 0 {
+                    (trap_data_bytes as f64 / total_bytes as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                let loaded_traps_len = loaded_traps.len();
+
                 {
                     let mut s = get_server_state(server).write().unwrap();
                     s.map = Some(state);
@@ -485,6 +510,16 @@ impl Plugin for DeathrunEdit {
                     s.active_traps.clear();
                 }
                 info!("id {id} uploaded a map (world_size={world_size}); state loaded");
+
+                server.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+                    text: format!(
+                        "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps. Overhead: \x0C2{:.1} KB\x0C7 (\x0C2{:.1}%\x0C7 of OGZ, \x0C2{}\x0C7 VSlot chunks).",
+                        loaded_traps_len,
+                        trap_kb,
+                        percent,
+                        trap_params_count
+                    ).lossy_cubestring()
+                });
 
                 // Push the corrected map to every connected client, including the uploader
                 // so they see the reset trap geometry instead of the triggered state they sent.

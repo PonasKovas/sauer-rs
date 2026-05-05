@@ -451,20 +451,16 @@ pub fn apply_and_broadcast(
     }
 
     let mut assigned_ids = Vec::new();
-    let mut broadcast_ents = entities_mod.to_vec();
-
-    for &(ent_id, ref ent) in entities_mod {
-        if ent_id < map.world.entities.len() {
-            map.world.entities[ent_id] = ent.clone();
-        }
-    }
+    let mut broadcast_ents = Vec::new();
 
     for ent in entities_add {
         let mut found_empty = None;
         for (i, e) in map.world.entities.iter().enumerate() {
             if e.ent_type == ogz_rs::data::EntityType::Empty {
-                found_empty = Some(i);
-                break;
+                if !entities_mod.iter().any(|&(mod_id, _)| mod_id == i) {
+                    found_empty = Some(i);
+                    break;
+                }
             }
         }
 
@@ -478,6 +474,13 @@ pub fn apply_and_broadcast(
         };
 
         assigned_ids.push(ent_id);
+        broadcast_ents.push((ent_id, ent.clone()));
+    }
+
+    for &(ent_id, ref ent) in entities_mod {
+        if ent_id < map.world.entities.len() {
+            map.world.entities[ent_id] = ent.clone();
+        }
         broadcast_ents.push((ent_id, ent.clone()));
     }
 
