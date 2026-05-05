@@ -146,12 +146,20 @@ pub fn get_outer_face_selections(adj: [i32; 3], size: i32) -> [SelInfo; 6] {
     ]
 }
 
-pub fn get_payload_selection(adj: [i32; 3]) -> SelInfo {
+pub fn get_payload_selection(adj: [i32; 3], orient: u8) -> SelInfo {
+    let d = (orient >> 1) as usize;
+    let dc = orient & 1;
+
+    let mut offset = [1, 1, 1];
+    if dc == 1 {
+        offset[d] = 7;
+    }
+
     SelInfo {
         o: Vec3 {
-            x: adj[0] + 1,
-            y: adj[1] + 1,
-            z: adj[2] + 1,
+            x: adj[0] + offset[0],
+            y: adj[1] + offset[1],
+            z: adj[2] + offset[2],
         },
         s: Vec3 { x: 1, y: 1, z: 1 },
         grid: 1, // 1-cube wide selection forces subdivision into an internal invisible face
