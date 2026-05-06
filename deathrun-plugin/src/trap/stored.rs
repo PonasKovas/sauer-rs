@@ -204,7 +204,7 @@ pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channe
     packets
 }
 
-pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
+pub fn sync_traps_to_map(server: &std::sync::Arc<Server>, _owner_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
     let owner_cn = crate::SERVER_BOT_CN as i32;
     let stored_traps: Vec<StoredTrap> = state.traps.iter().map(StoredTrap::from_trap).collect();
@@ -223,9 +223,13 @@ pub fn sync_traps_to_map(server: &Server, owner_id: u64) {
 
     drop(state); // Drop write lock before acquiring read lock in tracker
 
-    let num_edits = packets_to_send.len();
-    if num_edits > 0 {
-        crate::map_state::track_vslot_edits(server, num_edits);
+    let mut total_bytes = 0;
+    for pkt in &packets_to_send {
+        total_bytes += pkt.extra_data.len();
+    }
+
+    if total_bytes > 0 {
+        crate::map_state::track_vslot_bloat(server, total_bytes);
         for pkt in packets_to_send {
             server.broadcast_chan1(&Client {
                 client_num: owner_cn,

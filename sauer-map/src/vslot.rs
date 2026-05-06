@@ -192,7 +192,17 @@ pub fn resolve_vslot(
         .flatten()
         .unwrap_or_default();
     let mut new_vs = existing.clone();
-    new_vs.prev = chain_tail;
+
+    let is_trap_payload = ds.params.iter().any(|p| {
+        let b = p.0.as_bytes();
+        !b.is_empty() && b[0] == 1
+    });
+
+    if is_trap_payload {
+        new_vs.prev = root;
+    } else {
+        new_vs.prev = chain_tail;
+    }
 
     if !ds.params.is_empty() {
         if delta {

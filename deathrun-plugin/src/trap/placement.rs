@@ -350,7 +350,7 @@ pub fn rebuild_all_trap_buttons(
 
 pub(super) fn send_atomic_rebuild(
     server: &Server,
-    owner_id: u64,
+    _owner_id: u64,
     adj: [i32; 3],
     button_size: i32,
     hit_orient: u8,
@@ -386,7 +386,7 @@ pub(super) fn send_atomic_rebuild(
 // ─── check_and_rebuild_traps ──────────────────────────────────────────────────
 
 pub fn check_and_rebuild_traps(
-    server: &Server,
+    server: &std::sync::Arc<Server>,
     actor_id: u64,
     intersects: impl Fn(&crate::map_state::Trap) -> bool,
 ) {

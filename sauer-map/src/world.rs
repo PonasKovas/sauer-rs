@@ -17,7 +17,7 @@ use ogz_rs::data::VSlot;
 use std::collections::HashSet;
 
 impl World {
-    pub fn compact_vslots(&mut self, vslots: &mut Vec<Option<ogz_rs::data::VSlot>>) {
+    pub fn compact_vslots(&self, vslots: &mut Vec<Option<ogz_rs::data::VSlot>>) {
         let mut used = std::collections::HashSet::new();
         fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
             match node {

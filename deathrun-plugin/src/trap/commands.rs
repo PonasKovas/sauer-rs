@@ -13,7 +13,6 @@ use sauer_server::plugin::Context;
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
-    let cn = server.get_cn(id).unwrap_or(0) as i32;
     let mut state = get_server_state(server).write().unwrap();
 
     let trap_idx = state.traps.iter().position(|t| {
@@ -71,7 +70,6 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
 pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     let id = ctx.id();
     let server = ctx.server().clone();
-    let cn = server.get_cn(id).unwrap_or(0) as i32;
     let mut state = get_server_state(&server).write().unwrap();
 
     let map = match state.map.as_mut() {
@@ -627,7 +625,6 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
 
 pub fn cmd_endtrap(ctx: &Context) {
     let id = ctx.id();
-    let cn = ctx.server().get_cn(id).unwrap_or(0) as i32;
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 

@@ -97,8 +97,8 @@ pub fn encode_payload<T: Serialize>(
         current_extra.extend_from_slice(&chunk);
 
         chunks_in_block += 1;
-        if chunks_in_block >= 60 {
-            // Safe maximum per network packet
+        if chunks_in_block >= 200 {
+            // Increased maximum to efficiently utilize ~5KB packet size limit
             current_extra.push(0xFF);
             extra_data_blocks.push(std::mem::take(&mut current_extra));
             chunks_in_block = 0;

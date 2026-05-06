@@ -431,7 +431,7 @@ pub fn set_button_color(
 }
 
 pub fn apply_and_broadcast(
-    server: &Server,
+    server: &std::sync::Arc<Server>,
     actor_id: u64,
     sel: &SelInfo,
     unpack_len: i32,

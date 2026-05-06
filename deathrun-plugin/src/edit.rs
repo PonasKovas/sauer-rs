@@ -1,5 +1,5 @@
 use crate::map_state::{
-    DeathrunState, MapState, get_server_state, is_waiting_for_map, send_map_to_async, with_map_state_mut,
+    DeathrunState, MapState, get_server_state, is_waiting_for_map, with_map_state_mut,
 };
 use crate::trap::{
     check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
@@ -369,12 +369,12 @@ impl Plugin for DeathrunEdit {
             let mut state = get_server_state(server).write().unwrap();
             state.map = None;
             state.waiting_for_map = true;
-            state.traps.clear();
-            state.trap_edit = None;
-            state.active_traps.clear();
-            state.vslot_edits.clear();
-        }
-        for client_id in server.client_ids() {
+        state.traps.clear();
+        state.trap_edit = None;
+        state.active_traps.clear();
+        state.client_vslot_bloat.clear();
+    }
+    for client_id in server.client_ids() {
             server.set_spectator(client_id, true);
         }
 
@@ -430,7 +430,7 @@ impl Plugin for DeathrunEdit {
         let total_bytes = data.len();
         
         tokio::spawn(async move {
-            let start_time = std::time::Instant::now();
+            let _start_time = std::time::Instant::now();
             let parse_result = tokio::task::spawn_blocking(move || -> Result<_, String> {
                 let t_start = std::time::Instant::now();
                 
@@ -531,27 +531,19 @@ impl Plugin for DeathrunEdit {
                     ).lossy_cubestring()
                 });
 
-                // Instantly blast the pre-compressed bytes to all clients EXCEPT the uploader!
-                // Sending massive files back to the uploader clogs their ENet queue and causes disconnects.
-                let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
-                for client_id in server_clone.client_ids() {
-                    if client_id != id {
-                        server_clone.send_chan2(client_id, &pkt);
-                    }
-                }
-
-                server_clone.set_spectator(id, false);
-                ui::send(
-                    &server_clone,
-                    id,
-                    ui::body("Map received. You can now spawn and edit freely."),
-                );
-
-                // Ensure the uploader's map is visually synchronized with the server's baked/reset traps.
-                // This sends lightweight edit packets to sync the traps instead of an 8MB file transfer!
-                crate::trap::placement::check_and_rebuild_traps(&server_clone, id, |_| true);
+            let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
+            for client_id in server_clone.client_ids() {
+                server_clone.send_chan2(client_id, &pkt);
             }
-            Err(e) => warn!("id {id} sent an invalid map: {e}"),
+
+            server_clone.set_spectator(id, false);
+            ui::send(
+                &server_clone,
+                id,
+                ui::body("Map received. You can now spawn and edit freely."),
+            );
+        }
+        Err(e) => warn!("id {id} sent an invalid map: {e}"),
         }
     });
     }
@@ -562,7 +554,7 @@ impl Plugin for DeathrunEdit {
         crate::map_state::get_server_state(server)
             .read()
             .unwrap()
-            .vslot_edits
+            .client_vslot_bloat
             .insert(id, 0);
 
         if server.client_count() == 1 {
@@ -667,7 +659,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
-        crate::map_state::track_vslot_edits(ctx.server(), 1);
+        crate::map_state::track_vslot_bloat(ctx.server(), packet.extra_data.len());
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
@@ -850,11 +842,11 @@ impl Plugin for DeathrunEdit {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
             state.map = Some(MapState::new_empty(world_size));
             state.traps.clear();
-            state.active_traps.clear();
-            state.trap_edit = None;
-            state.trap_edit_particle_ent = None;
-            state.vslot_edits.clear();
-        } else if let Some(map) = state.map.as_mut() {
+        state.active_traps.clear();
+        state.trap_edit = None;
+        state.trap_edit_particle_ent = None;
+        state.client_vslot_bloat.clear();
+    } else if let Some(map) = state.map.as_mut() {
             map.enlarge();
         }
     }
