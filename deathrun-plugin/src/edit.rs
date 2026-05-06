@@ -430,8 +430,13 @@ impl Plugin for DeathrunEdit {
         let total_bytes = data.len();
         
         tokio::spawn(async move {
+            let start_time = std::time::Instant::now();
             let parse_result = tokio::task::spawn_blocking(move || -> Result<_, String> {
+                let t_start = std::time::Instant::now();
+                
                 let mut state = MapState::from_bytes(&data_clone).map_err(|e| e.to_string())?;
+                let t_parsed = t_start.elapsed();
+                
                 let world_size = state.world.size;
 
                 for ent in &mut state.world.entities {
@@ -444,42 +449,53 @@ impl Plugin for DeathrunEdit {
                     }
                 }
 
-            let mut loaded_traps = Vec::new();
-            let mut store_stats = crate::trap::vslot_store::StoreStats::default();
+                let mut loaded_traps = Vec::new();
+                let mut store_stats = crate::trap::vslot_store::StoreStats::default();
 
-            if let Ok((stored_traps, stats)) =
-                crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
-                    &state,
-                    crate::trap::TRAP_STORE_VERSION,
-                    crate::trap::TRAP_DOMAIN,
-                    |t| t.button_pos,
-                )
-            {
-                store_stats = stats;
-                for st in &stored_traps {
-                    st.apply_reset_to_world(&mut state.world);
+                let t_traps_start = std::time::Instant::now();
+                if let Ok((stored_traps, stats)) =
+                    crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
+                        &state,
+                        crate::trap::TRAP_STORE_VERSION,
+                        crate::trap::TRAP_DOMAIN,
+                        |t| t.button_pos,
+                    )
+                {
+                    store_stats = stats;
+                    for st in &stored_traps {
+                        st.apply_reset_to_world(&mut state.world);
+                    }
+                    loaded_traps = stored_traps
+                        .into_iter()
+                        .filter_map(|st| st.into_trap())
+                        .collect();
                 }
-                loaded_traps = stored_traps
-                    .into_iter()
-                    .filter_map(|st| st.into_trap())
-                    .collect();
-            }
+                let t_traps = t_traps_start.elapsed();
 
-            crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
-            for trap in &loaded_traps {
-                let packets = crate::trap::stored::generate_trap_vslot_packets(
-                    &crate::trap::StoredTrap::from_trap(trap),
+                let t_rebuild_start = std::time::Instant::now();
+                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
+                for trap in &loaded_traps {
+                    let packets = crate::trap::stored::generate_trap_vslot_packets(
+                        &crate::trap::StoredTrap::from_trap(trap),
+                    );
+                    for p in &packets {
+                        state.handle_edit_v_slot(p);
+                    }
+                }
+                let t_rebuild = t_rebuild_start.elapsed();
+
+                let t_serialize_start = std::time::Instant::now();
+                // Compress the fully prepared map back to Bytes here in the background
+                let out_bytes = state.to_ogz_bytes().map_err(|e| e.to_string())?;
+                let t_serialize = t_serialize_start.elapsed();
+
+                tracing::info!(
+                    "Map compilation metrics: [Parse: {:?}] [Read Traps: {:?}] [Rebuild Geometries: {:?}] [Serialize: {:?}] [Total: {:?}]",
+                    t_parsed, t_traps, t_rebuild, t_serialize, t_start.elapsed()
                 );
-                for p in &packets {
-                    state.handle_edit_v_slot(p);
-                }
-            }
 
-            // Compress the fully prepared map back to Bytes here in the background
-            let out_bytes = state.to_ogz_bytes().map_err(|e| e.to_string())?;
-
-            Ok((state, loaded_traps, out_bytes, world_size, store_stats))
-        }).await.expect("Map parsing panicked");
+                Ok((state, loaded_traps, out_bytes, world_size, store_stats))
+            }).await.expect("Map parsing panicked");
 
         match parse_result {
             Ok((state, loaded_traps, out_bytes, world_size, stats)) => {
@@ -515,10 +531,13 @@ impl Plugin for DeathrunEdit {
                     ).lossy_cubestring()
                 });
 
-                // Instantly blast the pre-compressed bytes to all clients without blocking!
+                // Instantly blast the pre-compressed bytes to all clients EXCEPT the uploader!
+                // Sending massive files back to the uploader clogs their ENet queue and causes disconnects.
                 let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
                 for client_id in server_clone.client_ids() {
-                    server_clone.send_chan2(client_id, &pkt);
+                    if client_id != id {
+                        server_clone.send_chan2(client_id, &pkt);
+                    }
                 }
 
                 server_clone.set_spectator(id, false);
@@ -527,6 +546,10 @@ impl Plugin for DeathrunEdit {
                     id,
                     ui::body("Map received. You can now spawn and edit freely."),
                 );
+
+                // Ensure the uploader's map is visually synchronized with the server's baked/reset traps.
+                // This sends lightweight edit packets to sync the traps instead of an 8MB file transfer!
+                crate::trap::placement::check_and_rebuild_traps(&server_clone, id, |_| true);
             }
             Err(e) => warn!("id {id} sent an invalid map: {e}"),
         }
