@@ -431,15 +431,15 @@ impl Plugin for DeathrunEdit {
         
         tokio::spawn(async move {
             let _start_time = std::time::Instant::now();
-            let parse_result = tokio::task::spawn_blocking(move || -> Result<(MapState, Vec<crate::map_state::Trap>, Vec<u8>, i32, sauer_map::vslot_db::StoreStats), String> {
+            let parse_result = tokio::task::spawn_blocking(move || -> Result<(Map, Vec<crate::map_state::Trap>, Vec<u8>, i32, sauer_map::vslot_db::StoreStats), String> {
                 let t_start = std::time::Instant::now();
                 
-                let mut state = MapState::from_bytes(&data_clone).map_err(|e| e.to_string())?;
+                let mut state = Map::from_bytes(&data_clone).map_err(|e: ogz_rs::OgzError| e.to_string())?;
                 let t_parsed = t_start.elapsed();
                 
-                let world_size = state.world.size;
+                let world_size = state.size;
 
-                for ent in &mut state.world.entities {
+                for ent in &mut state.entities {
                     if ent.ent_type == ogz_rs::data::EntityType::Particles
                         && ent.attrs[3] == 1337
                         && ent.attrs[4] == 7331
@@ -501,7 +501,7 @@ impl Plugin for DeathrunEdit {
 
                 let t_serialize_start = std::time::Instant::now();
                 // Compress the fully prepared map back to Bytes here in the background
-                let out_bytes = state.to_ogz_bytes().map_err(|e| e.to_string())?;
+                let out_bytes = state.to_ogz_bytes().map_err(|e: ogz_rs::OgzError| e.to_string())?;
                 let t_serialize = t_serialize_start.elapsed();
 
                 tracing::info!(
