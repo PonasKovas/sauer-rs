@@ -1,8 +1,4 @@
 use cube_string::IntoCubeStringLossy;
-use sauer_proto::{
-    channel1::CurrentMaster,
-    data::{MasterClient, Privilege},
-};
 use sauer_server::{Context, Plugin, Server};
 use std::sync::Arc;
 use teloxide::prelude::*;

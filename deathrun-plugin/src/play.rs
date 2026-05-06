@@ -531,7 +531,6 @@ fn declare_win(
 ) {
     lock.round_state = RoundState::Ended;
     ui::broadcast_round_over(server, winner_text, top_times);
-    drop(lock);
 
     for id in server.client_ids() {
         if let Some(cn) = server.get_cn(id) {

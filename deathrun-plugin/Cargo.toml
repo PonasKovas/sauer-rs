@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 sauer-server.workspace = true
 dashmap.workspace = true
-sauer-proto.workspace = true
+sauer-proto = { workspace = true, features = ["serde"] }
 sauer-map.workspace = true
 sauer-core.workspace = true
 ogz-rs.workspace = true

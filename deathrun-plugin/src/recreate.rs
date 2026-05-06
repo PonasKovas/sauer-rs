@@ -1,11 +1,7 @@
-use crate::map_state::get_server_state;
-use cube_string::IntoCubeStringLossy;
 use sauer_proto::{
     Client, channel1,
-    data::{SelInfo, Vec3},
-};
+};use sauer_proto::data::SelInfo;use sauer_core::Vec3;
 use sauer_server::Server;
-use std::sync::Arc;
 
 pub async fn visual_rebuild_map<F>(
     server: &Server,
@@ -180,59 +176,4 @@ pub async fn visual_rebuild_map<F>(
             server.send_chan1(id, batch);
         }
     }
-}
-
-pub fn spawn_recreate_map(server: Arc<Server>, id: u64, delay_ms: u64) {
-    let (world, entities, vslots, variables) = {
-        let state_lock = get_server_state(&server).read().unwrap();
-        let state = match state_lock.map.as_ref() {
-            Some(s) => s,
-            None => {
-                server.send_chan1(
-                    id,
-                    &channel1::ServMsg {
-                        text: "No custom map uploaded to recreate!".lossy_cubestring(),
-                    },
-                );
-                return;
-            }
-        };
-        let vars = match &state.meta.config {
-            ogz_rs::data::MapConfig::Modern { variables } => variables.clone(),
-            _ => vec![],
-        };
-        (
-            state.world.clone(),
-            state.world.entities.clone(),
-            state.meta.vslots.clone(),
-            vars,
-        )
-    };
-
-    tokio::spawn(async move {
-        server.broadcast_chan1(&channel1::ServMsg {
-            text: "Morphing map sequence initiated...".lossy_cubestring(),
-        });
-
-        let ids = server.client_ids();
-        let author_cn = crate::SERVER_BOT_CN as i32;
-
-        visual_rebuild_map(
-            &server,
-            &ids,
-            author_cn,
-            &world,
-            &vslots,
-            &variables,
-            &entities,
-            delay_ms,
-            false,
-            |_, _, ent| Some(ent.clone()),
-        )
-        .await;
-
-        server.broadcast_chan1(&channel1::ServMsg {
-            text: "Map morphing reconstruction complete!".lossy_cubestring(),
-        });
-    });
 }

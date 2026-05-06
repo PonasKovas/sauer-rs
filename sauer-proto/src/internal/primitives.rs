@@ -150,19 +150,6 @@ pub(crate) fn write_short_pref_vslot_delta(val: &crate::data::VSlotDelta, out: &
     write_short_pref_data(&temp, out);
 }
 
-// varint length prefixed bytes
-pub(crate) fn read_varint_pref_data(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
-    let len = i32::sauer_read(reader)?;
-    let len = if len > 0 { len as usize } else { 0 };
-    let data = read_slice(reader, len)?.to_vec();
-
-    Ok(data)
-}
-pub(crate) fn write_varint_pref_data(val: &Vec<u8>, out: &mut Vec<u8>) {
-    (val.len() as i32).sauer_write(out);
-    out.extend_from_slice(val);
-}
-
 // -1 (or any negative number) terminated sequence
 pub(crate) fn read_neg_term_seq<T: SauerRead>(reader: &mut &[u8]) -> Result<Vec<T>, ParseError> {
     let mut vec = Vec::new();
