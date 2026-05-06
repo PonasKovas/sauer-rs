@@ -3,6 +3,7 @@ mod geom;
 pub mod octree;
 mod world;
 
+pub mod chunking;
 pub mod clipboard;
 pub mod raycast;
 pub mod vslot;

@@ -7,56 +7,14 @@ use sauer_proto::{
 use sauer_server::Server;
 use std::sync::Arc;
 
-pub(crate) fn collect_chunks(
-    node: &sauer_map::Node,
-    node_pos: [i32; 3],
-    node_size: i32,
-    chunk_size_limit: i32,
-    out: &mut Vec<([i32; 3], i32, sauer_map::Node)>,
-) {
-    if node_size <= chunk_size_limit {
-        if let sauer_map::Node::Leaf(cube) = node {
-            if cube.is_empty() && cube.material == ogz_rs::data::Material::default() {
-                return;
-            }
-        }
-        out.push((node_pos, node_size, node.clone()));
-        return;
-    }
-
-    match node {
-        sauer_map::Node::Branch(children) => {
-            let child_size = node_size / 2;
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [
-                    node_pos[0] + cx * child_size,
-                    node_pos[1] + cy * child_size,
-                    node_pos[2] + cz * child_size,
-                ];
-                collect_chunks(&children[i], child_pos, child_size, chunk_size_limit, out);
-            }
-        }
-        sauer_map::Node::Leaf(cube) => {
-            if !(cube.is_empty() && cube.material == ogz_rs::data::Material::default()) {
-                out.push((node_pos, node_size, node.clone()));
-            }
-        }
-    }
-}
-
 pub async fn visual_rebuild_map<F>(
     server: &Server,
     target_ids: &[u64],
     author_cn: i32,
-    world_size: i32,
-    root: &sauer_map::Node,
+    world: &sauer_map::World,
     vslots: &[Option<ogz_rs::data::VSlot>],
     variables: &[ogz_rs::data::Variable],
     entities: &[ogz_rs::data::Entity],
-    chunk_divisions: i32,
     chunk_delay_ms: u64,
     send_newmap: bool,
     mut entity_transformer: F,
@@ -67,8 +25,8 @@ pub async fn visual_rebuild_map<F>(
         return;
     }
 
-    println!("world_size: {world_size}");
-    let clear_size = world_size.max(1024);
+    println!("world_size: {}", world.size);
+    let clear_size = world.size.max(1024);
 
     for &id in target_ids {
         if send_newmap {
@@ -78,7 +36,7 @@ pub async fn visual_rebuild_map<F>(
                 &Client {
                     client_num: cn,
                     packet: channel1::NewMap {
-                        size: (world_size.trailing_zeros() as i32).max(10),
+                        size: (world.size.trailing_zeros() as i32).max(10),
                     },
                 },
             );
@@ -172,20 +130,23 @@ pub async fn visual_rebuild_map<F>(
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    let mut chunks = Vec::new();
-    let chunk_size_limit = world_size / chunk_divisions;
-    collect_chunks(root, [0, 0, 0], world_size, chunk_size_limit, &mut chunks);
+    let mut payloads = sauer_map::chunking::chunk_region(
+        world,
+        vslots,
+        [0, 0, 0],
+        [world.size, world.size, world.size],
+        4000,
+    );
 
     // Optional random shuffle to make it look cool, like in original recreate
     use rand::seq::SliceRandom;
-    chunks.shuffle(&mut rand::thread_rng());
+    payloads.shuffle(&mut rand::thread_rng());
 
-    crate::geo_sync::send_chunks_to_clients(
+    crate::geo_sync::send_payloads_to_clients(
         server,
         target_ids,
         author_cn,
-        chunks,
-        vslots,
+        payloads,
         chunk_delay_ms,
     )
     .await;
@@ -221,8 +182,8 @@ pub async fn visual_rebuild_map<F>(
     }
 }
 
-pub fn spawn_recreate_map(server: Arc<Server>, id: u64, divisions: i32, delay_ms: u64) {
-    let (map_size, root, entities, vslots, variables) = {
+pub fn spawn_recreate_map(server: Arc<Server>, id: u64, delay_ms: u64) {
+    let (world, entities, vslots, variables) = {
         let state_lock = get_server_state(&server).read().unwrap();
         let state = match state_lock.map.as_ref() {
             Some(s) => s,
@@ -241,8 +202,7 @@ pub fn spawn_recreate_map(server: Arc<Server>, id: u64, divisions: i32, delay_ms
             _ => vec![],
         };
         (
-            state.world.size,
-            state.world.root.clone(),
+            state.world.clone(),
             state.world.entities.clone(),
             state.meta.vslots.clone(),
             vars,
@@ -261,12 +221,10 @@ pub fn spawn_recreate_map(server: Arc<Server>, id: u64, divisions: i32, delay_ms
             &server,
             &ids,
             author_cn,
-            map_size,
-            &root,
+            &world,
             &vslots,
             &variables,
             &entities,
-            divisions,
             delay_ms,
             false,
             |_, _, ent| Some(ent.clone()),

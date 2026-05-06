@@ -320,12 +320,12 @@ pub fn rebuild_all_trap_buttons(
 // ─── Atomic rebuild ───────────────────────────────────────────────────────────
 
 pub(super) fn send_atomic_rebuild(
-    server: &Server,
+    server: &std::sync::Arc<Server>,
     _owner_id: u64,
     adj: [i32; 3],
     button_size: i32,
     hit_orient: u8,
-    clip_payload: sauer_proto::data::ClipboardPayload,
+    payloads: Vec<sauer_proto::data::ClipboardPayload>,
 ) {
     let target_cn = crate::SERVER_BOT_CN as i32;
     let (adj_sel, fill_sel) = get_selections(adj, button_size, hit_orient);
@@ -338,19 +338,18 @@ pub(super) fn send_atomic_rebuild(
             mode: EditFaceMode::Fill,
         },
     });
-    server.broadcast_chan1(&Client {
-        client_num: target_cn,
-        packet: channel1::DelCube {
-            sel: adj_sel.clone(),
-        },
+
+    let s_clone = std::sync::Arc::clone(server);
+    let adj_sel_clone = adj_sel.clone();
+    tokio::spawn(async move {
+        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
+        s_clone.broadcast_chan1((
+            corner_pushes(&adj_sel_clone, 0, target_cn),
+            corner_pushes(&adj_sel_clone, 1, target_cn),
+            corner_pushes(&adj_sel_clone, 2, target_cn),
+            corner_pushes(&adj_sel_clone, 3, target_cn),
+        ));
     });
-    crate::geo_sync::broadcast_geometry(server, target_cn, &adj_sel, clip_payload);
-    server.broadcast_chan1((
-        corner_pushes(&adj_sel, 0, target_cn),
-        corner_pushes(&adj_sel, 1, target_cn),
-        corner_pushes(&adj_sel, 2, target_cn),
-        corner_pushes(&adj_sel, 3, target_cn),
-    ));
 }
 
 // ─── check_and_rebuild_traps ──────────────────────────────────────────────────
@@ -393,23 +392,18 @@ pub fn check_and_rebuild_traps(
     }
 
     for trap in to_rebuild {
-        let mut payload = None;
+        let mut payloads = Vec::new();
 
         if let Some(map) = state.map.as_mut() {
             build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
 
-            let btn_node = sauer_map::octree::extract_node_at(
-                &map.world.root,
-                [0, 0, 0],
-                map.world.size,
-                trap.button_pos,
-                trap.button_size,
-            );
-            payload = Some(sauer_map::clipboard::generate_clipboard(
-                &btn_node,
-                trap.button_size,
-                &map.meta.vslots,
-            ));
+            let min = trap.button_pos;
+            let max = [
+                min[0] + trap.button_size,
+                min[1] + trap.button_size,
+                min[2] + trap.button_size,
+            ];
+            payloads = sauer_map::chunking::chunk_region(&map.world, &map.meta.vslots, min, max, 4000);
 
             let sel = sauer_map::Selection {
                 o: Vec3 {
@@ -444,7 +438,7 @@ pub fn check_and_rebuild_traps(
             trap.button_pos,
             trap.button_size,
             trap.button_orient,
-            payload.unwrap(),
+            payloads,
         );
     }
 

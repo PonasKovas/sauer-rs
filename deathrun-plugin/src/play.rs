@@ -219,7 +219,7 @@ impl DeathrunPlay {
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
-    let (world_size, root, entities, vslots, variables, my_epoch) = {
+    let (world, entities, vslots, variables, my_epoch) = {
         let mut lock = maps.write().unwrap();
         if lock.rotation.is_empty() {
             return;
@@ -249,8 +249,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             _ => vec![],
         };
         (
-            map.world.size,
-            map.world.root.clone(),
+            map.world.clone(),
             map.world.entities.clone(),
             map.meta.vslots.clone(),
             variables,
@@ -303,12 +302,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             &server,
             &ids,
             author_cn,
-            world_size,
-            &root,
+            &world,
             &vslots,
             &variables,
             &entities,
-            4,
             20,
             true,
             move |id, _i, ent| {
@@ -562,7 +559,7 @@ fn send_map_to_client(
     maps: &Arc<RwLock<PlayMaps>>,
     welcome: bool,
 ) -> bool {
-    let (world_size, root, entities, vslots, variables, evil_id) = {
+    let (world, entities, vslots, variables, evil_id) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -577,8 +574,7 @@ fn send_map_to_client(
             _ => vec![],
         };
         (
-            loaded.state.world.size,
-            loaded.state.world.root.clone(),
+            loaded.state.world.clone(),
             loaded.state.world.entities.clone(),
             loaded.state.meta.vslots.clone(),
             variables,
@@ -593,12 +589,10 @@ fn send_map_to_client(
             &server,
             &[target_id],
             author_cn,
-            world_size,
-            &root,
+            &world,
             &vslots,
             &variables,
             &entities,
-            4,
             20,
             true,
             |id, _i, ent| {

@@ -172,15 +172,12 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             mode: EditFaceMode::Fill,
         },
     });
-    server.broadcast_chan1(&Client {
-        client_num: target_cn,
-        packet: channel1::DelCube {
-            sel: adj_sel.clone(),
-        },
-    });
-    crate::geo_sync::broadcast_geometry(&server, target_cn, &adj_sel, clip_payload);
 
+    let s_clone = server.clone();
+    let adj_sel_clone = adj_sel.clone();
     tokio::spawn(async move {
+        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, vec![clip_payload], 0).await;
+
         use tokio::time::{Duration, sleep};
         let mut events: Vec<(u64, i32)> = {
             use rand::Rng;
@@ -198,12 +195,12 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
                 sleep(Duration::from_millis(t - elapsed)).await;
                 elapsed = t;
             }
-            server.broadcast_chan1(&Client {
+            s_clone.broadcast_chan1(&Client {
                 client_num: target_cn,
                 packet: channel1::EditFace {
                     sel: SelInfo {
                         corner,
-                        ..adj_sel.clone()
+                        ..adj_sel_clone.clone()
                     },
                     dir: 1,
                     mode: EditFaceMode::Corner,
@@ -215,7 +212,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         // This ensures the client map collapses the branch BEFORE we inject
         // the VSlot payload, safely subdividing the deformed geometry
         // and avoiding payload destruction.
-        crate::trap::stored::sync_traps_to_map(&server, id);
+        crate::trap::stored::sync_traps_to_map(&s_clone, id);
     });
 }
 
@@ -503,7 +500,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         trigger_cells,
         trigger_entities_mod,
         trigger_entities_add,
-        trigger_payload,
+        _trigger_payload,
         clip_pos,
         clip_s,
         clip_grid,
@@ -546,7 +543,6 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         server,
         id,
         &region_sel,
-        trigger_payload,
         &trigger_cells,
         &trigger_entities_mod,
         &trigger_entities_add,
@@ -870,21 +866,25 @@ pub fn cmd_endtrap(ctx: &Context) {
         corner: 0,
     };
 
-    // Revert clients: DelCube the tight region then paste original state.
-    // (pasteblock in vanilla is transparent — needs DelCube first to clear added geometry.)
+    // Revert clients: chunk original state and broadcast.
     if !trigger_cells.is_empty() {
-        server.broadcast_chan1(&Client {
-            client_num: target_cn,
-            packet: channel1::DelCube {
-                sel: region_sel.clone(),
-            },
-        });
-        crate::geo_sync::broadcast_geometry(
-            server,
-            target_cn,
-            &region_sel,
-            restore_payload.unwrap(),
+        let min = [region_sel.o.x, region_sel.o.y, region_sel.o.z];
+        let max = [
+            min[0] + region_sel.s.x * region_sel.grid,
+            min[1] + region_sel.s.y * region_sel.grid,
+            min[2] + region_sel.s.z * region_sel.grid,
+        ];
+        let payloads = sauer_map::chunking::chunk_region(
+            &edit_state.original_map.world,
+            &edit_state.original_map.meta.vslots,
+            min,
+            max,
+            4000,
         );
+        let s_clone = server.clone();
+        tokio::spawn(async move {
+            crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
+        });
     }
 
     // Restore entities to pre-recording state.
