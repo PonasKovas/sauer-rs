@@ -7,10 +7,7 @@ pub async fn visual_rebuild_map<F>(
     server: &Server,
     target_ids: &[u64],
     author_cn: i32,
-    world: &sauer_map::World,
-    vslots: &[Option<ogz_rs::data::VSlot>],
-    variables: &[ogz_rs::data::Variable],
-    entities: &[ogz_rs::data::Entity],
+    map: &sauer_map::Map,
     chunk_delay_ms: u64,
     send_newmap: bool,
     mut entity_transformer: F,
@@ -21,8 +18,8 @@ pub async fn visual_rebuild_map<F>(
         return;
     }
 
-    println!("world_size: {}", world.size);
-    let clear_size = world.size.max(1024);
+    println!("world_size: {}", map.size);
+    let clear_size = map.size.max(1024);
 
     for &id in target_ids {
         if send_newmap {
@@ -32,7 +29,7 @@ pub async fn visual_rebuild_map<F>(
                 &Client {
                     client_num: cn,
                     packet: channel1::NewMap {
-                        size: (world.size.trailing_zeros() as i32).max(10),
+                        size: (map.size.trailing_zeros() as i32).max(10),
                     },
                 },
             );
@@ -58,7 +55,7 @@ pub async fn visual_rebuild_map<F>(
             },
         );
 
-        for var in variables {
+        for var in &map.vars {
             let name = match var {
                 ogz_rs::data::Variable::Int { name, .. } => name.clone(),
                 ogz_rs::data::Variable::Float { name, .. } => name.clone(),
@@ -100,7 +97,7 @@ pub async fn visual_rebuild_map<F>(
         }
 
         let mut empty_batch = Vec::new();
-        for i in 0..entities.len() {
+        for i in 0..map.entities.len() {
             empty_batch.push(Client {
                 client_num: author_cn,
                 packet: channel1::EditEnt {
@@ -127,10 +124,9 @@ pub async fn visual_rebuild_map<F>(
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     let mut payloads = sauer_map::chunking::chunk_region(
-        world,
-        vslots,
+        map,
         [0, 0, 0],
-        [world.size, world.size, world.size],
+        [map.size, map.size, map.size],
         4000,
     );
 
@@ -151,7 +147,7 @@ pub async fn visual_rebuild_map<F>(
 
     for &id in target_ids {
         let mut batch = Vec::new();
-        for (i, ent) in entities.iter().enumerate() {
+        for (i, ent) in map.entities.iter().enumerate() {
             if let Some(transformed) = entity_transformer(id, i, ent) {
                 batch.push(Client {
                     client_num: author_cn,

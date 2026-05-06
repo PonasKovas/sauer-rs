@@ -53,8 +53,8 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
         cys: 2,
         corner: 0,
     };
-    map.world.fill(&sel, false);
-    map.world.set_material(&sel, Default::default());
+    map.fill(&sel, false);
+    map.set_material(&sel, Default::default());
     drop(state);
 
     sync_traps_to_map(server, id);
@@ -98,7 +98,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     adj[r_axis] = snap(hit_pt[r_axis]);
     adj[c_axis] = snap(hit_pt[c_axis]);
 
-    let ws = map.world.size;
+    let ws = map.size;
     if adj.iter().any(|&v| v < 0 || v >= ws)
         || adj[r_axis] + BUTTON_SIZE > ws
         || adj[c_axis] + BUTTON_SIZE > ws
@@ -114,9 +114,9 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     // Snapshot before corner pushes: clipboard delivers the flat button with
     // correct vslot indices and the internal cavity; corner animation then pushes edges on clients.
     let button_node =
-        sauer_map::octree::extract_node_at(&map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
+        sauer_map::octree::extract_node_at(&map.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
     let clip_payload =
-        sauer_map::clipboard::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
+        sauer_map::clipboard::generate_clipboard(map, &button_node, BUTTON_SIZE);
 
     let sel = Selection {
         o: Vec3 {
@@ -138,7 +138,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         let mut csel = sel.clone();
         csel.corner = corner;
         for _ in 0..6 {
-            map.world.edit_face(&csel, 1, 2);
+            map.edit_face(&csel, 1, 2);
         }
     }
 
@@ -642,7 +642,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         });
 
         if let Some(map) = state.map.as_mut() {
-            if let Some(ent) = map.world.entities.get_mut(ent_id) {
+            if let Some(ent) = map.entities.get_mut(ent_id) {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
             }
@@ -651,11 +651,11 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     // Collect the minimal per-cell diff to get accurate (no artifact) tight bounds.
     let current_map = state.map.as_ref().unwrap();
-    let world_size = current_map.world.size;
+    let world_size = current_map.size;
     let mut trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)> = Vec::new();
     sauer_map::octree::collect_diff_cells(
-        &edit_state.original_map.world.root,
-        &current_map.world.root,
+        &edit_state.original_map.root,
+        &current_map.root,
         [0, 0, 0],
         world_size,
         &mut trigger_cells,
@@ -707,21 +707,17 @@ pub fn cmd_endtrap(ctx: &Context) {
     ) = if !trigger_cells.is_empty() {
         // Trigger clipboard from the post-edit map (tight bounds only).
         let (cp, cs, cg, tc) = sauer_map::clipboard::generate_region_clipboard(
-            &current_map.world.root,
-            world_size,
+            current_map,
             tight_min,
             tight_max,
-            &current_map.meta.vslots,
         );
 
         // Restore clipboard from original map (same region dims for consistency).
         let rc = sauer_map::clipboard::generate_clipboard_for_region(
-            &edit_state.original_map.world.root,
-            world_size,
+            &edit_state.original_map,
             cp,
             cs,
             cg,
-            &edit_state.original_map.meta.vslots,
         );
 
         (cp, cs, cg, Some(tc), Some(rc))
@@ -741,8 +737,8 @@ pub fn cmd_endtrap(ctx: &Context) {
     let mut trigger_entities_add = Vec::new();
 
     for &ent_id in &edit_state.affected_entities {
-        let curr = current_map.world.entities.get(ent_id).unwrap_or(&empty_ent);
-        if ent_id < edit_state.original_map.world.entities.len() {
+        let curr = current_map.entities.get(ent_id).unwrap_or(&empty_ent);
+        if ent_id < edit_state.original_map.entities.len() {
             trigger_entities_mod.push((ent_id, curr.clone()));
         } else if curr.ent_type != ogz_rs::data::EntityType::Empty {
             trigger_entities_add.push(curr.clone());
@@ -754,7 +750,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         .iter()
         .map(|&(pos, size, _)| {
             let node = sauer_map::octree::extract_node_at(
-                &edit_state.original_map.world.root,
+                &edit_state.original_map.root,
                 [0, 0, 0],
                 world_size,
                 pos,
@@ -768,7 +764,6 @@ pub fn cmd_endtrap(ctx: &Context) {
         .map(|(id, _)| {
             let ent = edit_state
                 .original_map
-                .world
                 .entities
                 .get(*id)
                 .cloned()
@@ -862,8 +857,7 @@ pub fn cmd_endtrap(ctx: &Context) {
             min[2] + region_sel.s.z * region_sel.grid,
         ];
         let payloads = sauer_map::chunking::chunk_region(
-            &edit_state.original_map.world,
-            &edit_state.original_map.meta.vslots,
+            &edit_state.original_map,
             min,
             max,
             4000,
@@ -879,7 +873,6 @@ pub fn cmd_endtrap(ctx: &Context) {
     for &ent_id in &edit_state.affected_entities {
         let ent = edit_state
             .original_map
-            .world
             .entities
             .get(ent_id)
             .unwrap_or(&empty_ent);
@@ -908,13 +901,13 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     // Restore server geometry to original, keeping the expanded vslot table so indices
     // stay in sync with clients (recording may have appended new vslot entries).
-    let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().meta.vslots);
+    let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
     state.map = Some(*edit_state.original_map);
     if let Some(map) = state.map.as_mut() {
-        if merged_vslots.len() > map.meta.vslots.len() {
-            map.meta.vslots = merged_vslots;
+        if merged_vslots.len() > map.vslots.len() {
+            map.vslots = merged_vslots;
         }
-        map.update_server_items(server);
+        crate::map_state::update_server_items(map, server);
     }
     drop(state);
 

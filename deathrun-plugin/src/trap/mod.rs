@@ -51,6 +51,6 @@ pub enum RecordedPacket {
 
 pub struct TrapEditState {
     pub trap_idx: usize,
-    pub original_map: Box<crate::map_state::MapState>,
+    pub original_map: Box<sauer_map::Map>,
     pub affected_entities: std::collections::HashSet<usize>,
 }

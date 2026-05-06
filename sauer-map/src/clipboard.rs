@@ -1,8 +1,8 @@
-use crate::Node;
+use crate::{Map, Node};
 use ogz_rs::data::VSlot;
 use sauer_proto::data::ClipboardPayload;
 
-pub fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<(i32, VSlot)> {
+pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<(i32, VSlot)> {
     let mut used = std::collections::HashSet::new();
     fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
         match node {
@@ -33,10 +33,10 @@ pub fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<(i32, VSl
     out
 }
 
-pub fn generate_clipboard(node: &Node, size: i32, vslots: &[Option<VSlot>]) -> ClipboardPayload {
+pub fn generate_clipboard(map: &Map, node: &Node, size: i32) -> ClipboardPayload {
     let mut nodes = Vec::new();
     nodes.push(node.clone());
-    let vs = extract_vslots(&nodes, vslots);
+    let vs = extract_vslots(&nodes, &map.vslots);
     
     ClipboardPayload {
         unpack_len: 0,
@@ -53,12 +53,10 @@ pub fn generate_clipboard(node: &Node, size: i32, vslots: &[Option<VSlot>]) -> C
 }
 
 pub fn generate_clipboard_for_region(
-    root: &Node,
-    world_size: i32,
+    map: &Map,
     padded_min: [i32; 3],
     s: [i32; 3],
     grid: i32,
-    vslots: &[Option<VSlot>],
 ) -> ClipboardPayload {
     let [sx, sy, sz] = s;
     let mut nodes = Vec::with_capacity((sx * sy * sz) as usize);
@@ -70,13 +68,13 @@ pub fn generate_clipboard_for_region(
                     padded_min[1] + yi * grid,
                     padded_min[2] + zi * grid,
                 ];
-                let node = crate::octree::extract_node_at(root, [0, 0, 0], world_size, cell_pos, grid);
+                let node = crate::octree::extract_node_at(&map.root, [0, 0, 0], map.size, cell_pos, grid);
                 nodes.push(node);
             }
         }
     }
     
-    let vs = extract_vslots(&nodes, vslots);
+    let vs = extract_vslots(&nodes, &map.vslots);
     ClipboardPayload {
         unpack_len: 0,
         sel: sauer_core::Selection {
@@ -92,11 +90,9 @@ pub fn generate_clipboard_for_region(
 }
 
 pub fn generate_region_clipboard(
-    root: &Node,
-    world_size: i32,
+    map: &Map,
     min: [i32; 3],
     max: [i32; 3],
-    vslots: &[Option<VSlot>],
 ) -> ([i32; 3], [i32; 3], i32, ClipboardPayload) {
     let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
     let max_span = spans.iter().copied().max().unwrap_or(1).max(1);
@@ -107,12 +103,12 @@ pub fn generate_region_clipboard(
 
     let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
     let padded_max: [i32; 3] =
-        std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(world_size));
+        std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(map.size));
     let sx = (padded_max[0] - padded_min[0]) / grid;
     let sy = (padded_max[1] - padded_min[1]) / grid;
     let sz = (padded_max[2] - padded_min[2]) / grid;
     let s = [sx, sy, sz];
 
-    let payload = generate_clipboard_for_region(root, world_size, padded_min, s, grid, vslots);
+    let payload = generate_clipboard_for_region(map, padded_min, s, grid);
     (padded_min, s, grid, payload)
 }

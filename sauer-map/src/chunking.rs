@@ -1,25 +1,22 @@
-use crate::World;
-use ogz_rs::data::VSlot;
+use crate::Map;
 use sauer_proto::data::ClipboardPayload;
 use sauer_proto::channel1::ClipboardServer;
 use sauer_proto::Encode;
 use sauer_proto::route::{S2C, Chan1};
 
 pub fn chunk_region(
-    world: &World,
-    vslots: &[Option<VSlot>],
+    map: &Map,
     min: [i32; 3],
     max: [i32; 3],
     max_bytes: usize,
 ) -> Vec<ClipboardPayload> {
     let mut out = Vec::new();
-    do_chunk(world, vslots, min, max, max_bytes, &mut out);
+    do_chunk(map, min, max, max_bytes, &mut out);
     out
 }
 
 fn do_chunk(
-    world: &World,
-    vslots: &[Option<VSlot>],
+    map: &Map,
     min: [i32; 3],
     max: [i32; 3],
     max_bytes: usize,
@@ -33,7 +30,7 @@ fn do_chunk(
     }
 
     let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
-    let padded_max: [i32; 3] = std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(world.size));
+    let padded_max: [i32; 3] = std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(map.size));
 
     let sx = (padded_max[0] - padded_min[0]) / grid;
     let sy = (padded_max[1] - padded_min[1]) / grid;
@@ -42,7 +39,7 @@ fn do_chunk(
     // Check if it's 1x1x1 and cannot be split further
     let cannot_split = sx <= 1 && sy <= 1 && sz <= 1 && grid == 1;
 
-    let payload = crate::clipboard::generate_clipboard_for_region(&world.root, world.size, padded_min, [sx, sy, sz], grid, vslots);
+    let payload = crate::clipboard::generate_clipboard_for_region(map, padded_min, [sx, sy, sz], grid);
     
     let packet = ClipboardServer {
         client_num: 0,
@@ -84,7 +81,7 @@ fn do_chunk(
         }
         
         for (c_min, c_max) in sub_boxes {
-            do_chunk(world, vslots, c_min, c_max, max_bytes, out);
+            do_chunk(map, c_min, c_max, max_bytes, out);
         }
     }
 }

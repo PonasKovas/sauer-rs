@@ -195,43 +195,27 @@ pub fn get_outer_faces_vslot_packets(
 }
 
 pub fn build_button_geometry(
-    map: &mut crate::map_state::MapState,
+    map: &mut sauer_map::Map,
     adj: [i32; 3],
     size: i32,
     orient: u8,
 ) {
     // 1. Fill solid button bounds
-    let sel = SelInfo {
-        o: Vec3 {
-            x: adj[0],
-            y: adj[1],
-            z: adj[2],
-        },
-        s: Vec3 { x: 1, y: 1, z: 1 },
+    let sel = sauer_map::Selection {
+        o: sauer_proto::data::Vec3 { x: adj[0], y: adj[1], z: adj[2] },
+        s: sauer_proto::data::Vec3 { x: 1, y: 1, z: 1 },
         grid: size,
-        orient: Orient::try_from(orient as i32).unwrap_or(Orient::Left),
-        cx: 0,
-        cxs: 2,
-        cy: 0,
-        cys: 2,
-        corner: 0,
+        orient: sauer_proto::data::Orient::try_from(orient as i32).unwrap_or(sauer_proto::data::Orient::Left),
+        cx: 0, cxs: 2, cy: 0, cys: 2, corner: 0,
     };
-    map.world.fill(&sel, true);
-    map.world
-        .set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
-    map.world
-        .set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
-    map.world.set_material(
-        &sel,
-        ogz_rs::data::Material {
-            alpha: true,
-            ..Default::default()
-        },
-    );
+    map.fill(&sel, true);
+    map.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
+    map.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
+    map.set_material(&sel, ogz_rs::data::Material { alpha: true, ..Default::default() });
 
     // 2. Apply appearance VSlots strictly to the 6 outer faces
     for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
-        map.handle_edit_v_slot(&pkt);
+        map.apply_edit_v_slot(&pkt);
     }
 }
 
@@ -271,12 +255,12 @@ pub(super) fn corner_pushes(
 /// Takes `(button_pos, button_size, button_orient)` tuples to avoid a split-borrow
 /// when the caller holds `traps` and `map` in the same struct.
 pub fn reset_button_colors_by_pos(
-    map: &mut crate::map_state::MapState,
+    map: &mut sauer_map::Map,
     buttons: &[([i32; 3], i32, u8)],
 ) {
     for &(pos, size, orient) in buttons {
         for pkt in get_outer_faces_vslot_packets(pos, size, orient, BUTTON_COLOR_READY) {
-            map.handle_edit_v_slot(&pkt);
+            map.apply_edit_v_slot(&pkt);
         }
     }
 }
@@ -284,7 +268,7 @@ pub fn reset_button_colors_by_pos(
 // ─── Rebuild all trap buttons ─────────────────────────────────────────────────
 
 pub fn rebuild_all_trap_buttons(
-    map: &mut crate::map_state::MapState,
+    map: &mut sauer_map::Map,
     traps: &[crate::map_state::Trap],
 ) {
     for trap in traps {
@@ -310,7 +294,7 @@ pub fn rebuild_all_trap_buttons(
             let mut csel = sel.clone();
             csel.corner = corner;
             for _ in 0..6 {
-                map.world.edit_face(&csel, 1, 2);
+                map.edit_face(&csel, 1, 2);
             }
         }
     }
@@ -403,7 +387,7 @@ pub fn check_and_rebuild_traps(
                 min[1] + trap.button_size,
                 min[2] + trap.button_size,
             ];
-            payloads = sauer_map::chunking::chunk_region(&map.world, &map.meta.vslots, min, max, 4000);
+            payloads = sauer_map::chunking::chunk_region(map, min, max, 4000);
 
             let sel = sauer_map::Selection {
                 o: Vec3 {
@@ -425,7 +409,7 @@ pub fn check_and_rebuild_traps(
                 let mut csel = sel.clone();
                 csel.corner = corner;
                 for _ in 0..6 {
-                    map.world.edit_face(&csel, 1, 2);
+                    map.edit_face(&csel, 1, 2);
                 }
             }
 

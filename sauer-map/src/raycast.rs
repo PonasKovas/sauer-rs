@@ -1,4 +1,4 @@
-use crate::world::World;
+use crate::map::Map;
 use crate::{Cube, Node};
 
 /// Contains information about a successful raycast hit.
@@ -30,17 +30,17 @@ const FACES: [[[usize; 3]; 4]; 6] = [
 
 /// Casts a ray through the octree to find the exact geometry face intersected.
 pub fn raycast<'a>(
-    world: &'a World,
+    map: &'a Map,
     origin: [f32; 3],
     ray: [f32; 3],
     max_dist: f32,
 ) -> Option<RayHit<'a>> {
-    raycast_with_filter(world, origin, ray, max_dist, |c| !c.is_empty())
+    raycast_with_filter(map, origin, ray, max_dist, |c| !c.is_empty())
 }
 
 /// Casts a ray through the octree with a custom cube filter.
 pub fn raycast_with_filter<'a, F>(
-    world: &'a World,
+    map: &'a Map,
     origin: [f32; 3],
     ray: [f32; 3],
     max_dist: f32,
@@ -75,17 +75,17 @@ where
     ];
 
     let min_bound = [0.0, 0.0, 0.0];
-    let max_bound = [world.size as f32, world.size as f32, world.size as f32];
+    let max_bound = [map.size as f32, map.size as f32, map.size as f32];
 
     if let Some((tmin, tmax, axis)) = ray_aabb(origin, ray_norm, inv_ray, min_bound, max_bound) {
         if tmin <= max_dist && tmax >= 0.0 {
             return traverse(
-                &world.root,
+                &map.root,
                 origin,
                 ray_norm,
                 inv_ray,
                 [0, 0, 0],
-                world.size,
+                map.size,
                 tmin,
                 tmax.min(max_dist),
                 axis,

@@ -1,5 +1,5 @@
 use clap::Parser;
-use deathrun_plugin::map_state::MapState;
+use sauer_map::Map;
 use deathrun_plugin::trap::{StoredTrap, TRAP_DOMAIN, TRAP_STORE_VERSION};
 use std::path::PathBuf;
 
@@ -42,7 +42,7 @@ fn main() {
     }
 
     // Load state to evaluate *valid* traps vs ghost bloat
-    if let Ok(mut state) = MapState::from_bytes(&data) {
+    if let Ok(mut state) = Map::from_bytes(&data) {
         if let Ok((entries, stats)) = sauer_map::vslot_db::read_all::<StoredTrap>(
             &state.world,
             &state.meta.vslots,
@@ -84,10 +84,10 @@ fn main() {
 
         // Break broken dependency chains on Ghost VSlots so the compactor can successfully wipe them
         let mut ghosts_broken = 0;
-        for i in 0..state.meta.vslots.len() {
-            let root = sauer_map::vslot::root_base_of(&state.meta.vslots, i as u16);
+        for i in 0..state.vslots.len() {
+            let root = sauer_map::vslot::root_base_of(&state.vslots, i as u16);
 
-            if let Some(vs) = &mut state.meta.vslots[i] {
+            if let Some(vs) = &mut state.vslots[i] {
                 let is_trap_payload = vs.params.iter().any(|p| {
                     let b = p.name.as_bytes();
                     !b.is_empty() && b[0] == 1
@@ -110,7 +110,7 @@ fn main() {
             println!("\n=== Processing Output ===");
             
             if args.strip_traps {
-                for vs_opt in &mut state.meta.vslots {
+                for vs_opt in &mut state.vslots {
                     if let Some(vs) = vs_opt {
                         vs.params.retain(|p| {
                             let nb = p.name.as_bytes();

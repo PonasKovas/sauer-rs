@@ -1,5 +1,5 @@
 use clap::Parser;
-use deathrun_plugin::map_state::MapState;
+use sauer_map::Map;
 use deathrun_plugin::trap::{StoredTrap, TRAP_DOMAIN};
 use flate2::read::ZlibDecoder;
 use std::io::Read;
@@ -62,10 +62,9 @@ fn main() {
     let args = Args::parse();
 
     let input_data = std::fs::read(&args.input).expect("Failed to read input file");
-    let mut map_state = MapState::from_bytes(&input_data).expect("Failed to parse map");
+    let mut map_state = Map::from_bytes(&input_data).expect("Failed to parse map");
 
     let mut store_ents: Vec<(usize, &ogz_rs::data::Entity)> = map_state
-        .world
         .entities
         .iter()
         .enumerate()
@@ -83,7 +82,7 @@ fn main() {
     if args.purge_only {
         println!("Purging {} legacy trap entities without converting.", store_ents.len());
         
-        for ent in &mut map_state.world.entities {
+        for ent in &mut map_state.entities {
             if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0 {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
@@ -99,7 +98,7 @@ fn main() {
         println!("Found {} legacy traps.", stored_traps.len());
 
         // 1. Clear legacy trap data (domain 1 and 2, plus generic negative coords)
-        for ent in &mut map_state.world.entities {
+        for ent in &mut map_state.entities {
             if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0
             {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
@@ -110,7 +109,7 @@ fn main() {
 
         // 2. Restore map to clean state (in case it was saved active)
         for st in &stored_traps {
-            st.apply_reset_to_world(&mut map_state.world);
+            st.apply_reset_to_world(&mut map_state);
         }
 
         let loaded_traps: Vec<_> = stored_traps
@@ -125,7 +124,7 @@ fn main() {
             let st = deathrun_plugin::trap::StoredTrap::from_trap(trap);
             let packets = deathrun_plugin::trap::stored::generate_trap_vslot_packets(&st);
             for p in &packets {
-                map_state.handle_edit_v_slot(p);
+                map_state.apply_edit_v_slot(p);
             }
         }
     }

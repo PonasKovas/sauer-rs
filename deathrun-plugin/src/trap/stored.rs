@@ -147,24 +147,24 @@ impl StoredTrap {
     /// (pre-trigger) geometry and entity values. Safe to call even when the
     /// trap was not active — the reset state equals the base state, so the
     /// operation is idempotent.
-    pub fn apply_reset_to_world(&self, world: &mut sauer_map::World) {
+    pub fn apply_reset_to_world(&self, map: &mut sauer_map::Map) {
         for (pos, size, packed) in &self.reset_cells {
             let mut ptr = 0;
             if let Some(node) = sauer_proto::data::clipboard::unpack_cube(packed, &mut ptr) {
-                world.set_node_at(*pos, *size, node);
+                map.set_node_at(*pos, *size, node);
             }
         }
         for (id, stored_ent) in &self.reset_entities_mod {
-            if *id < world.entities.len() {
-                world.entities[*id] = stored_ent.clone().into_entity();
+            if *id < map.entities.len() {
+                map.entities[*id] = stored_ent.clone().into_entity();
             }
         }
         for added_ent in &self.trigger_entities_add {
             let ent = added_ent.clone().into_entity();
-            if let Some(idx) = world.entities.iter().position(|e| {
+            if let Some(idx) = map.entities.iter().position(|e| {
                 e.ent_type == ent.ent_type && e.position == ent.position && e.attrs == ent.attrs
             }) {
-                world.entities[idx] = ogz_rs::data::Entity {
+                map.entities[idx] = ogz_rs::data::Entity {
                     position: [0.0; 3],
                     attrs: [0; 5],
                     ent_type: ogz_rs::data::EntityType::Empty,
@@ -210,7 +210,7 @@ pub fn sync_traps_to_map(server: &std::sync::Arc<Server>, _owner_id: u64) {
         for trap in stored_traps {
             let packets = generate_trap_vslot_packets(&trap);
             for pkt in packets {
-                map.handle_edit_v_slot(&pkt);
+                map.apply_edit_v_slot(&pkt);
                 packets_to_send.push(pkt);
             }
         }

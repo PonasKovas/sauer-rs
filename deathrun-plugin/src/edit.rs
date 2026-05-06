@@ -1,6 +1,7 @@
 use crate::map_state::{
-    DeathrunState, MapState, get_server_state, is_waiting_for_map, with_map_state_mut,
+    DeathrunState, get_server_state, is_waiting_for_map, with_map_state_mut, update_server_items,
 };
+use sauer_map::Map;
 use crate::trap::{
     check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
 };
@@ -57,7 +58,7 @@ impl Plugin for DeathrunEdit {
         *server.game_mode.write().unwrap() = GameMode::CoopEdit;
         server.reserve_cn(crate::SERVER_BOT_CN);
         let mut state = DeathrunState::default();
-        state.map = Some(MapState::default_empty());
+        state.map = Some(Map::default_empty());
         server.extra.insert(RwLock::new(state));
 
         server.register_command("#newtrap", "create a trap at the aimed surface", "");
@@ -117,7 +118,7 @@ impl Plugin for DeathrunEdit {
         let mut dist = TRAP_EDIT_PARTICLE_MAX_DIST;
         if let Some(map) = state.map.as_ref() {
             if let Some(hit) = sauer_map::raycast::raycast_with_filter(
-                &map.world,
+                map,
                 origin,
                 forward,
                 TRAP_EDIT_PARTICLE_MAX_DIST,
@@ -146,13 +147,12 @@ impl Plugin for DeathrunEdit {
                 };
 
                 let id = map
-                    .world
                     .entities
                     .iter()
                     .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
                     .unwrap_or_else(|| {
-                        let i = map.world.entities.len();
-                        map.world.entities.push(ogz_rs::data::Entity {
+                        let i = map.entities.len();
+                        map.entities.push(ogz_rs::data::Entity {
                             position: [0.0; 3],
                             attrs: [0; 5],
                             ent_type: ogz_rs::data::EntityType::Empty,
@@ -161,7 +161,7 @@ impl Plugin for DeathrunEdit {
                         i
                     });
 
-                if let Some(ent) = map.world.entities.get_mut(id) {
+                if let Some(ent) = map.entities.get_mut(id) {
                     ent.ent_type = ogz_rs::data::EntityType::Particles;
                     ent.attrs = TRAP_EDIT_PARTICLE_ATTRS;
                 }
@@ -260,7 +260,7 @@ impl Plugin for DeathrunEdit {
             };
 
             let hit = match sauer_map::raycast::raycast_with_filter(
-                &map.world,
+                map,
                 origin,
                 ray,
                 2048.0,
@@ -455,8 +455,7 @@ impl Plugin for DeathrunEdit {
                 let t_traps_start = std::time::Instant::now();
                 if let Ok((entries, stats)) =
                     sauer_map::vslot_db::read_all::<crate::trap::StoredTrap>(
-                        &state.world,
-                        &state.meta.vslots,
+                        &state,
                         *b"DR",
                         crate::trap::TRAP_STORE_VERSION,
                         crate::trap::TRAP_DOMAIN,
@@ -479,7 +478,7 @@ impl Plugin for DeathrunEdit {
                         }
                     }
                     for st in &stored_traps {
-                        st.apply_reset_to_world(&mut state.world);
+                        st.apply_reset_to_world(&mut state);
                     }
                     loaded_traps = stored_traps
                         .into_iter()
@@ -495,7 +494,7 @@ impl Plugin for DeathrunEdit {
                         &crate::trap::StoredTrap::from_trap(trap),
                     );
                     for p in &packets {
-                        state.handle_edit_v_slot(p);
+                        state.apply_edit_v_slot(p);
                     }
                 }
                 let t_rebuild = t_rebuild_start.elapsed();
@@ -513,9 +512,9 @@ impl Plugin for DeathrunEdit {
                 Ok((state, loaded_traps, out_bytes, world_size, store_stats))
             }).await.expect("Map parsing panicked");
 
-        match parse_result {
+            match parse_result {
             Ok((state, loaded_traps, out_bytes, world_size, stats)) => {
-                state.update_server_items(&server_clone);
+                update_server_items(&state, &server_clone);
 
                 let comp_kb = stats.payload_compressed as f64 / 1024.0;
                 let uncomp_kb = stats.payload_uncompressed as f64 / 1024.0;
@@ -623,7 +622,7 @@ impl Plugin for DeathrunEdit {
 
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditTex(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_edit_tex(packet));
+        with_map_state_mut(ctx, |state| state.apply_edit_tex(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             intersects_sel(&packet.sel, trap)
         });
@@ -631,7 +630,7 @@ impl Plugin for DeathrunEdit {
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditMat(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_edit_mat(packet));
+        with_map_state_mut(ctx, |state| state.apply_edit_mat(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             intersects_sel(&packet.sel, trap)
         });
@@ -639,7 +638,7 @@ impl Plugin for DeathrunEdit {
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
         intercept_packet(ctx, crate::trap::RecordedPacket::DelCube(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_del_cube(packet));
+        with_map_state_mut(ctx, |state| state.apply_del_cube(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             intersects_sel(&packet.sel, trap)
         });
@@ -647,7 +646,7 @@ impl Plugin for DeathrunEdit {
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Replace(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_replace(packet));
+        with_map_state_mut(ctx, |state| state.apply_replace(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             if packet.in_sel == 0 {
                 true
@@ -659,7 +658,7 @@ impl Plugin for DeathrunEdit {
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditFace(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_edit_face(packet));
+        with_map_state_mut(ctx, |state| state.apply_edit_face(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             intersects_edit_face(&packet.sel, packet.dir, trap)
         });
@@ -667,11 +666,11 @@ impl Plugin for DeathrunEdit {
 
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditEnt(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_edit_ent(packet));
+        with_map_state_mut(ctx, |state| state.apply_edit_ent(packet));
     }
 
     async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
-        with_map_state_mut(ctx, |state| state.handle_edit_var(packet));
+        with_map_state_mut(ctx, |state| state.apply_edit_var(packet));
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
@@ -687,7 +686,7 @@ impl Plugin for DeathrunEdit {
         if delta.color.is_some() { size += 13; }
         crate::map_state::track_vslot_bloat(ctx.server(), size);
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
-        with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
+        with_map_state_mut(ctx, |state| state.apply_edit_v_slot(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
             intersects_sel(&packet.sel, trap)
         });
@@ -725,52 +724,11 @@ impl Plugin for DeathrunEdit {
             .map
             .as_mut()
         {
-            let sel = &packet.sel;
-
-            let d = sel.orient as usize >> 1;
-            let r_dim = [1usize, 2, 0][d];
-            let c_dim = [2usize, 0, 1][d];
-            let d_dim = [0usize, 1, 2][d];
-
-            let s_r = sel.s[r_dim];
-            let s_c = sel.s[c_dim];
-            let s_d = sel.s[d_dim];
-            let dc = sel.orient as usize & 1;
-
-            let total_nodes = (s_r * s_c * s_d) as usize;
-            let mut extracted_nodes = vec![
-                sauer_map::Node::Leaf(sauer_map::Cube {
-                    edges: [0; 12],
-                    textures: [0; 6],
-                    material: Default::default()
-                });
-                total_nodes
-            ];
-
-            state.world.edit_sel(&sel, |node, pos| {
-                let dx = (pos[r_dim] - sel.o[r_dim]) / sel.grid;
-                let dy = (pos[c_dim] - sel.o[c_dim]) / sel.grid;
-                let pos_d = (pos[d_dim] - sel.o[d_dim]) / sel.grid;
-                let dz = if dc != 0 { s_d - 1 - pos_d } else { pos_d };
-
-                if dx >= 0 && dx < s_r && dy >= 0 && dy < s_c && dz >= 0 && dz < s_d {
-                    let idx = (dz * s_c * s_r + dy * s_r + dx) as usize;
-                    if idx < extracted_nodes.len() {
-                        extracted_nodes[idx] = node.clone();
-                    }
-                }
-            });
-
-            let vslots = sauer_map::clipboard::extract_vslots(&extracted_nodes, &state.meta.vslots);
+            let payload = state.copy_selection(&packet.sel);
 
             if let Some(mut p) = server.players.try_get_mut(id) {
                 p.clipboard = Some(sauer_server::ClipboardData {
-                    payload: sauer_proto::data::ClipboardPayload {
-                        unpack_len: 0,
-                        sel: packet.sel.clone(),
-                        nodes: extracted_nodes,
-                        vslots,
-                    }
+                    payload
                 });
             }
         }
@@ -795,7 +753,7 @@ impl Plugin for DeathrunEdit {
         if let Some(p) = server.players.try_get(id) {
             if let Some(cb) = &p.clipboard {
                 let payload = cb.payload.clone();
-                with_map_state_mut(ctx, |state| state.handle_paste(packet, &payload));
+                with_map_state_mut(ctx, |state| state.apply_paste(packet, &payload));
 
                 let cb_sel = &payload.sel;
                 let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
@@ -814,7 +772,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
-        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.payload));
+        with_map_state_mut(ctx, |state| state.apply_undo_redo(&packet.payload));
 
         let sel = &packet.payload.sel;
         let max = [
@@ -841,7 +799,7 @@ impl Plugin for DeathrunEdit {
         let mut state = get_server_state(server).write().unwrap();
         if packet.size >= 0 {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
-            state.map = Some(MapState::new_empty(world_size));
+            state.map = Some(Map::new_empty(world_size));
             state.traps.clear();
         state.active_traps.clear();
         state.trap_edit = None;
@@ -867,7 +825,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
-        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.payload));
+        with_map_state_mut(ctx, |state| state.apply_undo_redo(&packet.payload));
 
         let sel = &packet.payload.sel;
         let max = [

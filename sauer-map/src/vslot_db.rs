@@ -1,7 +1,7 @@
-use crate::{Node, World};
+use crate::{Node, Map};
 use cube_string::CubeString;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-use ogz_rs::data::VSlot;
+
 use sauer_proto::data::{VSlotDelta, VSlotDeltaParam};
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
@@ -139,8 +139,7 @@ pub struct DbEntry<T> {
 }
 
 pub fn read_all<T: DeserializeOwned + Clone>(
-    world: &World,
-    vslots: &[Option<VSlot>],
+    map: &Map,
     magic: [u8; 2],
     version: u8,
     domain_id: u8,
@@ -148,7 +147,7 @@ pub fn read_all<T: DeserializeOwned + Clone>(
     let mut stats = StoreStats::default();
     let mut decoded_vslots = HashMap::new();
 
-    for (vslot_idx, vs_opt) in vslots.iter().enumerate() {
+    for (vslot_idx, vs_opt) in map.vslots.iter().enumerate() {
         if let Some(vs) = vs_opt {
             let mut chunks = HashMap::new();
             let mut max_idx = 0;
@@ -247,9 +246,9 @@ pub fn read_all<T: DeserializeOwned + Clone>(
     }
 
     traverse(
-        &world.root,
+        &map.root,
         [0, 0, 0],
-        world.size,
+        map.size,
         &decoded_vslots,
         &mut instance_map,
     );

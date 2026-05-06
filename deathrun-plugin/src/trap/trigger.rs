@@ -83,16 +83,15 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     extra_data: vec![],
                 };
                 let i = map
-                    .world
                     .entities
                     .iter()
                     .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
                     .unwrap_or_else(|| {
-                        let idx = map.world.entities.len();
-                        map.world.entities.push(blank.clone());
+                        let idx = map.entities.len();
+                        map.entities.push(blank.clone());
                         idx
                     });
-                map.world.entities[i] = blank;
+                map.entities[i] = blank;
                 id = Some(i);
             }
             id
@@ -149,9 +148,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 .iter()
                 .map(|&(pos, size, _)| {
                     let node = sauer_map::octree::extract_node_at(
-                        &map.world.root,
+                        &map.root,
                         [0, 0, 0],
-                        map.world.size,
+                        map.size,
                         pos,
                         size,
                     );
@@ -160,7 +159,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 .collect();
             let mut r_ents = Vec::new();
             for &(id, _) in &trigger_entities_mod {
-                if let Some(ent) = map.world.entities.get(id) {
+                if let Some(ent) = map.entities.get(id) {
                     r_ents.push((id, ent.clone()));
                 }
             }
@@ -342,7 +341,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         if let Some(id) = ent_id {
             let mut state = get_server_state(&server_clone).write().unwrap();
             if let Some(map) = state.map.as_mut() {
-                if let Some(ent) = map.world.entities.get_mut(id) {
+                if let Some(ent) = map.entities.get_mut(id) {
                     ent.ent_type = ogz_rs::data::EntityType::Empty;
                     ent.attrs = [0; 5];
                 }
@@ -402,7 +401,7 @@ pub fn set_button_color(
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
         if let Some(map) = state.map.as_mut() {
-            map.handle_edit_v_slot(&packet);
+            map.apply_edit_v_slot(&packet);
         }
         server.broadcast_chan1(&Client {
             client_num: actor_cn,
@@ -426,7 +425,7 @@ pub fn apply_and_broadcast(
     };
 
     for &(pos, size, ref node) in cells {
-        map.world.set_node_at(pos, size, node.clone());
+        map.set_node_at(pos, size, node.clone());
     }
 
     let mut assigned_ids = Vec::new();
@@ -434,7 +433,7 @@ pub fn apply_and_broadcast(
 
     for ent in entities_add {
         let mut found_empty = None;
-        for (i, e) in map.world.entities.iter().enumerate() {
+        for (i, e) in map.entities.iter().enumerate() {
             if e.ent_type == ogz_rs::data::EntityType::Empty {
                 if !entities_mod.iter().any(|&(mod_id, _)| mod_id == i) {
                     found_empty = Some(i);
@@ -444,11 +443,11 @@ pub fn apply_and_broadcast(
         }
 
         let ent_id = if let Some(i) = found_empty {
-            map.world.entities[i] = ent.clone();
+            map.entities[i] = ent.clone();
             i
         } else {
-            let i = map.world.entities.len();
-            map.world.entities.push(ent.clone());
+            let i = map.entities.len();
+            map.entities.push(ent.clone());
             i
         };
 
@@ -457,14 +456,14 @@ pub fn apply_and_broadcast(
     }
 
     for &(ent_id, ref ent) in entities_mod {
-        if ent_id < map.world.entities.len() {
-            map.world.entities[ent_id] = ent.clone();
+        if ent_id < map.entities.len() {
+            map.entities[ent_id] = ent.clone();
         }
         broadcast_ents.push((ent_id, ent.clone()));
     }
 
     map.invalidate_cache();
-    map.update_server_items(server);
+    crate::map_state::update_server_items(map, server);
 
     let actor_cn = crate::SERVER_BOT_CN as i32;
 
@@ -475,7 +474,7 @@ pub fn apply_and_broadcast(
             min[1] + sel.s.y * sel.grid,
             min[2] + sel.s.z * sel.grid,
         ];
-        sauer_map::chunking::chunk_region(&map.world, &map.meta.vslots, min, max, 4000)
+        sauer_map::chunking::chunk_region(map, min, max, 4000)
     } else {
         Vec::new()
     };

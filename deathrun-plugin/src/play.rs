@@ -1,8 +1,9 @@
-use crate::map_state::{DeathrunState, MapState, Trap, get_server_state};
+use crate::map_state::{DeathrunState, Trap, get_server_state};
+use sauer_map::Map;
 use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
-use ogz_rs::data::MapConfig;
+
 use rand::seq::SliceRandom;
 use sauer_proto::data::PlayerState;
 use sauer_proto::{
@@ -50,7 +51,7 @@ pub enum RoundState {
 }
 
 pub struct LoadedMap {
-    pub state: MapState,
+    pub state: Map,
     pub traps: Vec<Trap>,
 }
 
@@ -95,10 +96,10 @@ impl Default for PlayMaps {
 
 impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
-        let mut state = MapState::from_bytes(data).map_err(|e| e.to_string())?;
+        let mut state = Map::from_bytes(data).map_err(|e| e.to_string())?;
         let mut traps = Vec::new();
         // Universal cleanup of magic active trap particles
-        for ent in &mut state.world.entities {
+        for ent in &mut state.entities {
             if ent.ent_type == ogz_rs::data::EntityType::Particles
                 && ent.attrs[3] == 1337
                 && ent.attrs[4] == 7331
@@ -109,8 +110,7 @@ impl PlayMaps {
         }
 
         if let Ok((entries, _stats)) = sauer_map::vslot_db::read_all::<StoredTrap>(
-            &state.world,
-            &state.meta.vslots,
+            &state,
             *b"DR",
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,
@@ -132,7 +132,7 @@ impl PlayMaps {
             }
 
             for st in &stored {
-                st.apply_reset_to_world(&mut state.world);
+                st.apply_reset_to_world(&mut state);
             }
             traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
             if !traps.is_empty() {
@@ -146,7 +146,7 @@ impl PlayMaps {
                 &crate::trap::StoredTrap::from_trap(trap),
             );
             for p in &packets {
-                state.handle_edit_v_slot(p);
+                state.apply_edit_v_slot(p);
             }
         }
 
@@ -236,7 +236,7 @@ impl DeathrunPlay {
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
-    let (world, entities, vslots, variables, my_epoch) = {
+    let (map, my_epoch) = {
         let mut lock = maps.write().unwrap();
         if lock.rotation.is_empty() {
             return;
@@ -261,15 +261,8 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         let state_lock = get_server_state(&server);
         let state_read = state_lock.read().unwrap();
         let map = state_read.map.as_ref().unwrap();
-        let variables = match &map.meta.config {
-            MapConfig::Modern { variables } => variables.clone(),
-            _ => vec![],
-        };
         (
-            map.world.clone(),
-            map.world.entities.clone(),
-            map.meta.vslots.clone(),
-            variables,
+            map.clone(),
             epoch,
         )
     };
@@ -307,10 +300,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             server.set_spectator(id, true);
         }
 
-        let has_team_1 = entities
+        let has_team_1 = map.entities
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 1);
-        let has_team_2 = entities
+        let has_team_2 = map.entities
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
 
@@ -319,10 +312,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             &server,
             &ids,
             author_cn,
-            &world,
-            &vslots,
-            &variables,
-            &entities,
+            &map,
             20,
             true,
             move |id, _i, ent| {
@@ -575,7 +565,7 @@ fn send_map_to_client(
     maps: &Arc<RwLock<PlayMaps>>,
     welcome: bool,
 ) -> bool {
-    let (world, entities, vslots, variables, evil_id) = {
+    let (map, evil_id) = {
         let lock = maps.read().unwrap();
         let name = match &lock.current_map {
             Some(n) => n,
@@ -585,15 +575,8 @@ fn send_map_to_client(
             Some(m) => m,
             None => return false,
         };
-        let variables = match &loaded.state.meta.config {
-            MapConfig::Modern { variables } => variables.clone(),
-            _ => vec![],
-        };
         (
-            loaded.state.world.clone(),
-            loaded.state.world.entities.clone(),
-            loaded.state.meta.vslots.clone(),
-            variables,
+            loaded.state.clone(),
             lock.evil_id,
         )
     };
@@ -605,10 +588,7 @@ fn send_map_to_client(
             &server,
             &[target_id],
             author_cn,
-            &world,
-            &vslots,
-            &variables,
-            &entities,
+            &map,
             20,
             true,
             |id, _i, ent| {
@@ -829,7 +809,7 @@ impl Plugin for DeathrunPlay {
                 let py = packet.pos.y;
                 let pz = packet.pos.z;
 
-                for ent in &map_state.world.entities {
+                for ent in &map_state.entities {
                     if ent.ent_type == ogz_rs::data::EntityType::Flag {
                         let fx = ent.position[0];
                         let fy = ent.position[1];
@@ -906,14 +886,13 @@ impl Plugin for DeathrunPlay {
                                     extra_data: vec![],
                                 };
 
-                                let find_empty = |m: &mut crate::map_state::MapState| {
-                                    m.world
-                                        .entities
+                                let find_empty = |m: &mut sauer_map::Map| {
+                                    m.entities
                                         .iter()
                                         .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
                                         .unwrap_or_else(|| {
-                                            let i = m.world.entities.len();
-                                            m.world.entities.push(ogz_rs::data::Entity {
+                                            let i = m.entities.len();
+                                            m.entities.push(ogz_rs::data::Entity {
                                                 position: [0.0; 3],
                                                 attrs: [0; 5],
                                                 ent_type: ogz_rs::data::EntityType::Empty,
@@ -924,9 +903,9 @@ impl Plugin for DeathrunPlay {
                                 };
 
                                 let id1 = find_empty(map);
-                                map.world.entities[id1] = new_ent1;
+                                map.entities[id1] = new_ent1;
                                 let id2 = find_empty(map);
-                                map.world.entities[id2] = new_ent2;
+                                map.entities[id2] = new_ent2;
                                 ent_ids = (Some(id1), Some(id2));
                             }
                             drop(state);

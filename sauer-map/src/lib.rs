@@ -1,7 +1,7 @@
 mod edit;
 mod geom;
 pub mod octree;
-mod world;
+pub mod map;
 
 pub mod chunking;
 pub mod clipboard;
@@ -12,4 +12,4 @@ pub mod vslot_db;
 pub use edit::{apply_region, fill, set_material, set_texture};
 pub use geom::subdivide;
 pub use sauer_core::{Cube, Node, Selection};
-pub use world::World;
+pub use map::Map;
