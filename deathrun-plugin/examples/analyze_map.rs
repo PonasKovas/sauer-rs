@@ -1,6 +1,6 @@
 use clap::Parser;
 use sauer_map::Map;
-use deathrun_plugin::trap::{StoredTrap, TRAP_DOMAIN, TRAP_STORE_VERSION};
+use deathrun_plugin::trap::StoredTrap;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -43,13 +43,7 @@ fn main() {
 
     // Load state to evaluate *valid* traps vs ghost bloat
     if let Ok(mut state) = Map::from_bytes(&data) {
-        if let Ok((entries, stats)) = sauer_map::vslot_db::read_all::<StoredTrap>(
-            &state.world,
-            &state.meta.vslots,
-            *b"DR",
-            TRAP_STORE_VERSION,
-            TRAP_DOMAIN,
-        ) {
+        if let Ok((entries, stats)) = state.db_scan::<StoredTrap>() {
             let mut valid_count = 0;
             for entry in &entries {
                 let st = &entry.data;

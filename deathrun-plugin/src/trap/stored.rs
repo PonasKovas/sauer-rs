@@ -179,13 +179,7 @@ pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channe
     let sel = crate::trap::placement::get_payload_selection(trap.button_pos, trap.button_orient);
     let mut packets = Vec::new();
 
-    let data_blocks = sauer_map::vslot_db::encode_payload(
-        trap,
-        *b"DR",
-        crate::trap::TRAP_STORE_VERSION,
-        crate::trap::TRAP_DOMAIN,
-    )
-    .unwrap_or_default();
+    let data_blocks = sauer_map::Map::db_encode(trap).unwrap_or_default();
 
     for block in data_blocks {
         packets.push(sauer_proto::channel1::EditVSlot {

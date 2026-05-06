@@ -1,6 +1,6 @@
 use crate::map_state::{DeathrunState, Trap, get_server_state};
 use sauer_map::Map;
-use crate::trap::{StoredTrap, TRAP_STORE_VERSION};
+use crate::trap::StoredTrap;
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 
@@ -109,12 +109,7 @@ impl PlayMaps {
             }
         }
 
-        if let Ok((entries, _stats)) = sauer_map::vslot_db::read_all::<StoredTrap>(
-            &state,
-            *b"DR",
-            TRAP_STORE_VERSION,
-            crate::trap::TRAP_DOMAIN,
-        ) {
+        if let Ok((entries, _stats)) = state.db_scan::<StoredTrap>() {
             let mut stored = Vec::new();
             for entry in entries {
                 let st = entry.data;

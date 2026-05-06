@@ -45,12 +45,11 @@ pub fn decode_chunk_name(name: &[u8]) -> Option<usize> {
     Some(idx)
 }
 
-pub fn compress_payload<T: Serialize>(
-    data: &T,
-    magic: [u8; 2],
-    version: u8,
-    domain_id: u8,
-) -> Result<Vec<u8>, StoreError> {
+const DB_MAGIC: [u8; 2] = *b"DR";
+const DB_VERSION: u8 = 3;
+const DB_DOMAIN: u8 = 1;
+
+pub fn compress_payload<T: Serialize>(data: &T) -> Result<Vec<u8>, StoreError> {
     let raw = bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut zlib = Vec::new();
@@ -61,9 +60,9 @@ pub fn compress_payload<T: Serialize>(
         .map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut payload = Vec::with_capacity(6 + zlib.len());
-    payload.extend_from_slice(&magic);
-    payload.push(version);
-    payload.push(domain_id);
+    payload.extend_from_slice(&DB_MAGIC);
+    payload.push(DB_VERSION);
+    payload.push(DB_DOMAIN);
     payload.extend_from_slice(&(zlib.len() as u16).to_le_bytes());
     payload.extend_from_slice(&zlib);
 
@@ -106,13 +105,8 @@ pub fn chunk_payload(payload: &[u8]) -> Vec<VSlotDelta> {
     extra_data_blocks
 }
 
-pub fn encode_payload<T: Serialize>(
-    data: &T,
-    magic: [u8; 2],
-    version: u8,
-    domain_id: u8,
-) -> Result<Vec<VSlotDelta>, StoreError> {
-    let payload = compress_payload(data, magic, version, domain_id)?;
+pub fn encode_payload<T: Serialize>(data: &T) -> Result<Vec<VSlotDelta>, StoreError> {
+    let payload = compress_payload(data)?;
     Ok(chunk_payload(&payload))
 }
 
@@ -140,9 +134,6 @@ pub struct DbEntry<T> {
 
 pub fn read_all<T: DeserializeOwned + Clone>(
     map: &Map,
-    magic: [u8; 2],
-    version: u8,
-    domain_id: u8,
 ) -> Result<(Vec<DbEntry<T>>, StoreStats), StoreError> {
     let mut stats = StoreStats::default();
     let mut decoded_vslots = HashMap::new();
@@ -186,10 +177,10 @@ pub fn read_all<T: DeserializeOwned + Clone>(
             if !valid || payload.len() < 6 {
                 continue;
             }
-            if &payload[0..2] != &magic {
+            if &payload[0..2] != &DB_MAGIC {
                 continue;
             }
-            if payload[2] != version || payload[3] != domain_id {
+            if payload[2] != DB_VERSION || payload[3] != DB_DOMAIN {
                 continue;
             }
 

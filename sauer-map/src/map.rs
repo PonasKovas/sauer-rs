@@ -35,6 +35,26 @@ pub struct Map {
 }
 
 impl Map {
+    /// Scans the map's VSlot table to find and decode all stored structural data of type T.
+    pub fn db_scan<T: serde::de::DeserializeOwned + Clone>(&self) -> Result<(Vec<crate::db::DbEntry<T>>, crate::db::StoreStats), crate::db::StoreError> {
+        crate::vslot_db::read_all::<T>(self)
+    }
+
+    /// Encodes a struct into a sequence of VSlotDelta chunks for applying to the map.
+    pub fn db_encode<T: serde::Serialize>(data: &T) -> Result<Vec<sauer_proto::data::VSlotDelta>, crate::db::StoreError> {
+        crate::vslot_db::encode_payload(data)
+    }
+
+    /// Compresses a struct into a raw byte payload (used internally or for metrics).
+    pub fn db_compress<T: serde::Serialize>(data: &T) -> Result<Vec<u8>, crate::db::StoreError> {
+        crate::vslot_db::compress_payload(data)
+    }
+
+    /// Exposes the chunk name encoding for structural metric calculations.
+    pub fn db_encode_chunk_name(idx: usize) -> Vec<u8> {
+        crate::vslot_db::encode_chunk_name(idx)
+    }
+
     /// Creates a default empty map matching Sauerbraten's `emptymap(10)`
     pub fn default_empty() -> Self {
         Self::new_empty(1024)

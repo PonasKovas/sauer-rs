@@ -23,12 +23,6 @@ pub const BUTTON_SIDE_TEX: u16 = 242;
 pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
 pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
 
-pub const TRAP_STORE_VERSION: u8 = 3;
-pub const TRAP_DOMAIN: u8 = 1;
-
-pub const ACTIVE_TRAP_STORE_VERSION: u8 = 1;
-pub const ACTIVE_TRAP_DOMAIN: u8 = 2;
-
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ActiveTrap {
     pub trap_idx: usize,

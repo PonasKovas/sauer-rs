@@ -1,6 +1,6 @@
 use clap::Parser;
 use sauer_map::Map;
-use deathrun_plugin::trap::{StoredTrap, TRAP_DOMAIN};
+use deathrun_plugin::trap::StoredTrap;
 use flate2::read::ZlibDecoder;
 use std::io::Read;
 use std::path::PathBuf;
@@ -68,7 +68,7 @@ fn main() {
         .entities
         .iter()
         .enumerate()
-        .filter(|(_, e)| is_store_entity(e, TRAP_DOMAIN))
+        .filter(|(_, e)| is_store_entity(e, 1))
         .collect();
 
     if store_ents.is_empty() {
@@ -83,7 +83,7 @@ fn main() {
         println!("Purging {} legacy trap entities without converting.", store_ents.len());
         
         for ent in &mut map_state.entities {
-            if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0 {
+            if is_store_entity(ent, 1) || is_store_entity(ent, 2) || ent.position[2] < -9000.0 {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];
                 ent.position = [0.0; 3];
@@ -99,7 +99,7 @@ fn main() {
 
         // 1. Clear legacy trap data (domain 1 and 2, plus generic negative coords)
         for ent in &mut map_state.entities {
-            if is_store_entity(ent, TRAP_DOMAIN) || is_store_entity(ent, 2) || ent.position[2] < -9000.0
+            if is_store_entity(ent, 1) || is_store_entity(ent, 2) || ent.position[2] < -9000.0
             {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
                 ent.attrs = [0; 5];

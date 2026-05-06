@@ -431,7 +431,7 @@ impl Plugin for DeathrunEdit {
         
         tokio::spawn(async move {
             let _start_time = std::time::Instant::now();
-            let parse_result = tokio::task::spawn_blocking(move || -> Result<(Map, Vec<crate::map_state::Trap>, Vec<u8>, i32, sauer_map::vslot_db::StoreStats), String> {
+            let parse_result = tokio::task::spawn_blocking(move || -> Result<(Map, Vec<crate::map_state::Trap>, Vec<u8>, i32, sauer_map::db::StoreStats), String> {
                 let t_start = std::time::Instant::now();
                 
                 let mut state = Map::from_bytes(&data_clone).map_err(|e: ogz_rs::OgzError| e.to_string())?;
@@ -450,17 +450,10 @@ impl Plugin for DeathrunEdit {
                 }
 
                 let mut loaded_traps: Vec<crate::map_state::Trap> = Vec::new();
-                let mut store_stats = sauer_map::vslot_db::StoreStats::default();
+                let mut store_stats = sauer_map::db::StoreStats::default();
 
                 let t_traps_start = std::time::Instant::now();
-                if let Ok((entries, stats)) =
-                    sauer_map::vslot_db::read_all::<crate::trap::StoredTrap>(
-                        &state,
-                        *b"DR",
-                        crate::trap::TRAP_STORE_VERSION,
-                        crate::trap::TRAP_DOMAIN,
-                    )
-                {
+                if let Ok((entries, stats)) = state.db_scan::<crate::trap::StoredTrap>() {
                     store_stats = stats;
                     let mut stored_traps = Vec::new();
                     for entry in entries {
