@@ -16,7 +16,7 @@ pub mod vslot_delta;
 pub mod clipboard;
 
 pub use base_info::BaseInfo;
-pub use clipboard::{ClipboardPayload, UndoPayload};
+pub use clipboard::{ClipboardPayload, UndoPayload, UndoData, UndoEntity};
 pub use base_spawn::BaseSpawn;
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;

@@ -407,10 +407,38 @@ impl Map {
     /// Rolls geometry back to a previously stored Undo/Redo state snapshot.
     /// Returns `false` if the rollback was rejected because it intersected a protected region.
     pub fn apply_undo_redo(&mut self, payload: &sauer_proto::data::UndoPayload) -> bool {
-        let (min, max) = payload.sel.bounds();
-        if self.is_protected(min, max) { return false; }
-        self.apply_block(&payload.sel, payload.nodes.clone(), false);
-        true
+        match &payload.data {
+            sauer_proto::data::UndoData::Cubes { sel, nodes, .. } => {
+                let (min, max) = sel.bounds();
+                if self.is_protected(min, max) { return false; }
+                self.apply_block(sel, nodes.clone(), false);
+                true
+            }
+            sauer_proto::data::UndoData::Entities(ents) => {
+                // Ensure none of the entities touch a protected region
+                for ue in ents {
+                    let pos = ue.ent.position;
+                    let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
+                    let max = [min[0] + 1, min[1] + 1, min[2] + 1];
+                    if self.is_protected(min, max) { return false; }
+                }
+                
+                // Safely restore the entity state
+                for ue in ents {
+                    let id = ue.index as usize;
+                    if id >= self.entities.len() {
+                        self.entities.resize(id + 1, sauer_core::Entity {
+                            position: [0.0, 0.0, 0.0],
+                            attrs: [0; 5],
+                            ent_type: sauer_core::EntityType::Empty,
+                            extra_data: vec![],
+                        });
+                    }
+                    self.entities[id] = ue.ent.clone();
+                }
+                true
+            }
+        }
     }
 
     /// Extracts geometry within the given selection to create a payload for a clipboard copy.

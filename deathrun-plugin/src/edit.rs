@@ -821,13 +821,24 @@ impl Plugin for DeathrunEdit {
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_undo_redo(&packet.payload));
         if !ok {
-            let sel = &packet.payload.sel;
-            let max = [
-                sel.o.x + sel.s.x * sel.grid,
-                sel.o.y + sel.s.y * sel.grid,
-                sel.o.z + sel.s.z * sel.grid,
-            ];
-            handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
+            match &packet.payload.data {
+                sauer_proto::data::UndoData::Cubes { sel, .. } => {
+                    let max = [
+                        sel.o.x + sel.s.x * sel.grid,
+                        sel.o.y + sel.s.y * sel.grid,
+                        sel.o.z + sel.s.z * sel.grid,
+                    ];
+                    handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
+                }
+                sauer_proto::data::UndoData::Entities(ents) => {
+                    if let Some(ue) = ents.first() {
+                        let pos = ue.ent.position;
+                        let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
+                        let max = [min[0] + 1, min[1] + 1, min[2] + 1];
+                        handle_edit_reject(ctx, min, max);
+                    }
+                }
+            }
         }
     }
 
@@ -874,13 +885,24 @@ impl Plugin for DeathrunEdit {
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_undo_redo(&packet.payload));
         if !ok {
-            let sel = &packet.payload.sel;
-            let max = [
-                sel.o.x + sel.s.x * sel.grid,
-                sel.o.y + sel.s.y * sel.grid,
-                sel.o.z + sel.s.z * sel.grid,
-            ];
-            handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
+            match &packet.payload.data {
+                sauer_proto::data::UndoData::Cubes { sel, .. } => {
+                    let max = [
+                        sel.o.x + sel.s.x * sel.grid,
+                        sel.o.y + sel.s.y * sel.grid,
+                        sel.o.z + sel.s.z * sel.grid,
+                    ];
+                    handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
+                }
+                sauer_proto::data::UndoData::Entities(ents) => {
+                    if let Some(ue) = ents.first() {
+                        let pos = ue.ent.position;
+                        let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
+                        let max = [min[0] + 1, min[1] + 1, min[2] + 1];
+                        handle_edit_reject(ctx, min, max);
+                    }
+                }
+            }
         }
     }
 }

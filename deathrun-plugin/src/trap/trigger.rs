@@ -412,7 +412,7 @@ pub fn set_button_color(
 
 pub fn apply_and_broadcast(
     server: &std::sync::Arc<Server>,
-    actor_id: u64,
+    _actor_id: u64,
     sel: &SelInfo,
     cells: &[([i32; 3], i32, sauer_map::Node)],
     entities_mod: &[(usize, ogz_rs::data::Entity)],

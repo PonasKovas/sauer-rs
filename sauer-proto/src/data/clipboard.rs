@@ -198,11 +198,19 @@ pub fn unpack_entity(bytes: &[u8], pos: &mut usize) -> Option<Entity> {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VSlotData {
+    pub index: u16,
+    pub slot: u16,
+    pub vslot: VSlot,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ClipboardPayload {
     pub unpack_len: i32,
     pub sel: Selection,
     pub nodes: Vec<Node>,
-    pub vslots: Vec<(i32, VSlot)>,
+    pub vslots: Vec<VSlotData>,
 }
 
 impl SauerWrite for ClipboardPayload {
@@ -222,13 +230,13 @@ impl SauerWrite for ClipboardPayload {
             pack_cube(node, &mut uncompressed);
         }
         
-        for (idx, vs) in &self.vslots {
-            uncompressed.extend_from_slice(&idx.to_le_bytes());
-            pack_vslot(&mut uncompressed, vs);
+        for v in &self.vslots {
+            uncompressed.extend_from_slice(&v.index.to_le_bytes());
+            uncompressed.extend_from_slice(&v.slot.to_le_bytes());
+            pack_vslot(&mut uncompressed, &v.vslot);
         }
-        if !self.vslots.is_empty() {
-            uncompressed.extend_from_slice(&(-1i32).to_le_bytes());
-        }
+        uncompressed.extend_from_slice(&0u16.to_le_bytes());
+        uncompressed.extend_from_slice(&0u16.to_le_bytes());
 
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
         encoder.write_all(&uncompressed).unwrap();
@@ -286,12 +294,15 @@ impl SauerRead for ClipboardPayload {
         
         let mut vslots = Vec::new();
         while pos + 4 <= decompressed.len() {
-            let idx = get_i32(&decompressed, &mut pos).unwrap();
-            if idx < 0 {
+            let index = u16::from_le_bytes(decompressed[pos..pos+2].try_into().unwrap());
+            pos += 2;
+            let slot = u16::from_le_bytes(decompressed[pos..pos+2].try_into().unwrap());
+            pos += 2;
+            if index == 0 {
                 break;
             }
             let vs = unpack_vslot(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
-            vslots.push((idx, vs));
+            vslots.push(VSlotData { index, slot, vslot: vs });
         }
         
         Ok(ClipboardPayload { unpack_len, sel, nodes, vslots })
@@ -300,43 +311,70 @@ impl SauerRead for ClipboardPayload {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UndoEntity {
+    pub index: i32,
+    pub ent: Entity,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum UndoData {
+    Entities(Vec<UndoEntity>),
+    Cubes {
+        sel: Selection,
+        nodes: Vec<Node>,
+        gridmap: Vec<u8>,
+        vslots: Vec<VSlotData>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UndoPayload {
     pub unpack_len: i32,
-    pub ents: Vec<Entity>,
-    pub sel: Selection,
-    pub nodes: Vec<Node>,
-    pub vslots: Vec<(i32, VSlot)>,
+    pub data: UndoData,
 }
 
 impl SauerWrite for UndoPayload {
     fn sauer_write(&self, out: &mut Vec<u8>) {
         let mut uncompressed = Vec::new();
         
-        let numents = self.ents.len() as u16;
-        uncompressed.extend_from_slice(&numents.to_le_bytes());
-        for ent in &self.ents {
-            pack_entity(ent, &mut uncompressed);
-        }
+        match &self.data {
+            UndoData::Entities(ents) => {
+                let numents = ents.len() as u16;
+                uncompressed.extend_from_slice(&numents.to_le_bytes());
+                for ue in ents {
+                    uncompressed.extend_from_slice(&(ue.index as u16).to_le_bytes());
+                    pack_entity(&ue.ent, &mut uncompressed);
+                }
+            }
+            UndoData::Cubes { sel, nodes, gridmap, vslots } => {
+                let numents = 0u16;
+                uncompressed.extend_from_slice(&numents.to_le_bytes());
 
-        uncompressed.extend_from_slice(&self.sel.o.x.to_le_bytes());
-        uncompressed.extend_from_slice(&self.sel.o.y.to_le_bytes());
-        uncompressed.extend_from_slice(&self.sel.o.z.to_le_bytes());
-        uncompressed.extend_from_slice(&self.sel.s.x.to_le_bytes());
-        uncompressed.extend_from_slice(&self.sel.s.y.to_le_bytes());
-        uncompressed.extend_from_slice(&self.sel.s.z.to_le_bytes());
-        uncompressed.extend_from_slice(&self.sel.grid.to_le_bytes());
-        uncompressed.extend_from_slice(&(self.sel.orient as i32).to_le_bytes());
-        
-        for node in &self.nodes {
-            pack_cube(node, &mut uncompressed);
-        }
-        
-        for (idx, vs) in &self.vslots {
-            uncompressed.extend_from_slice(&idx.to_le_bytes());
-            pack_vslot(&mut uncompressed, vs);
-        }
-        if !self.vslots.is_empty() {
-            uncompressed.extend_from_slice(&(-1i32).to_le_bytes());
+                uncompressed.extend_from_slice(&sel.o.x.to_le_bytes());
+                uncompressed.extend_from_slice(&sel.o.y.to_le_bytes());
+                uncompressed.extend_from_slice(&sel.o.z.to_le_bytes());
+                uncompressed.extend_from_slice(&sel.s.x.to_le_bytes());
+                uncompressed.extend_from_slice(&sel.s.y.to_le_bytes());
+                uncompressed.extend_from_slice(&sel.s.z.to_le_bytes());
+                uncompressed.extend_from_slice(&sel.grid.to_le_bytes());
+                uncompressed.extend_from_slice(&(sel.orient as i32).to_le_bytes());
+                
+                for node in nodes {
+                    pack_cube(node, &mut uncompressed);
+                }
+                
+                uncompressed.extend_from_slice(gridmap);
+
+                for v in vslots {
+                    uncompressed.extend_from_slice(&v.index.to_le_bytes());
+                    uncompressed.extend_from_slice(&v.slot.to_le_bytes());
+                    pack_vslot(&mut uncompressed, &v.vslot);
+                }
+                uncompressed.extend_from_slice(&0u16.to_le_bytes());
+                uncompressed.extend_from_slice(&0u16.to_le_bytes());
+            }
         }
 
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
@@ -367,52 +405,69 @@ impl SauerRead for UndoPayload {
         let numents = u16::from_le_bytes(decompressed[pos..pos+2].try_into().unwrap());
         pos += 2;
         
-        let mut ents = Vec::with_capacity(numents as usize);
-        for _ in 0..numents {
-            ents.push(unpack_entity(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 24 })?);
-        }
-
-        let get_i32 = |bytes: &[u8], pos: &mut usize| -> Option<i32> {
-            if *pos + 4 > bytes.len() { return None; }
-            let v = i32::from_le_bytes(bytes[*pos..*pos+4].try_into().unwrap());
-            *pos += 4;
-            Some(v)
-        };
-        
-        let o_x = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let o_y = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let o_z = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let s_x = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let s_y = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let s_z = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let grid = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        let orient = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
-        
-        let sel = sauer_core::Selection {
-            o: sauer_core::Vec3 { x: o_x, y: o_y, z: o_z },
-            s: sauer_core::Vec3 { x: s_x, y: s_y, z: s_z },
-            grid,
-            orient: sauer_core::Orient::try_from(orient).unwrap_or(sauer_core::Orient::Left),
-            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
-        };
-        
-        let total_nodes = (s_x * s_y * s_z).max(0) as usize;
-        let mut nodes = Vec::with_capacity(total_nodes);
-        for _ in 0..total_nodes {
-            nodes.push(unpack_cube(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 1 })?);
-        }
-        
-        let mut vslots = Vec::new();
-        while pos + 4 <= decompressed.len() {
-            let idx = get_i32(&decompressed, &mut pos).unwrap();
-            if idx < 0 {
-                break;
+        let data = if numents > 0 {
+            let mut ents = Vec::with_capacity(numents as usize);
+            for _ in 0..numents {
+                if pos + 2 > decompressed.len() { return Err(ParseError::UnexpectedEof { expected: 2 }); }
+                let index = u16::from_le_bytes(decompressed[pos..pos+2].try_into().unwrap()) as i32;
+                pos += 2;
+                let ent = unpack_entity(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 24 })?;
+                ents.push(UndoEntity { index, ent });
             }
-            let vs = unpack_vslot(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
-            vslots.push((idx, vs));
-        }
+            UndoData::Entities(ents)
+        } else {
+            let get_i32 = |bytes: &[u8], pos: &mut usize| -> Option<i32> {
+                if *pos + 4 > bytes.len() { return None; }
+                let v = i32::from_le_bytes(bytes[*pos..*pos+4].try_into().unwrap());
+                *pos += 4;
+                Some(v)
+            };
+            
+            let o_x = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let o_y = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let o_z = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let s_x = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let s_y = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let s_z = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let grid = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            let orient = get_i32(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+            
+            let sel = sauer_core::Selection {
+                o: sauer_core::Vec3 { x: o_x, y: o_y, z: o_z },
+                s: sauer_core::Vec3 { x: s_x, y: s_y, z: s_z },
+                grid,
+                orient: sauer_core::Orient::try_from(orient).unwrap_or(sauer_core::Orient::Left),
+                cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+            };
+            
+            let total_nodes = (s_x * s_y * s_z).max(0) as usize;
+            let mut nodes = Vec::with_capacity(total_nodes);
+            for _ in 0..total_nodes {
+                nodes.push(unpack_cube(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 1 })?);
+            }
+            
+            if pos + total_nodes > decompressed.len() { return Err(ParseError::UnexpectedEof { expected: total_nodes }); }
+            let mut gridmap = vec![0; total_nodes];
+            gridmap.copy_from_slice(&decompressed[pos..pos+total_nodes]);
+            pos += total_nodes;
+
+            let mut vslots = Vec::new();
+            while pos + 4 <= decompressed.len() {
+                let index = u16::from_le_bytes(decompressed[pos..pos+2].try_into().unwrap());
+                pos += 2;
+                let slot = u16::from_le_bytes(decompressed[pos..pos+2].try_into().unwrap());
+                pos += 2;
+                if index == 0 {
+                    break;
+                }
+                let vs = unpack_vslot(&decompressed, &mut pos).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
+                vslots.push(VSlotData { index, slot, vslot: vs });
+            }
+
+            UndoData::Cubes { sel, nodes, gridmap, vslots }
+        };
         
-        Ok(UndoPayload { unpack_len, ents, sel, nodes, vslots })
+        Ok(UndoPayload { unpack_len, data })
     }
 }
 

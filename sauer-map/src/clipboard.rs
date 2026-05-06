@@ -1,8 +1,8 @@
 use crate::{Map, Node};
 use ogz_rs::data::VSlot;
-use sauer_proto::data::ClipboardPayload;
+use sauer_proto::data::{ClipboardPayload};use sauer_proto::data::clipboard::VSlotData;
 
-pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<(i32, VSlot)> {
+pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VSlotData> {
     let mut used = std::collections::HashSet::new();
     fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
         match node {
@@ -27,7 +27,12 @@ pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<(i
     let mut out = Vec::new();
     for idx in used_vec {
         if let Some(Some(vs)) = vslots.get(idx as usize) {
-            out.push((idx as i32, vs.clone()));
+            let slot = crate::vslot::root_base_of(vslots, idx);
+            out.push(VSlotData {
+                index: idx,
+                slot: slot as u16,
+                vslot: vs.clone(),
+            });
         }
     }
     out

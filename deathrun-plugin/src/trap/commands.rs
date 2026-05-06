@@ -6,7 +6,7 @@ use sauer_map::Selection;
 use sauer_proto::{
     Client,
     channel1::{self, ServMsg},
-    data::{EditFaceMode, SelInfo, Vec3},
+    data::{SelInfo, Vec3},
 };
 use sauer_server::plugin::Context;
 

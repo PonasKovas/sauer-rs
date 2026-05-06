@@ -1,10 +1,4 @@
-use crate::map_state::get_server_state;
-use sauer_proto::{
-    Client, PacketSequence,
-    channel1::{self},
-    data::{EditFaceMode, Orient, SelInfo, Vec3},
-};
-use sauer_server::Server;
+use sauer_proto::data::{Orient, SelInfo, Vec3};
 
 use super::BUTTON_COLOR_READY;
 
