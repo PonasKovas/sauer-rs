@@ -325,8 +325,7 @@ pub(super) fn send_atomic_rebuild(
     adj: [i32; 3],
     button_size: i32,
     hit_orient: u8,
-    clip_unpack_len: i32,
-    clip_data: Vec<u8>,
+    clip_payload: sauer_proto::data::ClipboardPayload,
 ) {
     let target_cn = crate::SERVER_BOT_CN as i32;
     let (adj_sel, fill_sel) = get_selections(adj, button_size, hit_orient);
@@ -345,7 +344,7 @@ pub(super) fn send_atomic_rebuild(
             sel: adj_sel.clone(),
         },
     });
-    crate::geo_sync::broadcast_geometry(server, target_cn, &adj_sel, clip_unpack_len, &clip_data);
+    crate::geo_sync::broadcast_geometry(server, target_cn, &adj_sel, clip_payload);
     server.broadcast_chan1((
         corner_pushes(&adj_sel, 0, target_cn),
         corner_pushes(&adj_sel, 1, target_cn),
@@ -373,8 +372,7 @@ pub fn check_and_rebuild_traps(
             button_pos: t.button_pos,
             button_size: t.button_size,
             button_orient: t.button_orient,
-            trigger_clipboard: t.trigger_clipboard.clone(),
-            trigger_unpack_len: t.trigger_unpack_len,
+            trigger_payload: t.trigger_payload.clone(),
             trigger_cells: t.trigger_cells.clone(),
             trigger_entities_mod: t.trigger_entities_mod.clone(),
             trigger_entities_add: t.trigger_entities_add.clone(),
@@ -383,8 +381,7 @@ pub fn check_and_rebuild_traps(
             clip_grid: t.clip_grid,
             time: t.time,
             timeout: t.timeout,
-            reset_clipboard: t.reset_clipboard.clone(),
-            reset_unpack_len: t.reset_unpack_len,
+            reset_payload: t.reset_payload.clone(),
             reset_cells: t.reset_cells.clone(),
             reset_entities_mod: t.reset_entities_mod.clone(),
             is_active: t.is_active,
@@ -396,8 +393,7 @@ pub fn check_and_rebuild_traps(
     }
 
     for trap in to_rebuild {
-        let mut clip_unpack_len = 0;
-        let mut clip_data = Vec::new();
+        let mut payload = None;
 
         if let Some(map) = state.map.as_mut() {
             build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
@@ -409,13 +405,11 @@ pub fn check_and_rebuild_traps(
                 trap.button_pos,
                 trap.button_size,
             );
-            let (ul, d) = sauer_map::clipboard::generate_clipboard(
+            payload = Some(sauer_map::clipboard::generate_clipboard(
                 &btn_node,
                 trap.button_size,
                 &map.meta.vslots,
-            );
-            clip_unpack_len = ul;
-            clip_data = d;
+            ));
 
             let sel = sauer_map::Selection {
                 o: Vec3 {
@@ -450,8 +444,7 @@ pub fn check_and_rebuild_traps(
             trap.button_pos,
             trap.button_size,
             trap.button_orient,
-            clip_unpack_len,
-            clip_data,
+            payload.unwrap(),
         );
     }
 

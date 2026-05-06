@@ -1636,7 +1636,6 @@ version = "0.1.0"
 dependencies = [
  "bitcode",
  "cube-string",
- "flate2",
  "glam",
  "ogz-rs",
  "sauer-core",
@@ -1664,6 +1663,7 @@ name = "sauer-proto"
 version = "0.1.0"
 dependencies = [
  "cube-string",
+ "flate2",
  "mlua",
  "num_enum",
  "sauer-core",

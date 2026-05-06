@@ -39,8 +39,7 @@ pub struct StoredTrap {
     pub button_pos: [i32; 3],
     pub button_size: i32,
     pub button_orient: u8,
-    pub trigger_clipboard: Vec<u8>,
-    pub trigger_unpack_len: i32,
+    pub trigger_payload: Option<sauer_proto::data::ClipboardPayload>,
     pub trigger_cells: Vec<([i32; 3], i32, Vec<u8>)>,
     pub trigger_entities_mod: Vec<(usize, StoredEntity)>,
     pub trigger_entities_add: Vec<StoredEntity>,
@@ -52,8 +51,7 @@ pub struct StoredTrap {
     /// Base-state geometry — always applied on load to guarantee the map starts
     /// in a clean (pre-trigger) state regardless of whether a trap was active
     /// when the map was saved.
-    pub reset_clipboard: Vec<u8>,
-    pub reset_unpack_len: i32,
+    pub reset_payload: Option<sauer_proto::data::ClipboardPayload>,
     pub reset_cells: Vec<([i32; 3], i32, Vec<u8>)>,
     pub reset_entities_mod: Vec<(usize, StoredEntity)>,
 }
@@ -65,7 +63,7 @@ impl StoredTrap {
                 .iter()
                 .map(|(pos, size, node)| {
                     let mut packed = Vec::new();
-                    sauer_map::clipboard::pack_cube(node, &mut packed);
+                    sauer_proto::data::clipboard::pack_cube(node, &mut packed);
                     (*pos, *size, packed)
                 })
                 .collect::<Vec<_>>()
@@ -74,8 +72,7 @@ impl StoredTrap {
             button_pos: t.button_pos,
             button_size: t.button_size,
             button_orient: t.button_orient,
-            trigger_clipboard: t.trigger_clipboard.clone(),
-            trigger_unpack_len: t.trigger_unpack_len,
+            trigger_payload: t.trigger_payload.clone(),
             trigger_cells: pack_cells(&t.trigger_cells),
             trigger_entities_mod: t
                 .trigger_entities_mod
@@ -92,8 +89,7 @@ impl StoredTrap {
             clip_grid: t.clip_grid,
             time: t.time,
             timeout: t.timeout,
-            reset_clipboard: t.reset_clipboard.clone(),
-            reset_unpack_len: t.reset_unpack_len,
+            reset_payload: t.reset_payload.clone(),
             reset_cells: pack_cells(&t.reset_cells),
             reset_entities_mod: t
                 .reset_entities_mod
@@ -110,7 +106,7 @@ impl StoredTrap {
                 let mut out = Vec::new();
                 for (pos, size, packed) in packed_cells {
                     let mut ptr = 0;
-                    let node = sauer_map::clipboard::unpack_cube(&packed, &mut ptr)?;
+                    let node = sauer_proto::data::clipboard::unpack_cube(&packed, &mut ptr)?;
                     out.push((pos, size, node));
                 }
                 Some(out)
@@ -119,8 +115,7 @@ impl StoredTrap {
             button_pos: self.button_pos,
             button_size: self.button_size,
             button_orient: self.button_orient,
-            trigger_clipboard: self.trigger_clipboard,
-            trigger_unpack_len: self.trigger_unpack_len,
+            trigger_payload: self.trigger_payload,
             trigger_cells: unpack_cells(self.trigger_cells)?,
             trigger_entities_mod: self
                 .trigger_entities_mod
@@ -137,8 +132,7 @@ impl StoredTrap {
             clip_grid: self.clip_grid,
             time: self.time,
             timeout: self.timeout,
-            reset_clipboard: self.reset_clipboard,
-            reset_unpack_len: self.reset_unpack_len,
+            reset_payload: self.reset_payload,
             reset_cells: unpack_cells(self.reset_cells).unwrap_or_default(),
             reset_entities_mod: self
                 .reset_entities_mod
@@ -156,7 +150,7 @@ impl StoredTrap {
     pub fn apply_reset_to_world(&self, world: &mut sauer_map::World) {
         for (pos, size, packed) in &self.reset_cells {
             let mut ptr = 0;
-            if let Some(node) = sauer_map::clipboard::unpack_cube(packed, &mut ptr) {
+            if let Some(node) = sauer_proto::data::clipboard::unpack_cube(packed, &mut ptr) {
                 world.set_node_at(*pos, *size, node);
             }
         }

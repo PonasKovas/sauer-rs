@@ -97,8 +97,7 @@ impl Server {
             let team = pd.team.clone();
             let clipboard = pd.clipboard.as_ref().map(|cb| ClipboardServer {
                 client_num: other_cn as i32,
-                unpack_len: cb.unpack_len,
-                data: cb.data.clone(),
+                payload: cb.payload.clone(),
             });
             drop(pd);
 

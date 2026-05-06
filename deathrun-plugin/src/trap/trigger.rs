@@ -17,7 +17,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
     if trap.is_active {
         return;
     }
-    if trap.trigger_clipboard.is_empty()
+    if trap.trigger_payload.is_none()
         && trap.trigger_entities_mod.is_empty()
         && trap.trigger_entities_add.is_empty()
     {
@@ -26,8 +26,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
     trap.is_active = true;
 
-    let trigger_clipboard = trap.trigger_clipboard.clone();
-    let trigger_unpack_len = trap.trigger_unpack_len;
+    let trigger_payload = trap.trigger_payload.clone();
     let trigger_cells = trap.trigger_cells.clone();
     let trigger_entities_mod = trap.trigger_entities_mod.clone();
     let trigger_entities_add = trap.trigger_entities_add.clone();
@@ -140,23 +139,23 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         }
 
         // Snapshot restore data from current (pre-trigger) map state.
-        let (restore_unpack_len, restore_compressed, restore_cells, restore_entities_mod) = {
+        let (restore_payload, restore_cells, restore_entities_mod) = {
             let state = get_server_state(&server_clone).read().unwrap();
             let map = match state.map.as_ref() {
                 Some(m) => m,
                 None => return,
             };
-            let (unpack_len, compressed) = if !trigger_cells.is_empty() {
-                sauer_map::clipboard::generate_clipboard_for_region(
+            let payload = if !trigger_cells.is_empty() {
+                Some(sauer_map::clipboard::generate_clipboard_for_region(
                     &map.world.root,
                     map.world.size,
                     clip_pos,
                     clip_s,
                     clip_grid,
                     &map.meta.vslots,
-                )
+                ))
             } else {
-                (0, Vec::new())
+                None
             };
             let cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
                 .iter()
@@ -177,7 +176,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     r_ents.push((id, ent.clone()));
                 }
             }
-            (unpack_len, compressed, cells, r_ents)
+            (payload, cells, r_ents)
         };
 
         let region_sel = SelInfo {
@@ -205,8 +204,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             &server_clone,
             actor_id,
             &region_sel,
-            trigger_unpack_len,
-            &trigger_clipboard,
+            trigger_payload,
             &trigger_cells,
             &trigger_entities_mod,
             &trigger_entities_add,
@@ -291,8 +289,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     &server_clone,
                     actor_id,
                     &region_sel,
-                    restore_unpack_len,
-                    &restore_compressed,
+                    restore_payload.clone(),
                     &restore_cells,
                     &final_restore_ents,
                     &[],
@@ -350,8 +347,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 &server_clone,
                 actor_id,
                 &region_sel,
-                restore_unpack_len,
-                &restore_compressed,
+                restore_payload.clone(),
                 &restore_cells,
                 &final_restore_ents,
                 &[],
@@ -434,8 +430,7 @@ pub fn apply_and_broadcast(
     server: &std::sync::Arc<Server>,
     actor_id: u64,
     sel: &SelInfo,
-    unpack_len: i32,
-    data: &[u8],
+    payload: Option<sauer_proto::data::ClipboardPayload>,
     cells: &[([i32; 3], i32, sauer_map::Node)],
     entities_mod: &[(usize, ogz_rs::data::Entity)],
     entities_add: &[ogz_rs::data::Entity],
@@ -490,12 +485,12 @@ pub fn apply_and_broadcast(
 
     let actor_cn = crate::SERVER_BOT_CN as i32;
 
-    if !data.is_empty() {
+    if let Some(payload) = payload {
         server.broadcast_chan1(&Client {
             client_num: actor_cn,
             packet: channel1::DelCube { sel: sel.clone() },
         });
-        crate::geo_sync::broadcast_geometry(server, actor_cn, sel, unpack_len, data);
+        crate::geo_sync::broadcast_geometry(server, actor_cn, sel, payload);
     }
 
     let mut batch = Vec::new();

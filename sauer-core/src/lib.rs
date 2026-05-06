@@ -333,12 +333,14 @@ impl Cube {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VSlotParam {
     pub name: CubeString,
     pub values: [f32; 4],
 }
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VSlot {
     pub prev: i32,
     pub params: Vec<VSlotParam>,
@@ -431,6 +433,7 @@ impl TryFrom<EntityType> for ItemType {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Entity {
     pub position: [f32; 3],
     pub attrs: [i16; 5],

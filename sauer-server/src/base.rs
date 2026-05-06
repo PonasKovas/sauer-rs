@@ -767,7 +767,7 @@ impl<P: Plugin> Plugin for Base<P> {
             },
         );
 
-        let clipboard_packets: Vec<(i32, i32, Vec<u8>)> = server
+        let clipboard_packets: Vec<(i32, sauer_proto::data::ClipboardPayload)> = server
             .players
             .map
             .iter()
@@ -778,17 +778,16 @@ impl<P: Plugin> Plugin for Base<P> {
                     e.value()
                         .clipboard
                         .as_ref()
-                        .map(|cb| (cn as i32, cb.unpack_len, cb.data.clone()))
+                        .map(|cb| (cn as i32, cb.payload.clone()))
                 })
             })
             .collect();
-        for (owner_cn, unpack_len, data) in clipboard_packets {
+        for (owner_cn, payload) in clipboard_packets {
             server.send_chan1(
                 id,
                 &ClipboardServer {
                     client_num: owner_cn,
-                    unpack_len,
-                    data,
+                    payload,
                 },
             );
         }
@@ -1066,8 +1065,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 id,
                 &UndoServer {
                     client_num: cn as i32,
-                    unpack_len: packet.unpack_len,
-                    data: packet.data.clone(),
+                    payload: packet.payload.clone(),
                 },
             );
         }
@@ -1083,8 +1081,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 id,
                 &RedoServer {
                     client_num: cn as i32,
-                    unpack_len: packet.unpack_len,
-                    data: packet.data.clone(),
+                    payload: packet.payload.clone(),
                 },
             );
         }
@@ -1141,8 +1138,7 @@ impl<P: Plugin> Plugin for Base<P> {
             return;
         }
 
-        let pack_len = packet.data.len();
-        if pack_len == 0 || pack_len > (1 << 16) || packet.unpack_len <= 0 {
+        if packet.payload.nodes.is_empty() {
             if let Some(mut p) = server.players.try_get_mut(id) {
                 p.clipboard = None;
             }
@@ -1151,8 +1147,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         if let Some(mut p) = server.players.try_get_mut(id) {
             p.clipboard = Some(ClipboardData {
-                unpack_len: packet.unpack_len,
-                data: packet.data.clone(),
+                payload: packet.payload.clone(),
             });
         }
 
@@ -1161,8 +1156,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 id,
                 &ClipboardServer {
                     client_num: cn as i32,
-                    unpack_len: packet.unpack_len,
-                    data: packet.data.clone(),
+                    payload: packet.payload.clone(),
                 },
             );
         }

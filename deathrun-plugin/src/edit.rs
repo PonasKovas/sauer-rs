@@ -745,38 +745,17 @@ impl Plugin for DeathrunEdit {
                 }
             });
 
-            let mut uncompressed = Vec::new();
-            for val in [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z] {
-                uncompressed.extend_from_slice(&val.to_le_bytes());
-            }
-            for val in [packet.sel.s.x, packet.sel.s.y, packet.sel.s.z] {
-                uncompressed.extend_from_slice(&val.to_le_bytes());
-            }
-            uncompressed.extend_from_slice(&packet.sel.grid.to_le_bytes());
-            uncompressed.extend_from_slice(&(packet.sel.orient as i32).to_le_bytes());
+            let vslots = sauer_map::clipboard::extract_vslots(&extracted_nodes, &state.meta.vslots);
 
-            for node in extracted_nodes.iter() {
-                sauer_map::clipboard::pack_cube(node, &mut uncompressed);
-            }
-
-            sauer_map::clipboard::pack_vslots(
-                &extracted_nodes,
-                &state.meta.vslots,
-                &mut uncompressed,
-            );
-
-            use flate2::{Compression, write::ZlibEncoder};
-            use std::io::Write;
-            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
-            encoder.write_all(&uncompressed).unwrap();
-
-            if let Ok(compressed) = encoder.finish() {
-                if let Some(mut p) = server.players.try_get_mut(id) {
-                    p.clipboard = Some(sauer_server::ClipboardData {
-                        unpack_len: uncompressed.len() as i32,
-                        data: compressed,
-                    });
-                }
+            if let Some(mut p) = server.players.try_get_mut(id) {
+                p.clipboard = Some(sauer_server::ClipboardData {
+                    payload: sauer_proto::data::ClipboardPayload {
+                        unpack_len: 0,
+                        sel: packet.sel.clone(),
+                        nodes: extracted_nodes,
+                        vslots,
+                    }
+                });
             }
         }
 
@@ -799,41 +778,37 @@ impl Plugin for DeathrunEdit {
 
         if let Some(p) = server.players.try_get(id) {
             if let Some(cb) = &p.clipboard {
-                let cb_data = cb.data.clone();
-                with_map_state_mut(ctx, |state| state.handle_paste(packet, &cb_data));
+                let payload = cb.payload.clone();
+                with_map_state_mut(ctx, |state| state.handle_paste(packet, &payload));
 
-                if let Some((cb_sel, _)) = sauer_map::clipboard::decode_clipboard(&cb_data) {
-                    let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-                    let max = [
-                        min[0] + cb_sel.s[0] * packet.sel.grid,
-                        min[1] + cb_sel.s[1] * packet.sel.grid,
-                        min[2] + cb_sel.s[2] * packet.sel.grid,
-                    ];
-                    crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-                        crate::trap::intersects_bounds(min, max, trap)
-                    });
-                    return;
-                }
+                let cb_sel = &payload.sel;
+                let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+                let max = [
+                    min[0] + cb_sel.s.x * packet.sel.grid,
+                    min[1] + cb_sel.s.y * packet.sel.grid,
+                    min[2] + cb_sel.s.z * packet.sel.grid,
+                ];
+                crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+                    crate::trap::intersects_bounds(min, max, trap)
+                });
+                return;
             }
         }
         crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
-        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
+        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.payload));
 
-        if let Some((sel, _)) = sauer_map::clipboard::decode_undo(&packet.data) {
-            let max = [
-                sel.o.x + sel.s.x * sel.grid,
-                sel.o.y + sel.s.y * sel.grid,
-                sel.o.z + sel.s.z * sel.grid,
-            ];
-            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-                crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
-            });
-        } else {
-            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
-        }
+        let sel = &packet.payload.sel;
+        let max = [
+            sel.o.x + sel.s.x * sel.grid,
+            sel.o.y + sel.s.y * sel.grid,
+            sel.o.z + sel.s.z * sel.grid,
+        ];
+        crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
+        });
     }
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
@@ -876,19 +851,16 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
-        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.data));
+        with_map_state_mut(ctx, |state| state.handle_undo_redo(&packet.payload));
 
-        if let Some((sel, _)) = sauer_map::clipboard::decode_undo(&packet.data) {
-            let max = [
-                sel.o.x + sel.s.x * sel.grid,
-                sel.o.y + sel.s.y * sel.grid,
-                sel.o.z + sel.s.z * sel.grid,
-            ];
-            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-                crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
-            });
-        } else {
-            crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
-        }
+        let sel = &packet.payload.sel;
+        let max = [
+            sel.o.x + sel.s.x * sel.grid,
+            sel.o.y + sel.s.y * sel.grid,
+            sel.o.z + sel.s.z * sel.grid,
+        ];
+        crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
+            crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
+        });
     }
 }

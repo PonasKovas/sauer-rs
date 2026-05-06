@@ -115,7 +115,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     // correct vslot indices and the internal cavity; corner animation then pushes edges on clients.
     let button_node =
         sauer_map::octree::extract_node_at(&map.world.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
-    let (clip_unpack_len, clip_data) =
+    let clip_payload =
         sauer_map::clipboard::generate_clipboard(&button_node, BUTTON_SIZE, &map.meta.vslots);
 
     let sel = Selection {
@@ -146,8 +146,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         button_pos: adj,
         button_size: BUTTON_SIZE,
         button_orient: hit_orient,
-        trigger_clipboard: Vec::new(),
-        trigger_unpack_len: 0,
+        trigger_payload: None,
         trigger_cells: Vec::new(),
         trigger_entities_mod: Vec::new(),
         trigger_entities_add: Vec::new(),
@@ -156,8 +155,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         clip_grid: 1,
         time: 2000,
         timeout: 20000,
-        reset_clipboard: Vec::new(),
-        reset_unpack_len: 0,
+        reset_payload: None,
         reset_cells: Vec::new(),
         reset_entities_mod: Vec::new(),
         is_active: false,
@@ -180,7 +178,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
             sel: adj_sel.clone(),
         },
     });
-    crate::geo_sync::broadcast_geometry(&server, target_cn, &adj_sel, clip_unpack_len, &clip_data);
+    crate::geo_sync::broadcast_geometry(&server, target_cn, &adj_sel, clip_payload);
 
     tokio::spawn(async move {
         use tokio::time::{Duration, sleep};
@@ -481,7 +479,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         let trap = &state.traps[trap_idx];
         let original_map = state.map.clone().unwrap();
 
-        let trigger_data = if !trap.trigger_clipboard.is_empty()
+        let trigger_data = if trap.trigger_payload.is_some()
             || !trap.trigger_entities_mod.is_empty()
             || !trap.trigger_entities_add.is_empty()
         {
@@ -489,8 +487,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
                 trap.trigger_cells.clone(),
                 trap.trigger_entities_mod.clone(),
                 trap.trigger_entities_add.clone(),
-                trap.trigger_clipboard.clone(),
-                trap.trigger_unpack_len,
+                trap.trigger_payload.clone(),
                 trap.clip_pos,
                 trap.clip_s,
                 trap.clip_grid,
@@ -506,8 +503,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         trigger_cells,
         trigger_entities_mod,
         trigger_entities_add,
-        trigger_clipboard,
-        trigger_unpack_len,
+        trigger_payload,
         clip_pos,
         clip_s,
         clip_grid,
@@ -550,8 +546,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         server,
         id,
         &region_sel,
-        trigger_unpack_len,
-        &trigger_clipboard,
+        trigger_payload,
         &trigger_cells,
         &trigger_entities_mod,
         &trigger_entities_add,
@@ -717,13 +712,11 @@ pub fn cmd_endtrap(ctx: &Context) {
         clip_pos,
         clip_s,
         clip_grid,
-        trigger_unpack_len,
-        trigger_compressed,
-        restore_unpack_len,
-        restore_compressed,
+        trigger_payload,
+        restore_payload,
     ) = if !trigger_cells.is_empty() {
         // Trigger clipboard from the post-edit map (tight bounds only).
-        let (cp, cs, cg, tul, tc) = sauer_map::clipboard::generate_region_clipboard(
+        let (cp, cs, cg, tc) = sauer_map::clipboard::generate_region_clipboard(
             &current_map.world.root,
             world_size,
             tight_min,
@@ -732,7 +725,7 @@ pub fn cmd_endtrap(ctx: &Context) {
         );
 
         // Restore clipboard from original map (same region dims for consistency).
-        let (rul, rc) = sauer_map::clipboard::generate_clipboard_for_region(
+        let rc = sauer_map::clipboard::generate_clipboard_for_region(
             &edit_state.original_map.world.root,
             world_size,
             cp,
@@ -741,9 +734,9 @@ pub fn cmd_endtrap(ctx: &Context) {
             &edit_state.original_map.meta.vslots,
         );
 
-        (cp, cs, cg, tul, tc, rul, rc)
+        (cp, cs, cg, Some(tc), Some(rc))
     } else {
-        ([0; 3], [0; 3], 1, 0, Vec::new(), 0, Vec::new())
+        ([0; 3], [0; 3], 1, None, None)
     };
 
     // Collect trigger entities (post-edit state).
@@ -798,11 +791,10 @@ pub fn cmd_endtrap(ctx: &Context) {
         button_pos: state.traps[edit_state.trap_idx].button_pos,
         button_size: state.traps[edit_state.trap_idx].button_size,
         button_orient: state.traps[edit_state.trap_idx].button_orient,
-        trigger_clipboard: trigger_compressed.clone(),
-        trigger_unpack_len,
+        trigger_payload: trigger_payload.clone(),
         trigger_cells: trigger_cells.iter().map(|(pos, size, node)| {
             let mut packed = Vec::new();
-            sauer_map::clipboard::pack_cube(node, &mut packed);
+            sauer_proto::data::clipboard::pack_cube(node, &mut packed);
             (*pos, *size, packed)
         }).collect(),
         trigger_entities_mod: trigger_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
@@ -812,11 +804,10 @@ pub fn cmd_endtrap(ctx: &Context) {
         clip_grid,
         time: state.traps[edit_state.trap_idx].time,
         timeout: state.traps[edit_state.trap_idx].timeout,
-        reset_clipboard: restore_compressed.clone(),
-        reset_unpack_len: restore_unpack_len,
+        reset_payload: restore_payload.clone(),
         reset_cells: reset_cells.iter().map(|(pos, size, node)| {
             let mut packed = Vec::new();
-            sauer_map::clipboard::pack_cube(node, &mut packed);
+            sauer_proto::data::clipboard::pack_cube(node, &mut packed);
             (*pos, *size, packed)
         }).collect(),
         reset_entities_mod: reset_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
@@ -846,16 +837,14 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
         
         let trap = &mut state.traps[edit_state.trap_idx];
-        trap.trigger_clipboard = trigger_compressed;
-        trap.trigger_unpack_len = trigger_unpack_len;
+        trap.trigger_payload = trigger_payload;
         trap.trigger_cells = trigger_cells.clone();
         trap.trigger_entities_mod = trigger_entities_mod;
         trap.trigger_entities_add = trigger_entities_add;
         trap.clip_pos = clip_pos;
         trap.clip_s = clip_s;
         trap.clip_grid = clip_grid;
-        trap.reset_clipboard = restore_compressed.clone();
-        trap.reset_unpack_len = restore_unpack_len;
+        trap.reset_payload = restore_payload.clone();
         trap.reset_cells = reset_cells;
         trap.reset_entities_mod = reset_entities_mod;
     }
@@ -894,8 +883,7 @@ pub fn cmd_endtrap(ctx: &Context) {
             server,
             target_cn,
             &region_sel,
-            restore_unpack_len,
-            &restore_compressed,
+            restore_payload.unwrap(),
         );
     }
 

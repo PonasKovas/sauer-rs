@@ -9,9 +9,9 @@ use crate::internal::{
     SauerRead, SauerWrite, check_tag,
     constants::*,
     primitives::{
-        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data, read_varint_pref_data,
+        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data,
         read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq, write_short_pref_data,
-        write_varint_pref_data, write_varint_pref_seq,
+        write_varint_pref_seq,
         read_short_pref_vslot_delta, write_short_pref_vslot_delta,
     },
 };
@@ -590,24 +590,21 @@ make_struct!(
 /// `N_CLIPBOARD` Pushes map clipboard data (for cooperative editing) to the client.
 [N_CLIPBOARD] ClipboardServer {
     client_num: i32,
-    unpack_len: i32,
-    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+    payload: ClipboardPayload,
 });
 
 make_struct!(
 /// `N_UNDO` Sends geometry undo data to the client.
 [N_UNDO] UndoServer {
     client_num: i32,
-    unpack_len: i32,
-    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+    payload: UndoPayload,
 });
 
 make_struct!(
 /// `N_REDO` Sends geometry redo data to the client.
 [N_REDO] RedoServer {
     client_num: i32,
-    unpack_len: i32,
-    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+    payload: UndoPayload,
 });
 
 make_struct!(
@@ -1270,22 +1267,19 @@ make_struct!(
 make_struct!(
 /// `N_CLIPBOARD` Coop Edit: Uploads raw clipboard geometry data.
 [N_CLIPBOARD] ClipboardClient {
-    unpack_len: i32,
-    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+    payload: ClipboardPayload,
 });
 
 make_struct!(
 /// `N_UNDO` Coop Edit: Undo event.
 [N_UNDO] UndoClient {
-    unpack_len: i32,
-    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+    payload: UndoPayload,
 });
 
 make_struct!(
 /// `N_REDO` Coop Edit: Redo event.
 [N_REDO] RedoClient {
-    unpack_len: i32,
-    data: Vec<u8> => write_varint_pref_data, read_varint_pref_data,
+    payload: UndoPayload,
 });
 
 /// `N_BASES` Sends the list of capture base spawns to the server (Capture / Regen Capture).

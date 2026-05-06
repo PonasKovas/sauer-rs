@@ -8,6 +8,7 @@ sauer-core = { path = "../sauer-core", features = ["serde"] }
 num_enum.workspace = true
 thiserror.workspace = true
 cube-string.workspace = true
+flate2.workspace = true
 
 mlua = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

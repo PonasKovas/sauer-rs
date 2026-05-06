@@ -290,19 +290,15 @@ impl MapState {
         self.invalidate_cache();
     }
 
-    pub fn handle_paste(&mut self, packet: &channel1::PasteClient, clipboard_data: &[u8]) {
-        if let Some((cb_sel, nodes)) = sauer_map::clipboard::decode_clipboard(clipboard_data) {
-            let mut paste_sel = packet.sel.clone();
-            paste_sel.s = cb_sel.s;
-            paste_sel.orient = cb_sel.orient;
-            self.apply_block(&paste_sel, nodes, true);
-        }
+    pub fn handle_paste(&mut self, packet: &channel1::PasteClient, payload: &sauer_proto::data::ClipboardPayload) {
+        let mut paste_sel = packet.sel.clone();
+        paste_sel.s = payload.sel.s;
+        paste_sel.orient = payload.sel.orient;
+        self.apply_block(&paste_sel, payload.nodes.clone(), true);
     }
 
-    pub fn handle_undo_redo(&mut self, data: &[u8]) {
-        if let Some((sel, nodes)) = sauer_map::clipboard::decode_undo(data) {
-            self.apply_block(&sel, nodes, false);
-        }
+    pub fn handle_undo_redo(&mut self, payload: &sauer_proto::data::UndoPayload) {
+        self.apply_block(&payload.sel, payload.nodes.clone(), false);
     }
 
     pub fn handle_edit_v_slot(&mut self, packet: &channel1::EditVSlot) {
@@ -326,9 +322,7 @@ pub struct Trap {
     pub button_size: i32,
     pub button_orient: u8,
 
-    /// Pre-compressed clipboard for the triggered geometry.
-    pub trigger_clipboard: Vec<u8>,
-    pub trigger_unpack_len: i32,
+    pub trigger_payload: Option<sauer_proto::data::ClipboardPayload>,
 
     /// Per-cell changes — used for accurate server-map updates (no region collateral).
     pub trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
@@ -350,8 +344,7 @@ pub struct Trap {
     /// Base-state geometry — what to restore when resetting from an active trap.
     /// Populated by `cmd_endtrap`; mirrors the original map's cells/entities for
     /// the trap region so a save-while-active can be correctly recovered on load.
-    pub reset_clipboard: Vec<u8>,
-    pub reset_unpack_len: i32,
+    pub reset_payload: Option<sauer_proto::data::ClipboardPayload>,
     pub reset_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
     pub reset_entities_mod: Vec<(usize, ogz_rs::data::Entity)>,
 

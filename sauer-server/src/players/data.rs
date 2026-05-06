@@ -4,8 +4,7 @@ use sauer_proto::data::{ClientState, PlayerModel, PlayerState, Privilege, Vec3};
 /// Stored clipboard geometry data for coop edit clipboard relay.
 #[derive(Clone, Debug)]
 pub struct ClipboardData {
-    pub unpack_len: i32,
-    pub data: Vec<u8>,
+    pub payload: sauer_proto::data::ClipboardPayload,
 }
 
 #[derive(Clone, Debug)]

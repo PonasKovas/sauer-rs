@@ -13,8 +13,10 @@ mod edit_var_value;
 mod flag_state;
 pub(crate) mod vec3;
 pub mod vslot_delta;
+pub mod clipboard;
 
 pub use base_info::BaseInfo;
+pub use clipboard::{ClipboardPayload, UndoPayload};
 pub use base_spawn::BaseSpawn;
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
