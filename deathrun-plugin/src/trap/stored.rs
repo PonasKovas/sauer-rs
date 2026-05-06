@@ -225,7 +225,18 @@ pub fn sync_traps_to_map(server: &std::sync::Arc<Server>, _owner_id: u64) {
 
     let mut total_bytes = 0;
     for pkt in &packets_to_send {
-        total_bytes += pkt.extra_data.len();
+        let delta = &pkt.extra_data;
+        for p in &delta.params {
+            total_bytes += 1 + p.name.len() + 1 + 16;
+        }
+        if delta.scale.is_some() { total_bytes += 5; }
+        if delta.rotation.is_some() { total_bytes += 5; }
+        if delta.offset.is_some() { total_bytes += 9; }
+        if delta.scroll.is_some() { total_bytes += 9; }
+        if delta.layer.is_some() { total_bytes += 5; }
+        if delta.alpha.is_some() { total_bytes += 9; }
+        if delta.color.is_some() { total_bytes += 13; }
+        total_bytes += 1; // 0xFF
     }
 
     if total_bytes > 0 {

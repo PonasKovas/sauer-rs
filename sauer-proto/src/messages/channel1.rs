@@ -12,6 +12,7 @@ use crate::internal::{
         read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data, read_varint_pref_data,
         read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq, write_short_pref_data,
         write_varint_pref_data, write_varint_pref_seq,
+        read_short_pref_vslot_delta, write_short_pref_vslot_delta,
     },
 };
 use crate::route::{C2S, Chan1, S2C};
@@ -391,7 +392,7 @@ make_struct!(
     sel: SelInfo,
     delta: i32,
     all_faces: bool,
-    extra_data: Vec<u8> => write_short_pref_data, read_short_pref_data,
+    extra_data: data::VSlotDelta => write_short_pref_vslot_delta, read_short_pref_vslot_delta,
 });
 
 make_struct!(

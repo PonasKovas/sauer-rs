@@ -659,7 +659,17 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
-        crate::map_state::track_vslot_bloat(ctx.server(), packet.extra_data.len());
+        let delta = &packet.extra_data;
+        let mut size = 1;
+        for p in &delta.params { size += 1 + p.name.len() + 1 + 16; }
+        if delta.scale.is_some() { size += 5; }
+        if delta.rotation.is_some() { size += 5; }
+        if delta.offset.is_some() { size += 9; }
+        if delta.scroll.is_some() { size += 9; }
+        if delta.layer.is_some() { size += 5; }
+        if delta.alpha.is_some() { size += 9; }
+        if delta.color.is_some() { size += 13; }
+        crate::map_state::track_vslot_bloat(ctx.server(), size);
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         with_map_state_mut(ctx, |state| state.handle_edit_v_slot(packet));
         check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {

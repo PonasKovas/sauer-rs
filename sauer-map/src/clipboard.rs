@@ -23,89 +23,49 @@ pub fn pack_cube(node: &Node, out: &mut Vec<u8>) {
     }
 }
 
-fn write_putint(out: &mut Vec<u8>, n: i32) {
-    if n < 128 && n > -127 {
-        out.push(n as u8);
-    } else if n < 0x8000 && n >= -0x8000 {
-        out.push(0x80);
-        out.push(n as u8);
-        out.push((n >> 8) as u8);
-    } else {
-        out.push(0x81);
-        out.push(n as u8);
-        out.push((n >> 8) as u8);
-        out.push((n >> 16) as u8);
-        out.push((n >> 24) as u8);
-    }
-}
-
-fn write_putuint(out: &mut Vec<u8>, n: i32) {
-    if n < 0 || n >= (1 << 21) {
-        out.push(0x80 | (n as u8 & 0x7F));
-        out.push(0x80 | ((n >> 7) as u8 & 0x7F));
-        out.push(0x80 | ((n >> 14) as u8 & 0x7F));
-        out.push((n >> 21) as u8);
-    } else if n < (1 << 7) {
-        out.push(n as u8);
-    } else if n < (1 << 14) {
-        out.push(0x80 | (n as u8 & 0x7F));
-        out.push((n >> 7) as u8);
-    } else {
-        out.push(0x80 | (n as u8 & 0x7F));
-        out.push(0x80 | ((n >> 7) as u8 & 0x7F));
-        out.push((n >> 14) as u8);
-    }
-}
-
-fn write_sendstring(out: &mut Vec<u8>, s: &cube_string::CubeString) {
-    for &c in s.as_bytes() {
-        write_putint(out, c as i32);
-    }
-    write_putint(out, 0);
-}
-
 fn pack_vslot(out: &mut Vec<u8>, vs: &VSlot) {
+    use sauer_core::io::{putint, putuint, putfloat, putstring};
     if !vs.params.is_empty() {
         for p in &vs.params {
             out.push(0);
-            write_sendstring(out, &p.name);
+            putstring(out, p.name.as_bytes());
             for i in 0..4 {
-                out.extend_from_slice(&p.values[i].to_le_bytes());
+                putfloat(out, p.values[i]);
             }
         }
     }
     if let Some(scale) = vs.scale {
         out.push(1);
-        out.extend_from_slice(&scale.to_le_bytes());
+        putfloat(out, scale);
     }
     if let Some(rotation) = vs.rotation {
         out.push(2);
-        write_putint(out, rotation);
+        putint(out, rotation);
     }
     if let Some(offset) = vs.offset {
         out.push(3);
-        write_putint(out, offset.0);
-        write_putint(out, offset.1);
+        putint(out, offset.0);
+        putint(out, offset.1);
     }
     if let Some(scroll) = vs.scroll {
         out.push(4);
-        out.extend_from_slice(&scroll.0.to_le_bytes());
-        out.extend_from_slice(&scroll.1.to_le_bytes());
+        putfloat(out, scroll.0);
+        putfloat(out, scroll.1);
     }
     if let Some(layer) = vs.layer {
         out.push(5);
-        write_putuint(out, layer);
+        putuint(out, layer);
     }
     if let Some(alpha) = vs.alpha {
         out.push(6);
-        out.extend_from_slice(&alpha.0.to_le_bytes());
-        out.extend_from_slice(&alpha.1.to_le_bytes());
+        putfloat(out, alpha.0);
+        putfloat(out, alpha.1);
     }
     if let Some(color) = vs.color {
         out.push(7);
-        out.extend_from_slice(&color.0.to_le_bytes());
-        out.extend_from_slice(&color.1.to_le_bytes());
-        out.extend_from_slice(&color.2.to_le_bytes());
+        putfloat(out, color.0);
+        putfloat(out, color.1);
+        putfloat(out, color.2);
     }
     out.push(0xFF);
 }

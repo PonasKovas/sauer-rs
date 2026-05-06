@@ -101,6 +101,13 @@ pub fn getfloat(reader: &mut &[u8]) -> Option<f32> {
     Some(f32::from_le_bytes(s))
 }
 
+pub fn putstring(out: &mut Vec<u8>, s: &[u8]) {
+    for &c in s {
+        putint(out, c as i32);
+    }
+    putint(out, 0);
+}
+
 pub fn getstring(reader: &mut &[u8]) -> Option<CubeString> {
     let mut string_bytes = Vec::new();
     loop {

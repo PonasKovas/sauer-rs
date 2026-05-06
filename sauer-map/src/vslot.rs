@@ -1,148 +1,5 @@
-use cube_string::CubeString;
 use ogz_rs::data::{VSlot, VSlotParam};
-
-pub struct PackedVSlot {
-    pub params: Vec<(CubeString, [f32; 4])>,
-    pub scale: Option<f32>,
-    pub rotation: Option<i32>,
-    pub offset: Option<(i32, i32)>,
-    pub scroll: Option<(f32, f32)>,
-    pub layer: Option<i32>,
-    pub alpha: Option<(f32, f32)>,
-    pub color: Option<(f32, f32, f32)>,
-}
-
-fn read_varint(data: &[u8], pos: &mut usize) -> Option<i32> {
-    if *pos >= data.len() {
-        return None;
-    }
-    let c = data[*pos] as i8;
-    *pos += 1;
-    match c {
-        -128 => {
-            if *pos + 2 > data.len() {
-                return None;
-            }
-            let v = i16::from_le_bytes([data[*pos], data[*pos + 1]]) as i32;
-            *pos += 2;
-            Some(v)
-        }
-        -127 => {
-            if *pos + 4 > data.len() {
-                return None;
-            }
-            let v = i32::from_le_bytes(data[*pos..*pos + 4].try_into().ok()?);
-            *pos += 4;
-            Some(v)
-        }
-        _ => Some(c as i32),
-    }
-}
-
-fn read_f32_le(data: &[u8], pos: &mut usize) -> Option<f32> {
-    if *pos + 4 > data.len() {
-        return None;
-    }
-    let v = f32::from_le_bytes(data[*pos..*pos + 4].try_into().ok()?);
-    *pos += 4;
-    Some(v)
-}
-
-fn read_sendstring(data: &[u8], pos: &mut usize) -> Option<CubeString> {
-    let mut bytes = Vec::new();
-    loop {
-        let c = read_varint(data, pos)? as u8;
-        if c == 0 {
-            break;
-        }
-        bytes.push(c);
-    }
-    Some(CubeString::from_bytes(bytes))
-}
-
-fn read_getuint(data: &[u8], pos: &mut usize) -> Option<i32> {
-    let b0 = *data.get(*pos)? as i32;
-    *pos += 1;
-    if b0 & 0x80 == 0 {
-        return Some(b0);
-    }
-    let b1 = *data.get(*pos)? as i32;
-    *pos += 1;
-    let mut n = b0 + (b1 << 7) - 0x80;
-    if n & (1 << 14) != 0 {
-        let b2 = *data.get(*pos)? as i32;
-        *pos += 1;
-        n += (b2 << 14) - (1 << 14);
-    }
-    if n & (1 << 21) != 0 {
-        let b3 = *data.get(*pos)? as i32;
-        *pos += 1;
-        n += (b3 << 21) - (1 << 21);
-    }
-    if n & (1 << 28) != 0 {
-        n |= !0i32 << 28;
-    }
-    Some(n)
-}
-
-pub fn parse_packed_vslot(data: &[u8]) -> Option<PackedVSlot> {
-    let mut pos = 0;
-    let mut params = Vec::new();
-    let mut scale = None;
-    let mut rotation = None;
-    let mut offset = None;
-    let mut scroll = None;
-    let mut layer = None;
-    let mut alpha = None;
-    let mut color = None;
-
-    loop {
-        if pos >= data.len() {
-            break;
-        }
-        let type_byte = data[pos];
-        pos += 1;
-        if type_byte >= 0x80 {
-            break;
-        }
-        match type_byte {
-            0 => {
-                let name = read_sendstring(data, &mut pos)?;
-                let vals = [
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                ];
-                params.push((name, vals));
-            }
-            1 => scale = Some(read_f32_le(data, &mut pos)?),
-            2 => rotation = Some(read_varint(data, &mut pos)?),
-            3 => offset = Some((read_varint(data, &mut pos)?, read_varint(data, &mut pos)?)),
-            4 => scroll = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?)),
-            5 => layer = Some(read_getuint(data, &mut pos)?),
-            6 => alpha = Some((read_f32_le(data, &mut pos)?, read_f32_le(data, &mut pos)?)),
-            7 => {
-                color = Some((
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                    read_f32_le(data, &mut pos)?,
-                ))
-            }
-            _ => return None,
-        }
-    }
-    Some(PackedVSlot {
-        params,
-        scale,
-        rotation,
-        offset,
-        scroll,
-        layer,
-        alpha,
-        color,
-    })
-}
+use sauer_proto::data::VSlotDelta;
 
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
     let mut current = idx as i32;
@@ -178,7 +35,7 @@ pub fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
 pub fn resolve_vslot(
     vslots: &mut Vec<Option<VSlot>>,
     base_tex: u16,
-    ds: &PackedVSlot,
+    ds: &VSlotDelta,
     delta: bool,
 ) -> u16 {
     if vslots.len() <= base_tex as usize {
@@ -194,7 +51,7 @@ pub fn resolve_vslot(
     let mut new_vs = existing.clone();
 
     let is_trap_payload = ds.params.iter().any(|p| {
-        let b = p.0.as_bytes();
+        let b = p.name.as_bytes();
         !b.is_empty() && b[0] == 1
     });
 
@@ -206,13 +63,13 @@ pub fn resolve_vslot(
 
     if !ds.params.is_empty() {
         if delta {
-            for (n, v) in &ds.params {
-                if let Some(p) = new_vs.params.iter_mut().find(|p| p.name == *n) {
-                    p.values = *v;
+            for p_delta in &ds.params {
+                if let Some(p) = new_vs.params.iter_mut().find(|p| p.name == p_delta.name) {
+                    p.values = p_delta.values;
                 } else {
                     new_vs.params.push(VSlotParam {
-                        name: n.clone(),
-                        values: *v,
+                        name: p_delta.name.clone(),
+                        values: p_delta.values,
                     });
                 }
             }
@@ -220,9 +77,9 @@ pub fn resolve_vslot(
             new_vs.params = ds
                 .params
                 .iter()
-                .map(|(n, v)| VSlotParam {
-                    name: n.clone(),
-                    values: *v,
+                .map(|p_delta| VSlotParam {
+                    name: p_delta.name.clone(),
+                    values: p_delta.values,
                 })
                 .collect();
         }

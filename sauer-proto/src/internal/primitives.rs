@@ -138,6 +138,18 @@ pub(crate) fn write_short_pref_data(val: &Vec<u8>, out: &mut Vec<u8>) {
     out.extend_from_slice(val);
 }
 
+pub(crate) fn read_short_pref_vslot_delta(reader: &mut &[u8]) -> Result<crate::data::VSlotDelta, ParseError> {
+    let data = read_short_pref_data(reader)?;
+    let mut data_reader = data.as_slice();
+    crate::data::VSlotDelta::sauer_read(&mut data_reader)
+}
+
+pub(crate) fn write_short_pref_vslot_delta(val: &crate::data::VSlotDelta, out: &mut Vec<u8>) {
+    let mut temp = Vec::new();
+    val.sauer_write(&mut temp);
+    write_short_pref_data(&temp, out);
+}
+
 // varint length prefixed bytes
 pub(crate) fn read_varint_pref_data(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
     let len = i32::sauer_read(reader)?;

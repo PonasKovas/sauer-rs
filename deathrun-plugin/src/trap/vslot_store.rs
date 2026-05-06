@@ -41,30 +41,11 @@ fn decode_chunk_name(name: &[u8]) -> Option<usize> {
     Some(idx)
 }
 
-fn putint(out: &mut Vec<u8>, n: i32) {
-    if (-126..=127).contains(&n) {
-        out.push(n as u8);
-    } else if (-32768..=32767).contains(&n) {
-        out.push(0x80);
-        out.extend_from_slice(&(n as i16).to_le_bytes());
-    } else {
-        out.push(0x81);
-        out.extend_from_slice(&n.to_le_bytes());
-    }
-}
-
-fn write_sendstring(out: &mut Vec<u8>, data: &[u8]) {
-    for &c in data {
-        putint(out, c as i32);
-    }
-    putint(out, 0);
-}
-
 pub fn encode_payload<T: Serialize>(
     data: &T,
     version: u8,
     domain_id: u8,
-) -> Result<Vec<Vec<u8>>, StoreError> {
+) -> Result<Vec<sauer_proto::data::VSlotDelta>, StoreError> {
     let raw = bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut zlib = Vec::new();
@@ -83,7 +64,7 @@ pub fn encode_payload<T: Serialize>(
 
     let total_chunks = (payload.len() + 15) / 16;
     let mut extra_data_blocks = Vec::new();
-    let mut current_extra = Vec::new();
+    let mut current_delta = sauer_proto::data::VSlotDelta::default();
     let mut chunks_in_block = 0;
 
     for idx in 0..total_chunks {
@@ -92,21 +73,25 @@ pub fn encode_payload<T: Serialize>(
         let mut chunk = [0u8; 16];
         chunk[..end - start].copy_from_slice(&payload[start..end]);
 
-        current_extra.push(0); // VSLOT_SHPARAM
-        write_sendstring(&mut current_extra, &encode_chunk_name(idx));
-        current_extra.extend_from_slice(&chunk);
+        let mut values = [0.0; 4];
+        for i in 0..4 {
+            values[i] = f32::from_le_bytes(chunk[i*4..(i+1)*4].try_into().unwrap());
+        }
+
+        current_delta.params.push(sauer_proto::data::VSlotDeltaParam {
+            name: cube_string::CubeString::from_bytes(encode_chunk_name(idx)),
+            values,
+        });
 
         chunks_in_block += 1;
         if chunks_in_block >= 200 {
             // Increased maximum to efficiently utilize ~5KB packet size limit
-            current_extra.push(0xFF);
-            extra_data_blocks.push(std::mem::take(&mut current_extra));
+            extra_data_blocks.push(std::mem::take(&mut current_delta));
             chunks_in_block = 0;
         }
     }
-    if !current_extra.is_empty() {
-        current_extra.push(0xFF);
-        extra_data_blocks.push(current_extra);
+    if !current_delta.params.is_empty() {
+        extra_data_blocks.push(current_delta);
     }
 
     Ok(extra_data_blocks)

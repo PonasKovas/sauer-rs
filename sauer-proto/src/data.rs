@@ -12,12 +12,14 @@ mod direction;
 mod edit_var_value;
 mod flag_state;
 pub(crate) mod vec3;
+pub mod vslot_delta;
 
 pub use base_info::BaseInfo;
 pub use base_spawn::BaseSpawn;
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
+pub use vslot_delta::{VSlotDelta, VSlotDeltaParam};
 
 pub use sauer_core::{EntityType, ItemType, Orient, Selection as SelInfo, Vec3};
 

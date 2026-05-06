@@ -226,12 +226,9 @@ impl World {
         sel: &Selection,
         all_faces: bool,
         delta: bool,
-        extra_data: &[u8],
+        ds: &sauer_proto::data::VSlotDelta,
         vslots: &mut Vec<Option<VSlot>>,
     ) {
-        let Some(ds) = crate::vslot::parse_packed_vslot(extra_data) else {
-            return;
-        };
         let orient = sel.orient as usize;
 
         fn crushededge(e: u8, dc: usize) -> bool {
@@ -374,7 +371,7 @@ impl World {
 
         let tex_remap: HashMap<u16, u16> = ordered_textures
             .iter()
-            .map(|&t| (t, crate::vslot::resolve_vslot(vslots, t, &ds, delta)))
+            .map(|&t| (t, crate::vslot::resolve_vslot(vslots, t, ds, delta)))
             .collect();
 
         self.edit_sel(sel, |node, _| {

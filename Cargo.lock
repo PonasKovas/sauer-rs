@@ -1640,6 +1640,7 @@ dependencies = [
  "glam",
  "ogz-rs",
  "sauer-core",
+ "sauer-proto",
  "serde",
  "thiserror 2.0.18",
 ]

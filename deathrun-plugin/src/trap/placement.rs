@@ -8,18 +8,6 @@ use sauer_server::Server;
 
 use super::BUTTON_COLOR_READY;
 
-// ─── vslot packing helpers ────────────────────────────────────────────────────
-
-pub fn pack_vslot_bytes(entries: &[(u8, &[u8])]) -> Vec<u8> {
-    let mut buf = Vec::new();
-    for (type_byte, data) in entries {
-        buf.push(*type_byte);
-        buf.extend_from_slice(data);
-    }
-    buf.push(0xFF);
-    buf
-}
-
 // ─── Selection helpers ────────────────────────────────────────────────────────
 
 pub fn get_selections(adj: [i32; 3], button_size: i32, hit_orient: u8) -> (SelInfo, SelInfo) {
@@ -178,31 +166,14 @@ pub fn get_outer_faces_vslot_packets(
     orient: u8,
     color: [f32; 3],
 ) -> Vec<sauer_proto::channel1::EditVSlot> {
-    let color_bytes = color
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect::<Vec<u8>>();
-    let alpha_bytes = [0.8f32, 0.8f32]
-        .iter()
-        .flat_map(|f| f.to_le_bytes())
-        .collect::<Vec<u8>>();
-    let scale_bytes = 2.0f32.to_le_bytes().to_vec();
+    use sauer_proto::data::VSlotDelta;
 
-    let mut data_sides = Vec::new();
-    data_sides.push(7);
-    data_sides.extend_from_slice(&color_bytes);
-    data_sides.push(6);
-    data_sides.extend_from_slice(&alpha_bytes);
-    data_sides.push(0xFF);
+    let mut data_sides = VSlotDelta::default();
+    data_sides.color = Some((color[0], color[1], color[2]));
+    data_sides.alpha = Some((0.8, 0.8));
 
-    let mut data_front = Vec::new();
-    data_front.push(7);
-    data_front.extend_from_slice(&color_bytes);
-    data_front.push(6);
-    data_front.extend_from_slice(&alpha_bytes);
-    data_front.push(1);
-    data_front.extend_from_slice(&scale_bytes);
-    data_front.push(0xFF);
+    let mut data_front = data_sides.clone();
+    data_front.scale = Some(2.0);
 
     let proto_orient = Orient::try_from(orient as i32).unwrap_or(Orient::Left);
 
