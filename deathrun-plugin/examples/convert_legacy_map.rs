@@ -124,7 +124,7 @@ fn main() {
             let st = deathrun_plugin::trap::StoredTrap::from_trap(trap);
             let packets = deathrun_plugin::trap::stored::generate_trap_vslot_packets(&st);
             for p in &packets {
-                map_state.apply_edit_v_slot(p);
+                map_state.apply_vslots(&p.sel, p.all_faces, p.delta != 0, &p.extra_data);
             }
         }
     }

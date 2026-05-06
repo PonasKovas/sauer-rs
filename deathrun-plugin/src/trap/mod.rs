@@ -1,7 +1,6 @@
 use sauer_proto::channel1;
 
 pub mod commands;
-pub mod intersect;
 pub mod placement;
 pub mod stored;
 pub mod trigger;
@@ -10,9 +9,8 @@ pub use commands::{
     cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_trapinfo, cmd_traptime,
     cmd_traptime_print, cmd_traptimeout, cmd_traptimeout_print,
 };
-pub use intersect::{intersects_bounds, intersects_edit_face, intersects_sel};
 pub use placement::{
-    check_and_rebuild_traps, rebuild_all_trap_buttons, reset_button_colors_by_pos,
+    rebuild_all_trap_buttons, reset_button_colors_by_pos,
 };
 pub use stored::{StoredTrap, sync_traps_to_map};
 pub use trigger::trigger_trap;

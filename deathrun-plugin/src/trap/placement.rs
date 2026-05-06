@@ -214,39 +214,17 @@ pub fn build_button_geometry(
     map.set_material(&sel, ogz_rs::data::Material { alpha: true, ..Default::default() });
 
     // 2. Apply appearance VSlots strictly to the 6 outer faces
-    for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
-        map.apply_edit_v_slot(&pkt);
+    for corner in 0..4 {
+        let mut csel = sel.clone();
+        csel.corner = corner;
+        for _ in 0..6 {
+            map.edit_face(&csel, 1, 2);
+        }
     }
-}
 
-// ─── Corner-push animation helpers ───────────────────────────────────────────
-
-pub(super) fn corner_pushes(
-    sel: &SelInfo,
-    corner: i32,
-    cn: i32,
-) -> impl PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>>
-+ sauer_proto::PacketDescriptor
-+ std::fmt::Debug {
-    let pkt = Client {
-        client_num: cn,
-        packet: channel1::EditFace {
-            sel: SelInfo {
-                corner,
-                ..sel.clone()
-            },
-            dir: 1,
-            mode: EditFaceMode::Corner,
-        },
-    };
-    (
-        pkt.clone(),
-        pkt.clone(),
-        pkt.clone(),
-        pkt.clone(),
-        pkt.clone(),
-        pkt,
-    )
+    for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
+        map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
+    }
 }
 
 // ─── Reset button colors ──────────────────────────────────────────────────────
@@ -260,7 +238,7 @@ pub fn reset_button_colors_by_pos(
 ) {
     for &(pos, size, orient) in buttons {
         for pkt in get_outer_faces_vslot_packets(pos, size, orient, BUTTON_COLOR_READY) {
-            map.apply_edit_v_slot(&pkt);
+            map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
         }
     }
 }
@@ -301,131 +279,4 @@ pub fn rebuild_all_trap_buttons(
     map.invalidate_cache();
 }
 
-// ─── Atomic rebuild ───────────────────────────────────────────────────────────
 
-pub(super) fn send_atomic_rebuild(
-    server: &std::sync::Arc<Server>,
-    _owner_id: u64,
-    adj: [i32; 3],
-    button_size: i32,
-    hit_orient: u8,
-    payloads: Vec<sauer_proto::data::ClipboardPayload>,
-) {
-    let target_cn = crate::SERVER_BOT_CN as i32;
-    let (adj_sel, fill_sel) = get_selections(adj, button_size, hit_orient);
-
-    server.broadcast_chan1(&Client {
-        client_num: target_cn,
-        packet: channel1::EditFace {
-            sel: fill_sel,
-            dir: -1,
-            mode: EditFaceMode::Fill,
-        },
-    });
-
-    let s_clone = std::sync::Arc::clone(server);
-    let adj_sel_clone = adj_sel.clone();
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
-        s_clone.broadcast_chan1((
-            corner_pushes(&adj_sel_clone, 0, target_cn),
-            corner_pushes(&adj_sel_clone, 1, target_cn),
-            corner_pushes(&adj_sel_clone, 2, target_cn),
-            corner_pushes(&adj_sel_clone, 3, target_cn),
-        ));
-    });
-}
-
-// ─── check_and_rebuild_traps ──────────────────────────────────────────────────
-
-pub fn check_and_rebuild_traps(
-    server: &std::sync::Arc<Server>,
-    actor_id: u64,
-    intersects: impl Fn(&crate::map_state::Trap) -> bool,
-) {
-    let id = actor_id;
-    let mut state = get_server_state(server).write().unwrap();
-
-    let to_rebuild: Vec<_> = state
-        .traps
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| intersects(t))
-        .map(|(_, t)| crate::map_state::Trap {
-            button_pos: t.button_pos,
-            button_size: t.button_size,
-            button_orient: t.button_orient,
-            trigger_payload: t.trigger_payload.clone(),
-            trigger_cells: t.trigger_cells.clone(),
-            trigger_entities_mod: t.trigger_entities_mod.clone(),
-            trigger_entities_add: t.trigger_entities_add.clone(),
-            clip_pos: t.clip_pos,
-            clip_s: t.clip_s,
-            clip_grid: t.clip_grid,
-            time: t.time,
-            timeout: t.timeout,
-            reset_payload: t.reset_payload.clone(),
-            reset_cells: t.reset_cells.clone(),
-            reset_entities_mod: t.reset_entities_mod.clone(),
-            is_active: t.is_active,
-        })
-        .collect();
-
-    if to_rebuild.is_empty() {
-        return;
-    }
-
-    for trap in to_rebuild {
-        let mut payloads = Vec::new();
-
-        if let Some(map) = state.map.as_mut() {
-            build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
-
-            let min = trap.button_pos;
-            let max = [
-                min[0] + trap.button_size,
-                min[1] + trap.button_size,
-                min[2] + trap.button_size,
-            ];
-            payloads = sauer_map::chunking::chunk_region(map, min, max, 4000);
-
-            let sel = sauer_map::Selection {
-                o: Vec3 {
-                    x: trap.button_pos[0],
-                    y: trap.button_pos[1],
-                    z: trap.button_pos[2],
-                },
-                s: Vec3 { x: 1, y: 1, z: 1 },
-                grid: trap.button_size,
-                orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
-                    .unwrap_or(sauer_proto::data::Orient::Left),
-                cx: 0,
-                cxs: 2,
-                cy: 0,
-                cys: 2,
-                corner: 0,
-            };
-            for corner in 0..4 {
-                let mut csel = sel.clone();
-                csel.corner = corner;
-                for _ in 0..6 {
-                    map.edit_face(&csel, 1, 2);
-                }
-            }
-
-            map.invalidate_cache();
-        }
-
-        send_atomic_rebuild(
-            server,
-            id,
-            trap.button_pos,
-            trap.button_size,
-            trap.button_orient,
-            payloads,
-        );
-    }
-
-    drop(state);
-    crate::trap::stored::sync_traps_to_map(server, id);
-}

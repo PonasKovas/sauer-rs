@@ -401,7 +401,7 @@ pub fn set_button_color(
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
         if let Some(map) = state.map.as_mut() {
-            map.apply_edit_v_slot(&packet);
+            map.apply_vslots(&packet.sel, packet.all_faces, packet.delta != 0, &packet.extra_data);
         }
         server.broadcast_chan1(&Client {
             client_num: actor_cn,
@@ -511,10 +511,6 @@ pub fn apply_and_broadcast(
     if !batch.is_empty() {
         server.broadcast_chan1(batch);
     }
-
-    crate::trap::placement::check_and_rebuild_traps(server, actor_id, |trap| {
-        crate::trap::intersects_sel(sel, trap)
-    });
 
     assigned_ids
 }

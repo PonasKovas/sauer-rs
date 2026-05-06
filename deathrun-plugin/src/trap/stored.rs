@@ -204,7 +204,7 @@ pub fn sync_traps_to_map(server: &std::sync::Arc<Server>, _owner_id: u64) {
         for trap in stored_traps {
             let packets = generate_trap_vslot_packets(&trap);
             for pkt in packets {
-                map.apply_edit_v_slot(&pkt);
+                map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
                 packets_to_send.push(pkt);
             }
         }

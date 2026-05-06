@@ -16,10 +16,15 @@ pub struct Map {
     pub size: i32,
     pub root: Node,
     
-    // Editable metadata
+    /// The map's texture slot (VSlot) registry. Contains material configurations and delta parameters.
     pub vslots: Vec<Option<VSlot>>,
+    /// The map's list of interactive game entities.
     pub entities: Vec<Entity>,
+    /// Global map variables controlling environment behavior.
     pub vars: Vec<Variable>,
+    
+    /// Bounding boxes identifying immutable sections of the geometry.
+    pub protected_regions: Vec<([i32; 3], [i32; 3])>,
 
     // Preservation of original OGZ metadata for lossless saving
     pub version: i32,
@@ -85,6 +90,7 @@ impl Map {
             blendmap_resolution: 0,
             blendmap_data: None,
             config: MapConfig::Modern { variables: vec![] },
+            protected_regions: vec![],
         }
     }
 
@@ -112,6 +118,7 @@ impl Map {
             blendmap_resolution: ogz.blendmap_resolution,
             blendmap_data: ogz.blendmap_data,
             config: ogz.config,
+            protected_regions: vec![],
         };
 
         map.compact_vslots();
@@ -203,6 +210,31 @@ impl Map {
 
     // --- Packet Consumers ---
 
+    /// Checks if a bounding box intersects any protected region in the map.
+    pub fn is_protected(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+        self.protected_regions.iter().any(|(p_min, p_max)| {
+            (0..3).all(|i| min[i] < p_max[i] && max[i] > p_min[i])
+        })
+    }
+
+    /// Marks a bounding box region as immutable, preventing future edits inside it.
+    pub fn protect_region(&mut self, min: [i32; 3], max: [i32; 3]) {
+        self.protected_regions.push((min, max));
+    }
+
+    /// Removes an exact bounding box from the protected regions list.
+    pub fn unprotect_region(&mut self, min: [i32; 3], max: [i32; 3]) {
+        self.protected_regions.retain(|&(p_min, p_max)| p_min != min || p_max != max);
+    }
+
+    /// Generates optimal network payload chunks to restore a region's geometry back to reality.
+    /// This keeps networking out of `sauer-map`, allowing the caller to broadcast `DelCube`
+    /// and `PasteServer` sequences using these payloads.
+    pub fn generate_restore_packets(&self, min: [i32; 3], max: [i32; 3]) -> Vec<sauer_proto::data::ClipboardPayload> {
+        crate::chunking::chunk_region(self, min, max, 4000)
+    }
+
+    /// Modifies a global map variable.
     pub fn apply_edit_var(&mut self, packet: &channel1::EditVar) {
         let ogz_var = match &packet.val {
             EditVarValue::Int(v) => Variable::Int { name: packet.name.clone(), value: *v },
@@ -219,12 +251,19 @@ impl Map {
         }
     }
 
-    pub fn apply_edit_tex(&mut self, packet: &channel1::EditTex) {
+    /// Applies a texture modification to a geometry selection.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_edit_tex(&mut self, packet: &channel1::EditTex) -> bool {
+        let (min, max) = packet.sel.bounds();
+        if self.is_protected(min, max) { return false; }
         self.set_texture(&packet.sel, packet.tex as u16, packet.all_faces);
         self.invalidate_cache();
+        true
     }
 
-    pub fn apply_edit_mat(&mut self, packet: &channel1::EditMat) {
+    /// Applies a material filter modification to a geometry selection.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_edit_mat(&mut self, packet: &channel1::EditMat) -> bool {
         let packet_mat = packet.mat as i32;
         let packet_filter = packet.filter as i32;
         let mut filtermat = 0u16;
@@ -248,6 +287,9 @@ impl Map {
             (matid, matmask)
         };
 
+        let (min, max) = packet.sel.bounds();
+        if self.is_protected(min, max) { return false; }
+
         self.edit_sel(&packet.sel, |node, _| {
             match node {
                 Node::Leaf(cube) => {
@@ -270,27 +312,64 @@ impl Map {
             }
         });
         self.invalidate_cache();
+        true
     }
 
-    pub fn apply_del_cube(&mut self, packet: &channel1::DelCube) {
+    /// Clears geometry (fills with air) in a selection.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_del_cube(&mut self, packet: &channel1::DelCube) -> bool {
+        let (min, max) = packet.sel.bounds();
+        if self.is_protected(min, max) { return false; }
         self.fill(&packet.sel, false);
         self.invalidate_cache();
+        true
     }
 
-    pub fn apply_replace(&mut self, packet: &channel1::Replace) {
+    /// Replaces all instances of a texture with another, optionally within a selection.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_replace(&mut self, packet: &channel1::Replace) -> bool {
+        if packet.in_sel != 0 {
+            let (min, max) = packet.sel.bounds();
+            if self.is_protected(min, max) { return false; }
+        } else if !self.protected_regions.is_empty() {
+            return false;
+        }
         let sel = if packet.in_sel != 0 { Some(packet.sel.clone()) } else { None };
         self.replace_texture(sel.as_ref(), packet.old_tex as u16, packet.new_tex as u16);
         self.invalidate_cache();
+        true
     }
 
-    pub fn apply_edit_face(&mut self, packet: &channel1::EditFace) {
+    /// Modifies the topology of the map by extruding, cornering, or filling a face.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_edit_face(&mut self, packet: &channel1::EditFace) -> bool {
+        let mut min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+        let mut max = [
+            min[0] + packet.sel.s.x * packet.sel.grid,
+            min[1] + packet.sel.s.y * packet.sel.grid,
+            min[2] + packet.sel.s.z * packet.sel.grid,
+        ];
+        let d = (packet.sel.orient as usize) >> 1;
+        let expansion = packet.dir.abs() * packet.sel.grid;
+        min[d] -= expansion;
+        max[d] += expansion;
+
+        if self.is_protected(min, max) { return false; }
+
         self.edit_face(&packet.sel, packet.dir, packet.mode as i32);
         self.invalidate_cache();
+        true
     }
 
-    pub fn apply_edit_ent(&mut self, packet: &channel1::EditEnt) {
-        let id = packet.ent_id as usize;
+    /// Creates or modifies a map entity.
+    /// Returns `false` if the edit was rejected because the position fell within a protected region.
+    pub fn apply_edit_ent(&mut self, packet: &channel1::EditEnt) -> bool {
         let pos = [packet.pos.x, packet.pos.y, packet.pos.z];
+        let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
+        let max = [min[0] + 1, min[1] + 1, min[2] + 1];
+        if self.is_protected(min, max) { return false; }
+
+        let id = packet.ent_id as usize;
         if id < self.entities.len() {
             let ent = &mut self.entities[id];
             ent.position = pos;
@@ -299,25 +378,42 @@ impl Map {
         } else if id == self.entities.len() {
             self.entities.push(Entity { position: pos, attrs: packet.attrs.map(|x| x as i16), ent_type: packet.type_, extra_data: Vec::new() });
         }
+        true
     }
 
-    pub fn apply_edit_v_slot(&mut self, packet: &channel1::EditVSlot) {
-        if packet.extra_data.is_empty() { return; }
+    /// Applies VSlot delta configurations (color, scroll, offset) to geometry faces.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_edit_v_slot(&mut self, packet: &channel1::EditVSlot) -> bool {
+        if packet.extra_data.is_empty() { return true; }
+        let (min, max) = packet.sel.bounds();
+        if self.is_protected(min, max) { return false; }
         self.apply_vslots(&packet.sel, packet.all_faces, packet.delta != 0, &packet.extra_data);
         self.invalidate_cache();
+        true
     }
 
-    pub fn apply_paste(&mut self, packet: &channel1::PasteClient, payload: &sauer_proto::data::ClipboardPayload) {
+    /// Pastes copied geometry back into the octree at the target selection.
+    /// Returns `false` if the edit was rejected because it intersected a protected region.
+    pub fn apply_paste(&mut self, packet: &channel1::PasteClient, payload: &sauer_proto::data::ClipboardPayload) -> bool {
         let mut paste_sel = packet.sel.clone();
         paste_sel.s = payload.sel.s;
         paste_sel.orient = payload.sel.orient;
+        let (min, max) = paste_sel.bounds();
+        if self.is_protected(min, max) { return false; }
         self.apply_block(&paste_sel, payload.nodes.clone(), true);
+        true
     }
 
-    pub fn apply_undo_redo(&mut self, payload: &sauer_proto::data::UndoPayload) {
+    /// Rolls geometry back to a previously stored Undo/Redo state snapshot.
+    /// Returns `false` if the rollback was rejected because it intersected a protected region.
+    pub fn apply_undo_redo(&mut self, payload: &sauer_proto::data::UndoPayload) -> bool {
+        let (min, max) = payload.sel.bounds();
+        if self.is_protected(min, max) { return false; }
         self.apply_block(&payload.sel, payload.nodes.clone(), false);
+        true
     }
 
+    /// Extracts geometry within the given selection to create a payload for a clipboard copy.
     pub fn copy_selection(&mut self, sel: &Selection) -> sauer_proto::data::ClipboardPayload {
         let d = sel.orient as usize >> 1;
         let r_dim = [1usize, 2, 0][d];

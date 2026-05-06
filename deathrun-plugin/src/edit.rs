@@ -2,9 +2,7 @@ use crate::map_state::{
     DeathrunState, get_server_state, is_waiting_for_map, with_map_state_mut, update_server_items,
 };
 use sauer_map::Map;
-use crate::trap::{
-    check_and_rebuild_traps, cmd_deltrap, cmd_newtrap, intersects_edit_face, intersects_sel,
-};
+use crate::trap::{cmd_deltrap, cmd_newtrap};
 use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
@@ -27,6 +25,23 @@ pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
 pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
 
 // ─── Packet Memory Tracker ────────────────────────────────────────────────────
+
+fn handle_edit_reject(ctx: &Context, min: [i32; 3], max: [i32; 3]) {
+    crate::ui::send_warn(ctx.server(), ctx.id(), "That region is protected by a trap.");
+    let server = ctx.server().clone();
+    let cn = crate::SERVER_BOT_CN as i32;
+    tokio::spawn(async move {
+        let payloads = {
+            let state = crate::map_state::get_server_state(&server).read().unwrap();
+            if let Some(map) = state.map.as_ref() {
+                map.generate_restore_packets(min, max)
+            } else {
+                vec![]
+            }
+        };
+        crate::geo_sync::broadcast_payloads(&server, cn, payloads, 0).await;
+    });
+}
 
 fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
     let server = ctx.server();
@@ -487,7 +502,7 @@ impl Plugin for DeathrunEdit {
                         &crate::trap::StoredTrap::from_trap(trap),
                     );
                     for p in &packets {
-                        state.apply_edit_v_slot(p);
+                        state.apply_vslots(&p.sel, p.all_faces, p.delta != 0, &p.extra_data);
                     }
                 }
                 let t_rebuild = t_rebuild_start.elapsed();
@@ -506,7 +521,12 @@ impl Plugin for DeathrunEdit {
             }).await.expect("Map parsing panicked");
 
             match parse_result {
-            Ok((state, loaded_traps, out_bytes, world_size, stats)) => {
+            Ok((mut state, loaded_traps, out_bytes, world_size, stats)) => {
+                for trap in &loaded_traps {
+                    let b_max = [trap.button_pos[0] + trap.button_size, trap.button_pos[1] + trap.button_size, trap.button_pos[2] + trap.button_size];
+                    state.protect_region(trap.button_pos, b_max);
+                }
+
                 update_server_items(&state, &server_clone);
 
                 let comp_kb = stats.payload_compressed as f64 / 1024.0;
@@ -615,51 +635,77 @@ impl Plugin for DeathrunEdit {
 
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditTex(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_edit_tex(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_sel(&packet.sel, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_edit_tex(packet));
+        if !ok {
+            let (min, max) = packet.sel.bounds();
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditMat(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_edit_mat(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_sel(&packet.sel, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_edit_mat(packet));
+        if !ok {
+            let (min, max) = packet.sel.bounds();
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
         intercept_packet(ctx, crate::trap::RecordedPacket::DelCube(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_del_cube(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_sel(&packet.sel, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_del_cube(packet));
+        if !ok {
+            let (min, max) = packet.sel.bounds();
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Replace(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_replace(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            if packet.in_sel == 0 {
-                true
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_replace(packet));
+        if !ok {
+            let (min, max) = if packet.in_sel != 0 {
+                packet.sel.bounds()
             } else {
-                intersects_sel(&packet.sel, trap)
-            }
-        });
+                let s = crate::map_state::get_server_state(ctx.server()).read().unwrap().map.as_ref().map(|m| m.size).unwrap_or(0);
+                ([0, 0, 0], [s, s, s])
+            };
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditFace(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_edit_face(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_edit_face(&packet.sel, packet.dir, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_edit_face(packet));
+        if !ok {
+            let mut min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+            let mut max = [
+                min[0] + packet.sel.s.x * packet.sel.grid,
+                min[1] + packet.sel.s.y * packet.sel.grid,
+                min[2] + packet.sel.s.z * packet.sel.grid,
+            ];
+            let d = (packet.sel.orient as usize) >> 1;
+            let expansion = packet.dir.abs() * packet.sel.grid;
+            min[d] -= expansion;
+            max[d] += expansion;
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
         intercept_packet(ctx, crate::trap::RecordedPacket::EditEnt(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_edit_ent(packet));
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_edit_ent(packet));
+        if !ok {
+            let min = [packet.pos.x as i32, packet.pos.y as i32, packet.pos.z as i32];
+            let max = [min[0] + 1, min[1] + 1, min[2] + 1];
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
@@ -679,24 +725,32 @@ impl Plugin for DeathrunEdit {
         if delta.color.is_some() { size += 13; }
         crate::map_state::track_vslot_bloat(ctx.server(), size);
         intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
-        with_map_state_mut(ctx, |state| state.apply_edit_v_slot(packet));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_sel(&packet.sel, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_edit_v_slot(packet));
+        if !ok {
+            let (min, max) = packet.sel.bounds();
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Flip(packet.clone()));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_sel(&packet.sel, trap)
-        });
+        let mut ok = true;
+        let (min, max) = packet.sel.bounds();
+        with_map_state_mut(ctx, |state| if state.is_protected(min, max) { ok = false; });
+        if !ok {
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
         intercept_packet(ctx, crate::trap::RecordedPacket::Rotate(packet.clone()));
-        check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            intersects_sel(&packet.sel, trap)
-        });
+        let mut ok = true;
+        let (min, max) = packet.sel.bounds();
+        with_map_state_mut(ctx, |state| if state.is_protected(min, max) { ok = false; });
+        if !ok {
+            handle_edit_reject(ctx, min, max);
+        }
     }
 
     async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
@@ -746,36 +800,35 @@ impl Plugin for DeathrunEdit {
         if let Some(p) = server.players.try_get(id) {
             if let Some(cb) = &p.clipboard {
                 let payload = cb.payload.clone();
-                with_map_state_mut(ctx, |state| state.apply_paste(packet, &payload));
-
-                let cb_sel = &payload.sel;
-                let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-                let max = [
-                    min[0] + cb_sel.s.x * packet.sel.grid,
-                    min[1] + cb_sel.s.y * packet.sel.grid,
-                    min[2] + cb_sel.s.z * packet.sel.grid,
-                ];
-                crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-                    crate::trap::intersects_bounds(min, max, trap)
-                });
-                return;
+                let mut ok = true;
+                with_map_state_mut(ctx, |state| ok = state.apply_paste(packet, &payload));
+                
+                if !ok {
+                    let cb_sel = &payload.sel;
+                    let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+                    let max = [
+                        min[0] + cb_sel.s.x * packet.sel.grid,
+                        min[1] + cb_sel.s.y * packet.sel.grid,
+                        min[2] + cb_sel.s.z * packet.sel.grid,
+                    ];
+                    handle_edit_reject(ctx, min, max);
+                }
             }
         }
-        crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |_| true);
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
-        with_map_state_mut(ctx, |state| state.apply_undo_redo(&packet.payload));
-
-        let sel = &packet.payload.sel;
-        let max = [
-            sel.o.x + sel.s.x * sel.grid,
-            sel.o.y + sel.s.y * sel.grid,
-            sel.o.z + sel.s.z * sel.grid,
-        ];
-        crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_undo_redo(&packet.payload));
+        if !ok {
+            let sel = &packet.payload.sel;
+            let max = [
+                sel.o.x + sel.s.x * sel.grid,
+                sel.o.y + sel.s.y * sel.grid,
+                sel.o.z + sel.s.z * sel.grid,
+            ];
+            handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
+        }
     }
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
@@ -818,16 +871,16 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
-        with_map_state_mut(ctx, |state| state.apply_undo_redo(&packet.payload));
-
-        let sel = &packet.payload.sel;
-        let max = [
-            sel.o.x + sel.s.x * sel.grid,
-            sel.o.y + sel.s.y * sel.grid,
-            sel.o.z + sel.s.z * sel.grid,
-        ];
-        crate::trap::check_and_rebuild_traps(ctx.server(), ctx.id(), |trap| {
-            crate::trap::intersects_bounds([sel.o.x, sel.o.y, sel.o.z], max, trap)
-        });
+        let mut ok = true;
+        with_map_state_mut(ctx, |state| ok = state.apply_undo_redo(&packet.payload));
+        if !ok {
+            let sel = &packet.payload.sel;
+            let max = [
+                sel.o.x + sel.s.x * sel.grid,
+                sel.o.y + sel.s.y * sel.grid,
+                sel.o.z + sel.s.z * sel.grid,
+            ];
+            handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
+        }
     }
 }

@@ -53,17 +53,24 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
         cys: 2,
         corner: 0,
     };
+
+    let b_max = [trap.button_pos[0] + trap.button_size, trap.button_pos[1] + trap.button_size, trap.button_pos[2] + trap.button_size];
+    map.unprotect_region(trap.button_pos, b_max);
+
     map.fill(&sel, false);
     map.set_material(&sel, Default::default());
+    
+    let button_node = sauer_map::octree::extract_node_at(&map.root, [0, 0, 0], map.size, trap.button_pos, trap.button_size);
+    let clip_payload = sauer_map::clipboard::generate_clipboard(map, &button_node, trap.button_size);
+    
     drop(state);
 
     sync_traps_to_map(server, id);
 
-    let (adj_sel, _) =
-        super::placement::get_selections(trap.button_pos, trap.button_size, trap.button_orient);
-    server.broadcast_chan1(&Client {
-        client_num: crate::SERVER_BOT_CN as i32,
-        packet: channel1::DelCube { sel: adj_sel },
+    let s_clone = server.clone();
+    let target_cn = crate::SERVER_BOT_CN as i32;
+    tokio::spawn(async move {
+        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, vec![clip_payload], 0).await;
     });
 }
 
@@ -107,40 +114,13 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     }
 
     let target_cn = crate::SERVER_BOT_CN as i32;
-    let (adj_sel, fill_sel) = super::placement::get_selections(adj, BUTTON_SIZE, hit_orient);
-
     crate::trap::placement::build_button_geometry(map, adj, BUTTON_SIZE, hit_orient);
 
-    // Snapshot before corner pushes: clipboard delivers the flat button with
-    // correct vslot indices and the internal cavity; corner animation then pushes edges on clients.
-    let button_node =
-        sauer_map::octree::extract_node_at(&map.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
-    let clip_payload =
-        sauer_map::clipboard::generate_clipboard(map, &button_node, BUTTON_SIZE);
+    let button_node = sauer_map::octree::extract_node_at(&map.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
+    let clip_payload = sauer_map::clipboard::generate_clipboard(map, &button_node, BUTTON_SIZE);
 
-    let sel = Selection {
-        o: Vec3 {
-            x: adj[0],
-            y: adj[1],
-            z: adj[2],
-        },
-        s: Vec3 { x: 1, y: 1, z: 1 },
-        grid: BUTTON_SIZE,
-        orient: sauer_proto::data::Orient::try_from(hit_orient as i32)
-            .unwrap_or(sauer_proto::data::Orient::Left),
-        cx: 0,
-        cxs: 2,
-        cy: 0,
-        cys: 2,
-        corner: 0,
-    };
-    for corner in 0..4 {
-        let mut csel = sel.clone();
-        csel.corner = corner;
-        for _ in 0..6 {
-            map.edit_face(&csel, 1, 2);
-        }
-    }
+    let b_max = [adj[0] + BUTTON_SIZE, adj[1] + BUTTON_SIZE, adj[2] + BUTTON_SIZE];
+    map.protect_region(adj, b_max);
 
     state.traps.push(Trap {
         button_pos: adj,
@@ -162,56 +142,9 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     });
     drop(state);
 
-    // Broadcast the button using a clipboard so clients install the exact vslot
-    // indices already in the server map, regardless of when /getmap is done.
-    server.broadcast_chan1(&Client {
-        client_num: target_cn,
-        packet: channel1::EditFace {
-            sel: fill_sel,
-            dir: -1,
-            mode: EditFaceMode::Fill,
-        },
-    });
-
     let s_clone = server.clone();
-    let adj_sel_clone = adj_sel.clone();
     tokio::spawn(async move {
         crate::geo_sync::broadcast_payloads(&s_clone, target_cn, vec![clip_payload], 0).await;
-
-        use tokio::time::{Duration, sleep};
-        let mut events: Vec<(u64, i32)> = {
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
-            (0i32..4)
-                .flat_map(|c| std::iter::repeat(c).take(6))
-                .map(|c| (rng.gen_range(0u64..=400), c))
-                .collect()
-        };
-        events.sort_by_key(|&(t, _)| t);
-
-        let mut elapsed = 0u64;
-        for (t, corner) in events {
-            if t > elapsed {
-                sleep(Duration::from_millis(t - elapsed)).await;
-                elapsed = t;
-            }
-            s_clone.broadcast_chan1(&Client {
-                client_num: target_cn,
-                packet: channel1::EditFace {
-                    sel: SelInfo {
-                        corner,
-                        ..adj_sel_clone.clone()
-                    },
-                    dir: 1,
-                    mode: EditFaceMode::Corner,
-                },
-            });
-        }
-
-        // Sync traps to map ONLY AFTER corner pushes complete.
-        // This ensures the client map collapses the branch BEFORE we inject
-        // the VSlot payload, safely subdividing the deformed geometry
-        // and avoiding payload destruction.
         crate::trap::stored::sync_traps_to_map(&s_clone, id);
     });
 }

@@ -137,11 +137,14 @@ impl PlayMaps {
 
         crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
         for trap in &traps {
+            let b_max = [trap.button_pos[0] + trap.button_size, trap.button_pos[1] + trap.button_size, trap.button_pos[2] + trap.button_size];
+            state.protect_region(trap.button_pos, b_max);
+
             let packets = crate::trap::stored::generate_trap_vslot_packets(
                 &crate::trap::StoredTrap::from_trap(trap),
             );
             for p in &packets {
-                state.apply_edit_v_slot(p);
+                state.apply_vslots(&p.sel, p.all_faces, p.delta != 0, &p.extra_data);
             }
         }
 
