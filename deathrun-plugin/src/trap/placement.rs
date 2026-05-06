@@ -8,53 +8,6 @@ use sauer_server::Server;
 
 use super::BUTTON_COLOR_READY;
 
-// ─── Selection helpers ────────────────────────────────────────────────────────
-
-pub fn get_selections(adj: [i32; 3], button_size: i32, hit_orient: u8) -> (SelInfo, SelInfo) {
-    let d = (hit_orient >> 1) as usize;
-    let dc = (hit_orient & 1) as usize;
-    let mut editf_o = adj;
-    editf_o[d] = if dc == 0 {
-        adj[d] + button_size
-    } else {
-        adj[d] - button_size
-    };
-
-    let proto_orient = match hit_orient {
-        0 => Orient::Left,
-        1 => Orient::Right,
-        2 => Orient::Back,
-        3 => Orient::Front,
-        4 => Orient::Bottom,
-        _ => Orient::Top,
-    };
-
-    let adj_sel = SelInfo {
-        o: Vec3 {
-            x: adj[0],
-            y: adj[1],
-            z: adj[2],
-        },
-        s: Vec3 { x: 1, y: 1, z: 1 },
-        grid: button_size,
-        orient: proto_orient,
-        cx: 0,
-        cxs: 2,
-        cy: 0,
-        cys: 2,
-        corner: 0,
-    };
-    let fill_sel = SelInfo {
-        o: Vec3 {
-            x: editf_o[0],
-            y: editf_o[1],
-            z: editf_o[2],
-        },
-        ..adj_sel.clone()
-    };
-    (adj_sel, fill_sel)
-}
-
 // ─── vslot application ────────────────────────────────────────────────────────
 
 pub fn get_outer_face_selections(adj: [i32; 3], size: i32) -> [SelInfo; 6] {

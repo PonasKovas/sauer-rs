@@ -33,25 +33,6 @@ pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<(i
     out
 }
 
-pub fn generate_clipboard(map: &Map, node: &Node, size: i32) -> ClipboardPayload {
-    let mut nodes = Vec::new();
-    nodes.push(node.clone());
-    let vs = extract_vslots(&nodes, &map.vslots);
-    
-    ClipboardPayload {
-        unpack_len: 0,
-        sel: sauer_core::Selection {
-            o: sauer_core::Vec3 { x: 0, y: 0, z: 0 },
-            s: sauer_core::Vec3 { x: 1, y: 1, z: 1 },
-            grid: size,
-            orient: sauer_core::Orient::Left,
-            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
-        },
-        nodes,
-        vslots: vs,
-    }
-}
-
 pub fn generate_clipboard_for_region(
     map: &Map,
     padded_min: [i32; 3],

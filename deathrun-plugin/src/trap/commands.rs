@@ -60,8 +60,7 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     map.fill(&sel, false);
     map.set_material(&sel, Default::default());
     
-    let button_node = sauer_map::octree::extract_node_at(&map.root, [0, 0, 0], map.size, trap.button_pos, trap.button_size);
-    let clip_payload = sauer_map::clipboard::generate_clipboard(map, &button_node, trap.button_size);
+    let payloads = map.generate_restore_packets(trap.button_pos, b_max);
     
     drop(state);
 
@@ -70,7 +69,7 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let s_clone = server.clone();
     let target_cn = crate::SERVER_BOT_CN as i32;
     tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, vec![clip_payload], 0).await;
+        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
     });
 }
 
@@ -116,11 +115,10 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     let target_cn = crate::SERVER_BOT_CN as i32;
     crate::trap::placement::build_button_geometry(map, adj, BUTTON_SIZE, hit_orient);
 
-    let button_node = sauer_map::octree::extract_node_at(&map.root, [0, 0, 0], ws, adj, BUTTON_SIZE);
-    let clip_payload = sauer_map::clipboard::generate_clipboard(map, &button_node, BUTTON_SIZE);
-
     let b_max = [adj[0] + BUTTON_SIZE, adj[1] + BUTTON_SIZE, adj[2] + BUTTON_SIZE];
     map.protect_region(adj, b_max);
+
+    let payloads = map.generate_restore_packets(adj, b_max);
 
     state.traps.push(Trap {
         button_pos: adj,
@@ -144,7 +142,7 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
 
     let s_clone = server.clone();
     tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, vec![clip_payload], 0).await;
+        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
         crate::trap::stored::sync_traps_to_map(&s_clone, id);
     });
 }
