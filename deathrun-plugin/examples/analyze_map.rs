@@ -43,15 +43,29 @@ fn main() {
 
     // Load state to evaluate *valid* traps vs ghost bloat
     if let Ok(mut state) = MapState::from_bytes(&data) {
-        if let Ok((stored, stats)) = deathrun_plugin::trap::vslot_store::read_all::<StoredTrap>(
-            &state,
+        if let Ok((entries, stats)) = sauer_map::vslot_db::read_all::<StoredTrap>(
+            &state.world,
+            &state.meta.vslots,
+            *b"DR",
             TRAP_STORE_VERSION,
             TRAP_DOMAIN,
-            |t| t.button_pos,
         ) {
+            let mut valid_count = 0;
+            for entry in &entries {
+                let st = &entry.data;
+                let bpos = st.button_pos;
+                let valid = entry.instances.iter().any(|inst| {
+                    inst.pos[0] >= bpos[0] && inst.pos[0] <= bpos[0] + 8 &&
+                    inst.pos[1] >= bpos[1] && inst.pos[1] <= bpos[1] + 8 &&
+                    inst.pos[2] >= bpos[2] && inst.pos[2] <= bpos[2] + 8
+                });
+                if valid {
+                    valid_count += 1;
+                }
+            }
             println!("\n=== VSlot Store (Trap) Stats ===");
             println!("Empty VSlot indices: {}", empty_vslots);
-            println!("Valid (Active/Loadable) Traps: {}", stored.len());
+            println!("Valid (Active/Loadable) Traps: {}", valid_count);
             println!("Total trap chunks (params): {}", stats.chunks);
             
             let comp_kb = stats.payload_compressed as f64 / 1024.0;

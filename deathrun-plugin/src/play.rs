@@ -108,12 +108,29 @@ impl PlayMaps {
             }
         }
 
-        if let Ok((stored, _stats)) = crate::trap::vslot_store::read_all::<StoredTrap>(
-            &state,
+        if let Ok((entries, _stats)) = sauer_map::vslot_db::read_all::<StoredTrap>(
+            &state.world,
+            &state.meta.vslots,
+            *b"DR",
             TRAP_STORE_VERSION,
             crate::trap::TRAP_DOMAIN,
-            |t| t.button_pos,
         ) {
+            let mut stored = Vec::new();
+            for entry in entries {
+                let st = entry.data;
+                let bpos = st.button_pos;
+                let valid = entry.instances.iter().any(|inst| {
+                    inst.pos[0] >= bpos[0] && inst.pos[0] <= bpos[0] + 8 &&
+                    inst.pos[1] >= bpos[1] && inst.pos[1] <= bpos[1] + 8 &&
+                    inst.pos[2] >= bpos[2] && inst.pos[2] <= bpos[2] + 8
+                });
+                if valid {
+                    stored.push(st);
+                } else {
+                    tracing::warn!("Rejected copied trap payload outside expected bounds at {:?}", entry.instances.first().map(|i| i.pos));
+                }
+            }
+
             for st in &stored {
                 st.apply_reset_to_world(&mut state.world);
             }

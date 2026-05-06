@@ -7,6 +7,7 @@ pub mod chunking;
 pub mod clipboard;
 pub mod raycast;
 pub mod vslot;
+pub mod vslot_db;
 
 pub use edit::{apply_region, fill, set_material, set_texture};
 pub use geom::subdivide;

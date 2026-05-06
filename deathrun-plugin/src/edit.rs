@@ -431,7 +431,7 @@ impl Plugin for DeathrunEdit {
         
         tokio::spawn(async move {
             let _start_time = std::time::Instant::now();
-            let parse_result = tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let parse_result = tokio::task::spawn_blocking(move || -> Result<(MapState, Vec<crate::map_state::Trap>, Vec<u8>, i32, sauer_map::vslot_db::StoreStats), String> {
                 let t_start = std::time::Instant::now();
                 
                 let mut state = MapState::from_bytes(&data_clone).map_err(|e| e.to_string())?;
@@ -449,19 +449,35 @@ impl Plugin for DeathrunEdit {
                     }
                 }
 
-                let mut loaded_traps = Vec::new();
-                let mut store_stats = crate::trap::vslot_store::StoreStats::default();
+                let mut loaded_traps: Vec<crate::map_state::Trap> = Vec::new();
+                let mut store_stats = sauer_map::vslot_db::StoreStats::default();
 
                 let t_traps_start = std::time::Instant::now();
-                if let Ok((stored_traps, stats)) =
-                    crate::trap::vslot_store::read_all::<crate::trap::StoredTrap>(
-                        &state,
+                if let Ok((entries, stats)) =
+                    sauer_map::vslot_db::read_all::<crate::trap::StoredTrap>(
+                        &state.world,
+                        &state.meta.vslots,
+                        *b"DR",
                         crate::trap::TRAP_STORE_VERSION,
                         crate::trap::TRAP_DOMAIN,
-                        |t| t.button_pos,
                     )
                 {
                     store_stats = stats;
+                    let mut stored_traps = Vec::new();
+                    for entry in entries {
+                        let st = entry.data;
+                        let bpos = st.button_pos;
+                        let valid = entry.instances.iter().any(|inst| {
+                            inst.pos[0] >= bpos[0] && inst.pos[0] <= bpos[0] + 8 &&
+                            inst.pos[1] >= bpos[1] && inst.pos[1] <= bpos[1] + 8 &&
+                            inst.pos[2] >= bpos[2] && inst.pos[2] <= bpos[2] + 8
+                        });
+                        if valid {
+                            stored_traps.push(st);
+                        } else {
+                            tracing::warn!("Rejected copied trap payload outside expected bounds at {:?}", entry.instances.first().map(|i| i.pos));
+                        }
+                    }
                     for st in &stored_traps {
                         st.apply_reset_to_world(&mut state.world);
                     }

@@ -12,3 +12,4 @@ cube-string.workspace = true
 serde = { workspace = true, features = ["derive"] }
 bitcode.workspace = true
 thiserror.workspace = true
+flate2.workspace = true

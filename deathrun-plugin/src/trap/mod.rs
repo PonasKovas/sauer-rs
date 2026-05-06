@@ -5,7 +5,6 @@ pub mod intersect;
 pub mod placement;
 pub mod stored;
 pub mod trigger;
-pub mod vslot_store;
 
 pub use commands::{
     cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_trapinfo, cmd_traptime,

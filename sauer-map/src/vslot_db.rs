@@ -1,6 +1,10 @@
-use crate::map_state::MapState;
-use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use serde::{Serialize, de::DeserializeOwned};
+use crate::{Node, World};
+use cube_string::CubeString;
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use ogz_rs::data::VSlot;
+use sauer_proto::data::{VSlotDelta, VSlotDeltaParam};
+use serde::{de::DeserializeOwned, Serialize};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 
 #[derive(Debug, thiserror::Error)]
@@ -25,7 +29,7 @@ pub fn encode_chunk_name(mut idx: usize) -> Vec<u8> {
     name
 }
 
-fn decode_chunk_name(name: &[u8]) -> Option<usize> {
+pub fn decode_chunk_name(name: &[u8]) -> Option<usize> {
     if name.is_empty() || name[0] != 1 {
         return None;
     }
@@ -41,11 +45,12 @@ fn decode_chunk_name(name: &[u8]) -> Option<usize> {
     Some(idx)
 }
 
-pub fn encode_payload<T: Serialize>(
+pub fn compress_payload<T: Serialize>(
     data: &T,
+    magic: [u8; 2],
     version: u8,
     domain_id: u8,
-) -> Result<Vec<sauer_proto::data::VSlotDelta>, StoreError> {
+) -> Result<Vec<u8>, StoreError> {
     let raw = bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut zlib = Vec::new();
@@ -56,15 +61,19 @@ pub fn encode_payload<T: Serialize>(
         .map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut payload = Vec::with_capacity(6 + zlib.len());
-    payload.extend_from_slice(b"DR");
+    payload.extend_from_slice(&magic);
     payload.push(version);
     payload.push(domain_id);
     payload.extend_from_slice(&(zlib.len() as u16).to_le_bytes());
     payload.extend_from_slice(&zlib);
 
+    Ok(payload)
+}
+
+pub fn chunk_payload(payload: &[u8]) -> Vec<VSlotDelta> {
     let total_chunks = (payload.len() + 15) / 16;
     let mut extra_data_blocks = Vec::new();
-    let mut current_delta = sauer_proto::data::VSlotDelta::default();
+    let mut current_delta = VSlotDelta::default();
     let mut chunks_in_block = 0;
 
     for idx in 0..total_chunks {
@@ -75,17 +84,17 @@ pub fn encode_payload<T: Serialize>(
 
         let mut values = [0.0; 4];
         for i in 0..4 {
-            values[i] = f32::from_le_bytes(chunk[i*4..(i+1)*4].try_into().unwrap());
+            values[i] = f32::from_le_bytes(chunk[i * 4..(i + 1) * 4].try_into().unwrap());
         }
 
-        current_delta.params.push(sauer_proto::data::VSlotDeltaParam {
-            name: cube_string::CubeString::from_bytes(encode_chunk_name(idx)),
+        current_delta.params.push(VSlotDeltaParam {
+            name: CubeString::from_bytes(encode_chunk_name(idx)),
             values,
         });
 
         chunks_in_block += 1;
         if chunks_in_block >= 200 {
-            // Increased maximum to efficiently utilize ~5KB packet size limit
+            // Maximum to efficiently utilize ~5KB packet size limit
             extra_data_blocks.push(std::mem::take(&mut current_delta));
             chunks_in_block = 0;
         }
@@ -94,7 +103,17 @@ pub fn encode_payload<T: Serialize>(
         extra_data_blocks.push(current_delta);
     }
 
-    Ok(extra_data_blocks)
+    extra_data_blocks
+}
+
+pub fn encode_payload<T: Serialize>(
+    data: &T,
+    magic: [u8; 2],
+    version: u8,
+    domain_id: u8,
+) -> Result<Vec<VSlotDelta>, StoreError> {
+    let payload = compress_payload(data, magic, version, domain_id)?;
+    Ok(chunk_payload(&payload))
 }
 
 #[derive(Default, Debug, Clone)]
@@ -105,19 +124,33 @@ pub struct StoreStats {
     pub payload_uncompressed: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct FaceInstance {
+    pub pos: [i32; 3],
+    pub size: i32,
+    pub orient: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct DbEntry<T> {
+    pub vslot_idx: u16,
+    pub data: T,
+    pub instances: Vec<FaceInstance>,
+}
+
 pub fn read_all<T: DeserializeOwned + Clone>(
-    map: &MapState,
+    world: &World,
+    vslots: &[Option<VSlot>],
+    magic: [u8; 2],
     version: u8,
     domain_id: u8,
-    extract_pos: impl Fn(&T) -> [i32; 3],
-) -> Result<(Vec<T>, StoreStats), StoreError> {
+) -> Result<(Vec<DbEntry<T>>, StoreStats), StoreError> {
     let mut stats = StoreStats::default();
-    // 1. Decode all active VSlots into a map (vslot_idx -> decoded payload)
-    let mut decoded_vslots = std::collections::HashMap::new();
+    let mut decoded_vslots = HashMap::new();
 
-    for (vslot_idx, vs_opt) in map.meta.vslots.iter().enumerate() {
+    for (vslot_idx, vs_opt) in vslots.iter().enumerate() {
         if let Some(vs) = vs_opt {
-            let mut chunks = std::collections::HashMap::new();
+            let mut chunks = HashMap::new();
             let mut max_idx = 0;
 
             for p in &vs.params {
@@ -154,7 +187,7 @@ pub fn read_all<T: DeserializeOwned + Clone>(
             if !valid || payload.len() < 6 {
                 continue;
             }
-            if &payload[0..2] != b"DR" {
+            if &payload[0..2] != &magic {
                 continue;
             }
             if payload[2] != version || payload[3] != domain_id {
@@ -179,61 +212,58 @@ pub fn read_all<T: DeserializeOwned + Clone>(
         }
     }
 
-    // 2. Traverse octree, find physical VSlots, and validate absolute coordinates
-    let mut valid_results = std::collections::HashMap::new();
+    let mut instance_map: HashMap<u16, Vec<FaceInstance>> = HashMap::new();
 
     fn traverse<T: Clone>(
-        node: &sauer_map::Node,
+        node: &Node,
         pos: [i32; 3],
         size: i32,
-        decoded: &std::collections::HashMap<u16, T>,
-        results: &mut std::collections::HashMap<[i32; 3], T>,
-        extract_pos: &impl Fn(&T) -> [i32; 3],
+        decoded: &HashMap<u16, T>,
+        instances: &mut HashMap<u16, Vec<FaceInstance>>,
     ) {
         match node {
-            sauer_map::Node::Leaf(c) => {
-                for &t in &c.textures {
-                    if let Some(trap) = decoded.get(&t) {
-                        let bpos = extract_pos(trap);
-                        // A physically valid trap data cube must reside inside the button volume
-                        let valid_x = pos[0] >= bpos[0] && pos[0] <= bpos[0] + 8;
-                        let valid_y = pos[1] >= bpos[1] && pos[1] <= bpos[1] + 8;
-                        let valid_z = pos[2] >= bpos[2] && pos[2] <= bpos[2] + 8;
-
-                        if valid_x && valid_y && valid_z {
-                            // HashMap keyed by button_pos implicitly deduplicates
-                            // multiple hits if the cavity floor was subdivided.
-                            results.insert(bpos, trap.clone());
-                        } else {
-                            tracing::warn!(
-                                "Rejected copied trap payload outside expected bounds at {:?}",
-                                pos
-                            );
-                        }
+            Node::Leaf(c) => {
+                for (orient, &t) in c.textures.iter().enumerate() {
+                    if decoded.contains_key(&t) {
+                        instances.entry(t).or_default().push(FaceInstance {
+                            pos,
+                            size,
+                            orient: orient as u8,
+                        });
                     }
                 }
             }
-            sauer_map::Node::Branch(ch) => {
+            Node::Branch(ch) => {
                 let half = size / 2;
                 for i in 0..8 {
                     let cx = (i & 1) as i32;
                     let cy = ((i >> 1) & 1) as i32;
                     let cz = ((i >> 2) & 1) as i32;
                     let cpos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                    traverse(&ch[i], cpos, half, decoded, results, extract_pos);
+                    traverse(&ch[i], cpos, half, decoded, instances);
                 }
             }
         }
     }
 
     traverse(
-        &map.world.root,
+        &world.root,
         [0, 0, 0],
-        map.world.size,
+        world.size,
         &decoded_vslots,
-        &mut valid_results,
-        &extract_pos,
+        &mut instance_map,
     );
 
-    Ok((valid_results.into_values().collect(), stats))
+    let mut results = Vec::new();
+    for (vslot_idx, data) in decoded_vslots {
+        if let Some(instances) = instance_map.remove(&vslot_idx) {
+            results.push(DbEntry {
+                vslot_idx,
+                data,
+                instances,
+            });
+        }
+    }
+
+    Ok((results, stats))
 }

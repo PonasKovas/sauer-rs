@@ -402,21 +402,15 @@ pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
     let raw_bytes = bitcode::serialize(&stored).unwrap_or_default();
     let uncompressed_size = raw_bytes.len();
 
-    let mut zlib = Vec::new();
-    {
-        use std::io::Write;
-        let mut enc = flate2::write::ZlibEncoder::new(&mut zlib, flate2::Compression::default());
-        let _ = enc.write_all(&raw_bytes);
-        let _ = enc.finish();
-    }
-    let payload_len = zlib.len() + 6;
+    let payload = sauer_map::vslot_db::compress_payload(&stored, *b"DR", crate::trap::TRAP_STORE_VERSION, crate::trap::TRAP_DOMAIN).unwrap_or_default();
+    let payload_len = payload.len();
 
     let total_chunks = (payload_len + 15) / 16;
 
     let mut size_on_disk = 0;
     let mut size_in_mem = 0;
     for idx in 0..total_chunks {
-        let name_len = crate::trap::vslot_store::encode_chunk_name(idx).len();
+        let name_len = sauer_map::vslot_db::encode_chunk_name(idx).len();
         size_on_disk += 1 + 1 + name_len + 16;
         size_in_mem += 32 + name_len;
     }
@@ -809,15 +803,8 @@ pub fn cmd_endtrap(ctx: &Context) {
         reset_entities_mod: reset_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
     };
 
-    let raw_bytes = bitcode::serialize(&stored_candidate).unwrap_or_default();
-    let mut zlib = Vec::new();
-    {
-        use std::io::Write;
-        let mut enc = flate2::write::ZlibEncoder::new(&mut zlib, flate2::Compression::default());
-        let _ = enc.write_all(&raw_bytes);
-        let _ = enc.finish();
-    }
-    let payload_len = zlib.len() + 6;
+    let payload = sauer_map::vslot_db::compress_payload(&stored_candidate, *b"DR", crate::trap::TRAP_STORE_VERSION, crate::trap::TRAP_DOMAIN).unwrap_or_default();
+    let payload_len = payload.len();
 
     let mut is_too_large = false;
     if payload_len > 1_000_000 {
