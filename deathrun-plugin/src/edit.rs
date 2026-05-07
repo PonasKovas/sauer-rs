@@ -53,9 +53,17 @@ fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
     }
 }
 
+pub struct TrapHighlightState {
+    pub trap_idx: Option<usize>,
+    pub look_start: tokio::time::Instant,
+    pub last_sent: tokio::time::Instant,
+    pub active: bool,
+}
+
 pub struct DeathrunEdit {
     player_dirs: DashMap<u64, Direction>,
     last_particle_update: DashMap<u64, tokio::time::Instant>,
+    trap_highlights: DashMap<u64, TrapHighlightState>,
 }
 
 impl DeathrunEdit {
@@ -63,11 +71,19 @@ impl DeathrunEdit {
         Self {
             player_dirs: DashMap::new(),
             last_particle_update: DashMap::new(),
+            trap_highlights: DashMap::new(),
         }
     }
 }
 
 impl Plugin for DeathrunEdit {
+    async fn disconnected(&self, ctx: &mut Context) {
+        let id = ctx.id();
+        self.player_dirs.remove(&id);
+        self.last_particle_update.remove(&id);
+        self.trap_highlights.remove(&id);
+    }
+
     async fn init(&self, server: &mut Server) {
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::CoopEdit;
@@ -99,106 +115,243 @@ impl Plugin for DeathrunEdit {
         self.player_dirs.insert(id, packet.dir);
 
         let server = ctx.server();
+        let is_spectator = server.players.try_get(id).map_or(true, |p| p.client_state == ClientState::Spectator);
+
         let state = get_server_state(server).read().unwrap();
 
-        if state.trap_edit.is_none() {
-            return;
-        }
-
-        let now = tokio::time::Instant::now();
-        if let Some(mut last) = self.last_particle_update.get_mut(&id) {
-            if now.duration_since(*last).as_millis() < 200 {
-                return;
-            }
-            *last = now;
-        } else {
-            self.last_particle_update.insert(id, now);
-        }
-
-        let yaw = (packet.dir.yaw as f32) + TRAP_EDIT_PARTICLE_YAW_OFFSET;
-        let yaw_rad = yaw.to_radians();
-        let pitch =
-            ((packet.dir.pitch as f32) + TRAP_EDIT_PARTICLE_PITCH_OFFSET).clamp(-90.0, 90.0);
-        let pitch_rad = pitch.to_radians();
-
+        // 1. Raycast for Trap Highlight (Straight Ahead)
+        let yaw_rad = (packet.dir.yaw as f32).to_radians();
+        let pitch_rad = (packet.dir.pitch as f32).to_radians();
         let forward = [
             -yaw_rad.sin() * pitch_rad.cos(),
             yaw_rad.cos() * pitch_rad.cos(),
             pitch_rad.sin(),
         ];
-
-        let eye_z = packet.pos.z + 14.0;
-        let origin = [packet.pos.x, packet.pos.y, eye_z];
-
-        let mut dist = TRAP_EDIT_PARTICLE_MAX_DIST;
+        let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
+        
+        let mut dist = 2048.0;
         if let Some(map) = state.map.as_ref() {
             if let Some(hit) = sauer_map::raycast::raycast_with_filter(
-                map,
-                origin,
-                forward,
-                TRAP_EDIT_PARTICLE_MAX_DIST,
-                |c| !c.is_empty() || c.material != sauer_core::Material::default(),
+                map, origin, forward, 2048.0,
+                |c| !c.is_empty() || c.material.volume == sauer_core::Volume::Glass,
             ) {
-                dist = (hit.dist - 1.0).max(1.0); // Pull back slightly from the wall so it doesn't clip
+                dist = hit.dist;
             }
         }
-        drop(state); // Drop the lock before sending to network
+        let hit_pt = [
+            origin[0] + forward[0] * dist,
+            origin[1] + forward[1] * dist,
+            origin[2] + forward[2] * dist,
+        ];
 
-        let particle_pos = Vec3 {
-            x: origin[0] + forward[0] * dist,
-            y: origin[1] + forward[1] * dist,
-            z: origin[2] + forward[2] * dist,
+        let hit_trap = if is_spectator {
+            None
+        } else {
+            state.traps.iter().position(|trap| {
+                let b_min = trap.button_pos;
+                let b_max = [
+                    b_min[0] + trap.button_size,
+                    b_min[1] + trap.button_size,
+                    b_min[2] + trap.button_size,
+                ];
+                (0..3).all(|ax| hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5)
+            })
         };
 
-        let ent_id = {
-            let mut state = get_server_state(server).write().unwrap();
+        // 2. Process Trap Highlight
+        let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| TrapHighlightState {
+            trap_idx: None,
+            look_start: tokio::time::Instant::now(),
+            last_sent: tokio::time::Instant::now(),
+            active: false,
+        });
 
-            if let Some(id) = state.trap_edit_particle_ent {
-                id
-            } else {
-                let map = match state.map.as_mut() {
-                    Some(m) => m,
-                    None => return,
-                };
-
-                let id = map
-                    .entities
-                    .iter()
-                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
-                    .unwrap_or_else(|| {
-                        let i = map.entities.len();
-                        map.entities.push(ogz_rs::data::Entity {
-                            position: [0.0; 3],
-                            attrs: [0; 5],
-                            ent_type: ogz_rs::data::EntityType::Empty,
-                            extra_data: vec![],
-                        });
-                        i
+        if hl_state.trap_idx != hit_trap {
+            if hl_state.active {
+                let mut batch = Vec::new();
+                for i in 0..12 {
+                    batch.push(sauer_proto::Client {
+                        client_num: crate::SERVER_BOT_CN as i32,
+                        packet: sauer_proto::channel1::EditEnt {
+                            ent_id: 9980 + i as i32,
+                            pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                            type_: sauer_proto::data::EntityType::Empty,
+                            attrs: [0, 0, 0, 0, 0],
+                        },
                     });
-
-                if let Some(ent) = map.entities.get_mut(id) {
-                    ent.ent_type = ogz_rs::data::EntityType::Particles;
-                    ent.attrs = TRAP_EDIT_PARTICLE_ATTRS;
                 }
-
-                state.trap_edit_particle_ent = Some(id);
-                id
+                server.send_chan1(id, batch);
             }
-        };
+            hl_state.trap_idx = hit_trap;
+            hl_state.look_start = tokio::time::Instant::now();
+            hl_state.active = false;
+        }
 
-        let cn = crate::SERVER_BOT_CN as i32;
+        if let Some(idx) = hit_trap {
+    if hl_state.last_sent.elapsed().as_millis() > 100 {
+                    let trap = &state.traps[idx];
+                    if trap.clip_s != [0, 0, 0] {
+                        let t_min = trap.clip_pos;
+                        let t_max = [
+                            t_min[0] + trap.clip_s[0] * trap.clip_grid,
+                            t_min[1] + trap.clip_s[1] * trap.clip_grid,
+                            t_min[2] + trap.clip_s[2] * trap.clip_grid,
+                        ];
+                        let len_x = t_max[0] - t_min[0];
+                        let len_y = t_max[1] - t_min[1];
+                        let len_z = t_max[2] - t_min[2];
 
-        let ent = Client {
-            client_num: cn,
-            packet: channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: particle_pos,
-                type_: EntityType::Particles,
-                attrs: TRAP_EDIT_PARTICLE_ATTRS.map(|x| x as i32),
-            },
-        };
+                        let edges = [
+    // X edges (using dir 1 instead of 2)
+    (t_min[0], t_min[1], t_min[2], 1, len_x),
+    (t_min[0], t_max[1], t_min[2], 1, len_x),
+    (t_min[0], t_min[1], t_max[2], 1, len_x),
+    (t_min[0], t_max[1], t_max[2], 1, len_x),
 
-        server.send_chan1(id, &ent);
+    // Y edges (using dir 2 instead of 1)
+    (t_min[0], t_min[1], t_min[2], 2, len_y),
+    (t_max[0], t_min[1], t_min[2], 2, len_y),
+    (t_min[0], t_min[1], t_max[2], 2, len_y),
+    (t_max[0], t_min[1], t_max[2], 2, len_y),
+
+    // Z edges (confirmed correct)
+    (t_min[0], t_min[1], t_min[2], 0, len_z),
+    (t_max[0], t_min[1], t_min[2], 0, len_z),
+    (t_min[0], t_max[1], t_min[2], 0, len_z),
+    (t_max[0], t_max[1], t_min[2], 0, len_z),
+];
+
+                        let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+                        let hue = (time_ms % 2000) as f32 / 2000.0;
+                        let h = hue * 6.0;
+                        let x = 1.0 - ((h % 2.0) - 1.0).abs();
+                        let (r, g, b) = match h as i32 {
+                            0 => (1.0, x, 0.0),
+                            1 => (x, 1.0, 0.0),
+                            2 => (0.0, 1.0, x),
+                            3 => (0.0, x, 1.0),
+                            4 => (x, 0.0, 1.0),
+                            _ => (1.0, 0.0, x),
+                        };
+                        let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
+
+                        let mut batch = Vec::new();
+                        for (i, edge) in edges.iter().enumerate() {
+                            batch.push(sauer_proto::Client {
+                                client_num: crate::SERVER_BOT_CN as i32,
+                                packet: sauer_proto::channel1::EditEnt {
+                                    ent_id: 9980 + i as i32,
+                                    pos: sauer_proto::data::Vec3 {
+                                        x: edge.0 as f32,
+                                        y: edge.1 as f32,
+                                        z: edge.2 as f32,
+                                    },
+                                    type_: sauer_proto::data::EntityType::Particles,
+                                    attrs: [7, edge.3, edge.4, color_int, 0],
+                                },
+                            });
+                        }
+                        server.send_chan1(id, batch);
+                        hl_state.active = true;
+                        hl_state.last_sent = tokio::time::Instant::now();
+                    }
+
+            }
+        }
+
+        // 3. Process Trap Edit Particle
+        let mut trap_edit_active = state.trap_edit.is_some();
+        if trap_edit_active {
+            let now = tokio::time::Instant::now();
+            if let Some(mut last) = self.last_particle_update.get_mut(&id) {
+                if now.duration_since(*last).as_millis() < 200 {
+                    trap_edit_active = false;
+                } else {
+                    *last = now;
+                }
+            } else {
+                self.last_particle_update.insert(id, now);
+            }
+        }
+
+        let mut forward_edit = [0.0; 3];
+        let mut dist_edit = TRAP_EDIT_PARTICLE_MAX_DIST;
+        
+        if trap_edit_active {
+            let yaw_edit = (packet.dir.yaw as f32) + TRAP_EDIT_PARTICLE_YAW_OFFSET;
+            let pitch_edit = ((packet.dir.pitch as f32) + TRAP_EDIT_PARTICLE_PITCH_OFFSET).clamp(-90.0, 90.0);
+            
+            let yaw_rad_edit = yaw_edit.to_radians();
+            let pitch_rad_edit = pitch_edit.to_radians();
+
+            forward_edit = [
+                -yaw_rad_edit.sin() * pitch_rad_edit.cos(),
+                yaw_rad_edit.cos() * pitch_rad_edit.cos(),
+                pitch_rad_edit.sin(),
+            ];
+
+            if let Some(map) = state.map.as_ref() {
+                if let Some(hit) = sauer_map::raycast::raycast_with_filter(
+                    map, origin, forward_edit, TRAP_EDIT_PARTICLE_MAX_DIST,
+                    |c| !c.is_empty() || c.material != sauer_core::Material::default(),
+                ) {
+                    dist_edit = (hit.dist - 1.0).max(1.0);
+                }
+            }
+        }
+        
+        drop(state); // Drop the lock before calculating networking state for edit particle
+
+        if trap_edit_active {
+            let particle_pos = Vec3 {
+                x: origin[0] + forward_edit[0] * dist_edit,
+                y: origin[1] + forward_edit[1] * dist_edit,
+                z: origin[2] + forward_edit[2] * dist_edit,
+            };
+
+            let ent_id = {
+                let mut state_w = get_server_state(server).write().unwrap();
+                if let Some(eid) = state_w.trap_edit_particle_ent {
+                    eid
+                } else {
+                    let map = match state_w.map.as_mut() {
+                        Some(m) => m,
+                        None => return,
+                    };
+                    let eid = map
+                        .entities
+                        .iter()
+                        .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                        .unwrap_or_else(|| {
+                            let i = map.entities.len();
+                            map.entities.push(ogz_rs::data::Entity {
+                                position: [0.0; 3],
+                                attrs: [0; 5],
+                                ent_type: ogz_rs::data::EntityType::Empty,
+                                extra_data: vec![],
+                            });
+                            i
+                        });
+
+                    if let Some(ent) = map.entities.get_mut(eid) {
+                        ent.ent_type = ogz_rs::data::EntityType::Particles;
+                        ent.attrs = TRAP_EDIT_PARTICLE_ATTRS;
+                    }
+                    state_w.trap_edit_particle_ent = Some(eid);
+                    eid
+                }
+            };
+
+            server.send_chan1(id, &Client {
+                client_num: crate::SERVER_BOT_CN as i32,
+                packet: channel1::EditEnt {
+                    ent_id: ent_id as i32,
+                    pos: particle_pos,
+                    type_: EntityType::Particles,
+                    attrs: TRAP_EDIT_PARTICLE_ATTRS.map(|x| x as i32),
+                },
+            });
+        }
     }
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
