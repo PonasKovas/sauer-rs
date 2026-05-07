@@ -485,13 +485,13 @@ impl Plugin for DeathrunEdit {
                             tracing::warn!("Rejected copied trap payload outside expected bounds at {:?}", entry.instances.first().map(|i| i.pos));
                         }
                     }
-                    for st in &stored_traps {
+                    for mut st in stored_traps {
+                        st.remap_vslots(&mut state);
                         st.apply_reset_to_world(&mut state);
+                        if let Some(trap) = st.into_trap() {
+                            loaded_traps.push(trap);
+                        }
                     }
-                    loaded_traps = stored_traps
-                        .into_iter()
-                        .filter_map(|st| st.into_trap())
-                        .collect();
                 }
                 let t_traps = t_traps_start.elapsed();
 

@@ -107,15 +107,15 @@ fn main() {
             }
         }
 
+        let mut loaded_traps = Vec::new();
         // 2. Restore map to clean state (in case it was saved active)
-        for st in &stored_traps {
+        for mut st in stored_traps {
+            st.remap_vslots(&mut map_state);
             st.apply_reset_to_world(&mut map_state);
+            if let Some(trap) = st.into_trap() {
+                loaded_traps.push(trap);
+            }
         }
-
-        let loaded_traps: Vec<_> = stored_traps
-            .into_iter()
-            .filter_map(|st| st.into_trap())
-            .collect();
 
         // 3. Rebuild trap geometries and bake them into VSlots
         deathrun_plugin::trap::placement::rebuild_all_trap_buttons(&mut map_state, &loaded_traps);

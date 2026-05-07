@@ -147,6 +147,73 @@ impl StoredTrap {
     /// (pre-trigger) geometry and entity values. Safe to call even when the
     /// trap was not active — the reset state equals the base state, so the
     /// operation is idempotent.
+    /// Safely synchronizes all stored VSlot definitions back to the live server map
+    /// and resolves any index shifts caused by engine garbage collection. Must be
+    /// called before `apply_reset_to_world` and `into_trap`.
+    pub fn remap_vslots(&mut self, map: &mut sauer_map::Map) {
+        let mut remapping = std::collections::HashMap::new();
+
+        let payloads = self.trigger_payload.iter().chain(self.reset_payload.iter());
+        for payload in payloads {
+            for vslot_data in &payload.vslots {
+                let ds = sauer_proto::data::VSlotDelta {
+                    params: vslot_data.vslot.params.iter().map(|p| sauer_proto::data::VSlotDeltaParam {
+                        name: p.name.clone(),
+                        values: p.values,
+                    }).collect(),
+                    scale: vslot_data.vslot.scale,
+                    rotation: vslot_data.vslot.rotation,
+                    offset: vslot_data.vslot.offset,
+                    scroll: vslot_data.vslot.scroll,
+                    layer: vslot_data.vslot.layer,
+                    alpha: vslot_data.vslot.alpha,
+                    color: vslot_data.vslot.color,
+                };
+                let new_idx = sauer_map::vslot::resolve_vslot(&mut map.vslots, vslot_data.slot, &ds, false);
+                remapping.insert(vslot_data.index, new_idx);
+            }
+        }
+
+        if remapping.is_empty() { return; }
+
+        fn remap_node_textures(node: &mut sauer_map::Node, remap: &std::collections::HashMap<u16, u16>) {
+            match node {
+                sauer_map::Node::Leaf(cube) => {
+                    for t in &mut cube.textures {
+                        if let Some(&new_idx) = remap.get(t) {
+                            *t = new_idx;
+                        }
+                    }
+                }
+                sauer_map::Node::Branch(children) => {
+                    for child in children.iter_mut() {
+                        remap_node_textures(child, remap);
+                    }
+                }
+            }
+        }
+
+        for cell in &mut self.trigger_cells {
+            let mut ptr = 0;
+            if let Some(mut node) = sauer_proto::data::clipboard::unpack_cube(&cell.2, &mut ptr) {
+                remap_node_textures(&mut node, &remapping);
+                let mut packed = Vec::new();
+                sauer_proto::data::clipboard::pack_cube(&node, &mut packed);
+                cell.2 = packed;
+            }
+        }
+
+        for cell in &mut self.reset_cells {
+            let mut ptr = 0;
+            if let Some(mut node) = sauer_proto::data::clipboard::unpack_cube(&cell.2, &mut ptr) {
+                remap_node_textures(&mut node, &remapping);
+                let mut packed = Vec::new();
+                sauer_proto::data::clipboard::pack_cube(&node, &mut packed);
+                cell.2 = packed;
+            }
+        }
+    }
+
     pub fn apply_reset_to_world(&self, map: &mut sauer_map::Map) {
         for (pos, size, packed) in &self.reset_cells {
             let mut ptr = 0;
@@ -176,7 +243,7 @@ impl StoredTrap {
 }
 
 pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channel1::EditVSlot> {
-    let sel = crate::trap::placement::get_payload_selection(trap.button_pos, trap.button_orient);
+    let sel = crate::trap::placement::get_payload_selection(trap.button_pos, trap.button_size, trap.button_orient);
     let mut packets = Vec::new();
 
     let data_blocks = sauer_map::Map::db_encode(trap).unwrap_or_default();

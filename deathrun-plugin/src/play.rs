@@ -126,10 +126,13 @@ impl PlayMaps {
                 }
             }
 
-            for st in &stored {
+            for mut st in stored {
+                st.remap_vslots(&mut state);
                 st.apply_reset_to_world(&mut state);
+                if let Some(trap) = st.into_trap() {
+                    traps.push(trap);
+                }
             }
-            traps = stored.into_iter().filter_map(|st| st.into_trap()).collect();
             if !traps.is_empty() {
                 info!("Loaded {} traps from map '{name}'", traps.len());
             }
