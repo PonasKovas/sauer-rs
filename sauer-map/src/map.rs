@@ -169,6 +169,38 @@ impl Map {
         }
         collect(&self.root, &mut used);
 
+        let used_clone = used.clone();
+        for &idx in &used_clone {
+            let current = idx as i32;
+            let mut fuel = 10000;
+            loop {
+                fuel -= 1;
+                if fuel == 0 { break; }
+                let prev = if let Some(Some(vs)) = self.vslots.get(current as usize) {
+                    vs.prev
+                } else {
+                    -1
+                };
+                if prev < 0 || used.contains(&(prev as u16)) || prev == current {
+                    break;
+                }
+                
+                let prev_prev = if let Some(Some(p)) = self.vslots.get(prev as usize) {
+                    p.prev
+                } else {
+                    -1
+                };
+                
+                if prev_prev < 0 || prev_prev == prev {
+                    break;
+                }
+                
+                if let Some(Some(vs)) = self.vslots.get_mut(current as usize) {
+                    vs.prev = prev_prev;
+                }
+            }
+        }
+
         let mut to_check: Vec<u16> = used.iter().copied().collect();
         while let Some(idx) = to_check.pop() {
             if let Some(Some(vs)) = self.vslots.get(idx as usize) {

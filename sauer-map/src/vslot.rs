@@ -3,11 +3,14 @@ use sauer_proto::data::VSlotDelta;
 
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
     let mut current = idx as i32;
+    let mut fuel = 10000;
     loop {
+        fuel -= 1;
+        if fuel == 0 { return current; }
         match vslots.get(current as usize) {
             Some(Some(vs)) => {
                 let p = vs.prev;
-                if p < 0 || (p as usize) >= vslots.len() {
+                if p < 0 || (p as usize) >= vslots.len() || p == current {
                     return current;
                 }
                 match &vslots[p as usize] {
@@ -21,15 +24,23 @@ pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
 }
 
 pub fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
-    let mut tail = root;
-    for i in 0..vslots.len() {
-        if let Some(Some(_)) = vslots.get(i) {
-            if root_base_of(vslots, i as u16) == root {
-                tail = i as i32;
+    let mut is_parent = vec![false; vslots.len()];
+    for vs_opt in vslots.iter() {
+        if let Some(vs) = vs_opt {
+            if vs.prev >= 0 && (vs.prev as usize) < vslots.len() {
+                is_parent[vs.prev as usize] = true;
             }
         }
     }
-    tail
+
+    for i in 0..vslots.len() {
+        if let Some(Some(_)) = vslots.get(i) {
+            if !is_parent[i] && root_base_of(vslots, i as u16) == root {
+                return i as i32;
+            }
+        }
+    }
+    root
 }
 
 pub fn resolve_vslot(
@@ -50,16 +61,7 @@ pub fn resolve_vslot(
         .unwrap_or_default();
     let mut new_vs = existing.clone();
 
-    let is_trap_payload = ds.params.iter().any(|p| {
-        let b = p.name.as_bytes();
-        !b.is_empty() && b[0] == 1
-    });
-
-    if is_trap_payload {
-        new_vs.prev = root;
-    } else {
-        new_vs.prev = chain_tail;
-    }
+    new_vs.prev = chain_tail;
 
     if !ds.params.is_empty() {
         if delta {

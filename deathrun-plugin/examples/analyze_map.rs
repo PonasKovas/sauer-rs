@@ -76,28 +76,8 @@ fn main() {
             println!("VSlot Structural Memory Overhead: {:.2} MB", overhead_mb);
         }
 
-        // Break broken dependency chains on Ghost VSlots so the compactor can successfully wipe them
-        let mut ghosts_broken = 0;
-        for i in 0..state.vslots.len() {
-            let root = sauer_map::vslot::root_base_of(&state.vslots, i as u16);
-
-            if let Some(vs) = &mut state.vslots[i] {
-                let is_trap_payload = vs.params.iter().any(|p| {
-                    let b = p.name.as_bytes();
-                    !b.is_empty() && b[0] == 1
-                });
-                if is_trap_payload {
-                    if vs.prev != root {
-                        vs.prev = root;
-                        ghosts_broken += 1;
-                    }
-                }
-            }
-        }
-
         let compacted_data = state.to_ogz_bytes().expect("Failed to serialize map");
         println!("\n=== Compaction Simulation ===");
-        println!("Ghost VSlot chains broken: {}", ghosts_broken);
         println!("If unreferenced ghosts are cleared by the server, the map shrinks to: {:.2} MB", compacted_data.len() as f64 / 1024.0 / 1024.0);
 
         if args.strip_traps || args.output.is_some() {
