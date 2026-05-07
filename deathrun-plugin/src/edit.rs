@@ -43,15 +43,7 @@ fn handle_edit_reject(ctx: &Context, min: [i32; 3], max: [i32; 3]) {
     });
 }
 
-fn intercept_packet(ctx: &Context, packet: crate::trap::RecordedPacket) {
-    let server = ctx.server();
-    let mut state = crate::map_state::get_server_state(server).write().unwrap();
-    if let Some(edit) = &mut state.trap_edit {
-        if let crate::trap::RecordedPacket::EditEnt(p) = &packet {
-            edit.affected_entities.insert(p.ent_id as usize);
-        }
-    }
-}
+
 
 pub struct TrapHighlightState {
     pub trap_idx: Option<usize>,
@@ -640,7 +632,6 @@ impl Plugin for DeathrunEdit {
                     }
                     for mut st in stored_traps {
                         st.remap_vslots(&mut state);
-                        st.apply_reset_to_world(&mut state);
                         if let Some(trap) = st.into_trap() {
                             loaded_traps.push(trap);
                         }
@@ -787,7 +778,6 @@ impl Plugin for DeathrunEdit {
     // ── Coop-edit map tracking + Interceptors + Trap immunities ──────────────────────
 
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::EditTex(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_edit_tex(packet));
         if !ok {
@@ -797,7 +787,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::EditMat(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_edit_mat(packet));
         if !ok {
@@ -807,7 +796,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::DelCube(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_del_cube(packet));
         if !ok {
@@ -817,7 +805,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::Replace(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_replace(packet));
         if !ok {
@@ -832,7 +819,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::EditFace(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_edit_face(packet));
         if !ok {
@@ -851,7 +837,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::EditEnt(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_edit_ent(packet));
         if !ok {
@@ -877,7 +862,6 @@ impl Plugin for DeathrunEdit {
         if delta.alpha.is_some() { size += 9; }
         if delta.color.is_some() { size += 13; }
         crate::map_state::track_vslot_bloat(ctx.server(), size);
-        intercept_packet(ctx, crate::trap::RecordedPacket::EditVSlot(packet.clone()));
         let mut ok = true;
         with_map_state_mut(ctx, |state| ok = state.apply_edit_v_slot(packet));
         if !ok {
@@ -887,7 +871,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::Flip(packet.clone()));
         let mut ok = true;
         let (min, max) = packet.sel.bounds();
         with_map_state_mut(ctx, |state| if state.is_protected(min, max) { ok = false; });
@@ -897,7 +880,6 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
-        intercept_packet(ctx, crate::trap::RecordedPacket::Rotate(packet.clone()));
         let mut ok = true;
         let (min, max) = packet.sel.bounds();
         with_map_state_mut(ctx, |state| if state.is_protected(min, max) { ok = false; });

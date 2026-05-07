@@ -1,5 +1,3 @@
-use sauer_proto::channel1;
-
 pub mod commands;
 pub mod placement;
 pub mod stored;
@@ -28,21 +26,8 @@ pub struct ActiveTrap {
     pub assigned_ids: Vec<usize>,
 }
 
-#[derive(Clone)]
-pub enum RecordedPacket {
-    EditFace(channel1::EditFace),
-    EditTex(channel1::EditTex),
-    EditMat(channel1::EditMat),
-    DelCube(channel1::DelCube),
-    EditVSlot(channel1::EditVSlot),
-    Replace(channel1::Replace),
-    Flip(channel1::Flip),
-    Rotate(channel1::Rotate),
-    EditEnt(channel1::EditEnt),
-}
-
 pub struct TrapEditState {
     pub trap_idx: usize,
     pub original_map: Box<sauer_map::Map>,
-    pub affected_entities: std::collections::HashSet<usize>,
+    pub is_edit: bool,
 }

@@ -1,11 +1,86 @@
 use crate::map_state::get_server_state;
 use sauer_proto::{
     Client, channel1,
-    data::{Orient, SelInfo, Vec3},
+    data::{Vec3, EntityType},
 };
 use sauer_server::Server;
 
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY};
+
+pub fn in_aabb(pos: [f32; 3], min: [i32; 3], max: [i32; 3]) -> bool {
+    pos[0] >= min[0] as f32 && pos[0] < max[0] as f32 &&
+    pos[1] >= min[1] as f32 && pos[1] < max[1] as f32 &&
+    pos[2] >= min[2] as f32 && pos[2] < max[2] as f32
+}
+
+pub fn swap_aabb_state(
+    server: &std::sync::Arc<Server>,
+    map: &mut sauer_map::Map,
+    min: [i32; 3],
+    max: [i32; 3],
+    payload: &sauer_proto::data::ClipboardPayload,
+    new_entities: &[ogz_rs::data::Entity],
+) -> Vec<usize> {
+    let mut modified_ids = std::collections::HashSet::new();
+
+    for (id, ent) in map.entities.iter_mut().enumerate() {
+        if ent.ent_type != EntityType::Empty && in_aabb(ent.position, min, max) {
+            ent.ent_type = EntityType::Empty;
+            ent.attrs = [0; 5];
+            modified_ids.insert(id);
+        }
+    }
+
+    for new_ent in new_entities {
+        if let Some(id) = map.entities.iter().position(|e| e.ent_type == EntityType::Empty) {
+            map.entities[id] = new_ent.clone();
+            modified_ids.insert(id);
+        } else {
+            let id = map.entities.len();
+            map.entities.push(new_ent.clone());
+            modified_ids.insert(id);
+        }
+    }
+
+    let mut paste_sel = payload.sel.clone();
+    paste_sel.o = Vec3 { x: min[0], y: min[1], z: min[2] };
+    
+    // Transparent = false ensures empty air blocks perfectly overwrite solid blocks!
+    map.apply_block(&paste_sel, payload.nodes.clone(), false);
+
+    map.invalidate_cache();
+    crate::map_state::update_server_items(map, server);
+
+    let actor_cn = crate::SERVER_BOT_CN as i32;
+    let mut batch = Vec::new();
+    for &id in &modified_ids {
+        let ent = &map.entities[id];
+        batch.push(Client {
+            client_num: actor_cn,
+            packet: channel1::EditEnt {
+                ent_id: id as i32,
+                pos: Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                type_: ent.ent_type,
+                attrs: ent.attrs.map(|x| x as i32),
+            }
+        });
+        if batch.len() >= 50 {
+            server.broadcast_chan1(batch.clone());
+            batch.clear();
+        }
+    }
+    if !batch.is_empty() {
+        server.broadcast_chan1(batch);
+    }
+
+    let payloads = sauer_map::chunking::chunk_region(map, min, max, 4000);
+    let s_clone = server.clone();
+    tokio::spawn(async move {
+        crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
+    });
+
+    modified_ids.into_iter().collect()
+}
 
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
@@ -14,22 +89,14 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
     }
     let trap = &mut state.traps[trap_idx];
 
-    if trap.is_active {
-        return;
-    }
-    if trap.trigger_payload.is_none()
-        && trap.trigger_entities_mod.is_empty()
-        && trap.trigger_entities_add.is_empty()
-    {
+    if trap.is_active || trap.trigger_payload.is_none() {
         return;
     }
 
     trap.is_active = true;
 
-    let _trigger_payload = trap.trigger_payload.clone();
-    let trigger_cells = trap.trigger_cells.clone();
-    let trigger_entities_mod = trap.trigger_entities_mod.clone();
-    let trigger_entities_add = trap.trigger_entities_add.clone();
+    let trigger_payload = trap.trigger_payload.clone().unwrap();
+    let trigger_entities = trap.trigger_entities.clone();
     let clip_pos = trap.clip_pos;
     let clip_s = trap.clip_s;
     let clip_grid = trap.clip_grid;
@@ -137,71 +204,49 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
         }
 
-        // Snapshot restore data from current (pre-trigger) map state.
-        let (restore_cells, restore_entities_mod) = {
+        let min = clip_pos;
+        let max = [
+            min[0] + clip_s[0] * clip_grid,
+            min[1] + clip_s[1] * clip_grid,
+            min[2] + clip_s[2] * clip_grid,
+        ];
+
+        // Snapshot perfectly exact AABB restore data from the current live map state
+        let (ready_payload, ready_entities) = {
             let state = get_server_state(&server_clone).read().unwrap();
             let map = match state.map.as_ref() {
                 Some(m) => m,
                 None => return,
             };
-            let cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
-                .iter()
-                .map(|&(pos, size, _)| {
-                    let node = sauer_map::octree::extract_node_at(
-                        &map.root,
-                        [0, 0, 0],
-                        map.size,
-                        pos,
-                        size,
-                    );
-                    (pos, size, node)
-                })
+            
+            let payload = sauer_map::clipboard::generate_clipboard_for_region(map, min, clip_s, clip_grid);
+            let ents: Vec<ogz_rs::data::Entity> = map.entities.iter()
+                .filter(|e| e.ent_type != EntityType::Empty && in_aabb(e.position, min, max))
+                .cloned()
                 .collect();
-            let mut r_ents = Vec::new();
-            for &(id, _) in &trigger_entities_mod {
-                if let Some(ent) = map.entities.get(id) {
-                    r_ents.push((id, ent.clone()));
-                }
-            }
-            (cells, r_ents)
+            
+            (payload, ents)
         };
 
-        let region_sel = SelInfo {
-            o: Vec3 {
-                x: clip_pos[0],
-                y: clip_pos[1],
-                z: clip_pos[2],
-            },
-            s: Vec3 {
-                x: clip_s[0],
-                y: clip_s[1],
-                z: clip_s[2],
-            },
-            grid: clip_grid,
-            orient: Orient::Left,
-            cx: 0,
-            cxs: 0,
-            cy: 0,
-            cys: 0,
-            corner: 0,
+        // --- 1. APPLY ACTIVE ---
+        let assigned_ids = {
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            swap_aabb_state(
+                &server_clone,
+                state.map.as_mut().unwrap(),
+                min,
+                max,
+                &trigger_payload,
+                &trigger_entities,
+            )
         };
-
-        // --- 1. APPLY TRIGGER ---
-        let assigned_ids = apply_and_broadcast(
-            &server_clone,
-            actor_id,
-            &region_sel,
-            &trigger_cells,
-            &trigger_entities_mod,
-            &trigger_entities_add,
-        );
 
         if is_edit_mode {
             let mut state = get_server_state(&server_clone).write().unwrap();
             state.active_traps.push(crate::trap::ActiveTrap {
                 trap_idx,
                 progress_bar_ent_id: ent_id,
-                assigned_ids: assigned_ids.clone(),
+                assigned_ids,
             });
         }
 
@@ -225,17 +270,6 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     }
                 }
             }
-        }
-
-        let empty_ent = ogz_rs::data::Entity {
-            position: [0.0; 3],
-            attrs: [0; 5],
-            ent_type: ogz_rs::data::EntityType::Empty,
-            extra_data: vec![],
-        };
-        let mut final_restore_ents = restore_entities_mod.clone();
-        for id in &assigned_ids {
-            final_restore_ents.push((*id, empty_ent.clone()));
         }
 
         set_button_color(
@@ -271,14 +305,17 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
 
             if !reverted && elapsed >= revert_dur {
-                apply_and_broadcast(
-                    &server_clone,
-                    actor_id,
-                    &region_sel,
-                    &restore_cells,
-                    &final_restore_ents,
-                    &[],
-                );
+                {
+                    let mut state = get_server_state(&server_clone).write().unwrap();
+                    swap_aabb_state(
+                        &server_clone,
+                        state.map.as_mut().unwrap(),
+                        min,
+                        max,
+                        &ready_payload,
+                        &ready_entities,
+                    );
+                }
                 if effective_timeout > trap_time {
                     // Force button color back to ACTIVE for the duration of the timeout cooldown.
                     set_button_color(
@@ -328,13 +365,14 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         }
 
         if !reverted {
-            apply_and_broadcast(
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            swap_aabb_state(
                 &server_clone,
-                actor_id,
-                &region_sel,
-                &restore_cells,
-                &final_restore_ents,
-                &[],
+                state.map.as_mut().unwrap(),
+                min,
+                max,
+                &ready_payload,
+                &ready_entities,
             );
         }
 
@@ -410,107 +448,4 @@ pub fn set_button_color(
     }
 }
 
-pub fn apply_and_broadcast(
-    server: &std::sync::Arc<Server>,
-    _actor_id: u64,
-    sel: &SelInfo,
-    cells: &[([i32; 3], i32, sauer_map::Node)],
-    entities_mod: &[(usize, ogz_rs::data::Entity)],
-    entities_add: &[ogz_rs::data::Entity],
-) -> Vec<usize> {
-    let mut state = get_server_state(server).write().unwrap();
-    let map = match state.map.as_mut() {
-        Some(m) => m,
-        None => return Vec::new(),
-    };
 
-    for &(pos, size, ref node) in cells {
-        map.set_node_at(pos, size, node.clone());
-    }
-
-    let mut assigned_ids = Vec::new();
-    let mut broadcast_ents = Vec::new();
-
-    for ent in entities_add {
-        let mut found_empty = None;
-        for (i, e) in map.entities.iter().enumerate() {
-            if e.ent_type == ogz_rs::data::EntityType::Empty {
-                if !entities_mod.iter().any(|&(mod_id, _)| mod_id == i) {
-                    found_empty = Some(i);
-                    break;
-                }
-            }
-        }
-
-        let ent_id = if let Some(i) = found_empty {
-            map.entities[i] = ent.clone();
-            i
-        } else {
-            let i = map.entities.len();
-            map.entities.push(ent.clone());
-            i
-        };
-
-        assigned_ids.push(ent_id);
-        broadcast_ents.push((ent_id, ent.clone()));
-    }
-
-    for &(ent_id, ref ent) in entities_mod {
-        if ent_id < map.entities.len() {
-            map.entities[ent_id] = ent.clone();
-        }
-        broadcast_ents.push((ent_id, ent.clone()));
-    }
-
-    map.invalidate_cache();
-    crate::map_state::update_server_items(map, server);
-
-    let actor_cn = crate::SERVER_BOT_CN as i32;
-
-    let payloads = if !cells.is_empty() {
-        let min = [sel.o.x, sel.o.y, sel.o.z];
-        let max = [
-            min[0] + sel.s.x * sel.grid,
-            min[1] + sel.s.y * sel.grid,
-            min[2] + sel.s.z * sel.grid,
-        ];
-        sauer_map::chunking::chunk_region(map, min, max, 4000)
-    } else {
-        Vec::new()
-    };
-    drop(state);
-
-    if !payloads.is_empty() {
-        let s_clone = std::sync::Arc::clone(server);
-        tokio::spawn(async move {
-            crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
-        });
-    }
-
-    let mut batch = Vec::new();
-    for (ent_id, ent) in broadcast_ents {
-        let ent_type = ent.ent_type;
-        batch.push(Client {
-            client_num: actor_cn,
-            packet: channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            },
-        });
-        if batch.len() >= 50 {
-            server.broadcast_chan1(batch.clone());
-            batch.clear();
-        }
-    }
-    if !batch.is_empty() {
-        server.broadcast_chan1(batch);
-    }
-
-    assigned_ids
-}

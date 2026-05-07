@@ -128,7 +128,6 @@ impl PlayMaps {
 
             for mut st in stored {
                 st.remap_vslots(&mut state);
-                st.apply_reset_to_world(&mut state);
                 if let Some(trap) = st.into_trap() {
                     traps.push(trap);
                 }

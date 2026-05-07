@@ -108,10 +108,9 @@ fn main() {
         }
 
         let mut loaded_traps = Vec::new();
-        // 2. Restore map to clean state (in case it was saved active)
+        // 2. Load traps into the new format
         for mut st in stored_traps {
             st.remap_vslots(&mut map_state);
-            st.apply_reset_to_world(&mut map_state);
             if let Some(trap) = st.into_trap() {
                 loaded_traps.push(trap);
             }

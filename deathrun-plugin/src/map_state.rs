@@ -43,15 +43,7 @@ pub struct Trap {
     pub button_orient: u8,
 
     pub trigger_payload: Option<sauer_proto::data::ClipboardPayload>,
-
-    /// Per-cell changes — used for accurate server-map updates (no region collateral).
-    pub trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
-
-    /// Modified existing entities when the trap is active.
-    pub trigger_entities_mod: Vec<(usize, ogz_rs::data::Entity)>,
-
-    /// Newly added entities when the trap is active.
-    pub trigger_entities_add: Vec<ogz_rs::data::Entity>,
+    pub trigger_entities: Vec<ogz_rs::data::Entity>,
 
     /// DelCube/paste region — tight diff bounds, grid-aligned.
     pub clip_pos: [i32; 3],
@@ -60,14 +52,6 @@ pub struct Trap {
 
     pub time: u32,
     pub timeout: u32,
-
-    /// Base-state geometry — what to restore when resetting from an active trap.
-    /// Populated by `cmd_endtrap`; mirrors the original map's cells/entities for
-    /// the trap region so a save-while-active can be correctly recovered on load.
-    pub reset_payload: Option<sauer_proto::data::ClipboardPayload>,
-    pub reset_cells: Vec<([i32; 3], i32, sauer_map::Node)>,
-    pub reset_entities_mod: Vec<(usize, ogz_rs::data::Entity)>,
-
     pub is_active: bool,
 }
 

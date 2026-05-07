@@ -6,7 +6,7 @@ use sauer_map::Selection;
 use sauer_proto::{
     Client,
     channel1::{self, ServMsg},
-    data::{SelInfo, Vec3},
+    data::Vec3,
 };
 use sauer_server::plugin::Context;
 
@@ -125,17 +125,12 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
         button_size: BUTTON_SIZE,
         button_orient: hit_orient,
         trigger_payload: None,
-        trigger_cells: Vec::new(),
-        trigger_entities_mod: Vec::new(),
-        trigger_entities_add: Vec::new(),
+        trigger_entities: Vec::new(),
         clip_pos: [0; 3],
-        clip_s: [1; 3],
+        clip_s: [0; 3],
         clip_grid: 1,
         time: 2000,
         timeout: 20000,
-        reset_payload: None,
-        reset_cells: Vec::new(),
-        reset_entities_mod: Vec::new(),
         is_active: false,
     });
     drop(state);
@@ -365,129 +360,47 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
 
-    // Phase 1: validate, snapshot the base state, and collect existing trigger data.
-    // All done under a single write lock that is released before apply_and_broadcast.
-    let (trap_idx, original_map, trigger_data) = {
-        let state = get_server_state(server).write().unwrap();
+    let (trap_idx, original_map, trigger_payload, trigger_entities, clip_pos, clip_s, clip_grid) = {
+        let state = get_server_state(server).read().unwrap();
 
         if state.trap_edit.is_some() {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
-                },
-            );
+            server.send_chan1(id, &ServMsg { text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring() });
             return;
         }
 
         let trap_idx = match state.traps.iter().position(|t| {
-            (0..3).all(|ax| {
-                hit_pt[ax] >= t.button_pos[ax] as f32
-                    && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-            })
+            (0..3).all(|ax| hit_pt[ax] >= t.button_pos[ax] as f32 && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32)
         }) {
             None => {
-                server.send_chan1(
-                    id,
-                    &ServMsg {
-                        text: "Not looking at a trap.".lossy_cubestring(),
-                    },
-                );
+                server.send_chan1(id, &ServMsg { text: "Not looking at a trap.".lossy_cubestring() });
                 return;
             }
             Some(i) => i,
         };
 
         let trap = &state.traps[trap_idx];
-        let original_map = state.map.clone().unwrap();
-
-        let trigger_data = if trap.trigger_payload.is_some()
-            || !trap.trigger_entities_mod.is_empty()
-            || !trap.trigger_entities_add.is_empty()
-        {
-            Some((
-                trap.trigger_cells.clone(),
-                trap.trigger_entities_mod.clone(),
-                trap.trigger_entities_add.clone(),
-                trap.trigger_payload.clone(),
-                trap.clip_pos,
-                trap.clip_s,
-                trap.clip_grid,
-            ))
-        } else {
-            None
-        };
-
-        (trap_idx, original_map, trigger_data)
+        (trap_idx, Box::new(state.map.clone().unwrap()), trap.trigger_payload.clone(), trap.trigger_entities.clone(), trap.clip_pos, trap.clip_s, trap.clip_grid)
     };
 
-    let Some((
-        trigger_cells,
-        trigger_entities_mod,
-        trigger_entities_add,
-        _trigger_payload,
-        clip_pos,
-        clip_s,
-        clip_grid,
-    )) = trigger_data
-    else {
-        // No existing trigger: start recording from current state (same as #settrap).
-        let mut state = get_server_state(server).write().unwrap();
-        state.trap_edit = Some(TrapEditState {
-            trap_idx,
-            original_map: Box::new(original_map),
-            affected_entities: std::collections::HashSet::new(),
-        });
-        drop(state);
-        crate::ui::broadcast_trap_edit_started(server, trap_idx);
-        return;
-    };
+    if clip_s != [0, 0, 0] {
+        if let Some(payload) = &trigger_payload {
+            let min = clip_pos;
+            let max = [min[0] + clip_s[0]*clip_grid, min[1] + clip_s[1]*clip_grid, min[2] + clip_s[2]*clip_grid];
+            let mut state = get_server_state(server).write().unwrap();
+            super::trigger::swap_aabb_state(
+                &std::sync::Arc::clone(&server),
+                state.map.as_mut().unwrap(),
+                min,
+                max,
+                payload,
+                &trigger_entities,
+            );
+        }
+    }
 
-    // Phase 2: apply the existing trigger state to the server map and broadcast to clients.
-    let region_sel = SelInfo {
-        o: Vec3 {
-            x: clip_pos[0],
-            y: clip_pos[1],
-            z: clip_pos[2],
-        },
-        s: Vec3 {
-            x: clip_s[0],
-            y: clip_s[1],
-            z: clip_s[2],
-        },
-        grid: clip_grid,
-        orient: sauer_proto::data::Orient::Left,
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
-    };
-
-    let assigned_ids = super::trigger::apply_and_broadcast(
-        server,
-        id,
-        &region_sel,
-        &trigger_cells,
-        &trigger_entities_mod,
-        &trigger_entities_add,
-    );
-
-    // Phase 3: set trap_edit with the pre-trigger map as the baseline for diffing.
     {
         let mut state = get_server_state(server).write().unwrap();
-        let mut affected = std::collections::HashSet::new();
-        for &(id, _) in &trigger_entities_mod {
-            affected.insert(id);
-        }
-        for id in assigned_ids {
-            affected.insert(id);
-        }
-        state.trap_edit = Some(TrapEditState {
-            trap_idx,
-            original_map: Box::new(original_map),
-            affected_entities: affected,
-        });
+        state.trap_edit = Some(TrapEditState { trap_idx, original_map, is_edit: true });
     }
 
     crate::ui::broadcast_trap_edit_started(server, trap_idx);
@@ -499,41 +412,22 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     let mut state = get_server_state(server).write().unwrap();
 
     if state.trap_edit.is_some() {
-        server.send_chan1(
-            id,
-            &ServMsg {
-                text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
-            },
-        );
+        server.send_chan1(id, &ServMsg { text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring() });
         return;
     }
 
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
+    let trap_idx = match state.traps.iter().position(|t| {
+        (0..3).all(|ax| hit_pt[ax] >= t.button_pos[ax] as f32 && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32)
+    }) {
         None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
+            server.send_chan1(id, &ServMsg { text: "Not looking at a trap.".lossy_cubestring() });
             return;
         }
         Some(i) => i,
     };
 
-    let original_map = state.map.clone().unwrap();
-    state.trap_edit = Some(TrapEditState {
-        trap_idx,
-        original_map: Box::new(original_map),
-        affected_entities: std::collections::HashSet::new(),
-    });
+    let original_map = Box::new(state.map.clone().unwrap());
+    state.trap_edit = Some(TrapEditState { trap_idx, original_map, is_edit: false });
     drop(state);
 
     crate::ui::broadcast_trap_edit_started(server, trap_idx);
@@ -547,12 +441,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     let edit_state = match state.trap_edit.take() {
         Some(e) => e,
         None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "No trap is currently being edited.".lossy_cubestring(),
-                },
-            );
+            server.send_chan1(id, &ServMsg { text: "No trap is currently being edited.".lossy_cubestring() });
             return;
         }
     };
@@ -562,16 +451,11 @@ pub fn cmd_endtrap(ctx: &Context) {
             client_num: crate::SERVER_BOT_CN as i32,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
+                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
                 type_: sauer_proto::data::EntityType::Empty,
                 attrs: [0; 5],
             },
         });
-
         if let Some(map) = state.map.as_mut() {
             if let Some(ent) = map.entities.get_mut(ent_id) {
                 ent.ent_type = ogz_rs::data::EntityType::Empty;
@@ -580,244 +464,125 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
     }
 
-    // Collect the minimal per-cell diff to get accurate (no artifact) tight bounds.
     let current_map = state.map.as_ref().unwrap();
     let world_size = current_map.size;
-    let mut trigger_cells: Vec<([i32; 3], i32, sauer_map::Node)> = Vec::new();
-    sauer_map::octree::collect_diff_cells(
-        &edit_state.original_map.root,
-        &current_map.root,
-        [0, 0, 0],
-        world_size,
-        &mut trigger_cells,
-    );
+    let empty_ent = ogz_rs::data::Entity { position: [0.0; 3], attrs: [0; 5], ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![] };
 
-    // Completely filter out any cells that intersect the button's bounds!
-    // This ensures the button geometry and payload are INDESTRUCTIBLE by the trap itself.
-    let trap_pos = state.traps[edit_state.trap_idx].button_pos;
-    let trap_size = state.traps[edit_state.trap_idx].button_size;
-    let b_min = trap_pos;
-    let b_max = [
-        b_min[0] + trap_size,
-        b_min[1] + trap_size,
-        b_min[2] + trap_size,
-    ];
-
-    trigger_cells.retain(|&(pos, size, _)| {
-        let c_min = pos;
-        let c_max = [pos[0] + size, pos[1] + size, pos[2] + size];
-        let intersects = (0..3).all(|i| c_min[i] < b_max[i] && c_max[i] > b_min[i]);
-        !intersects
-    });
-
-    if trigger_cells.is_empty() && edit_state.affected_entities.is_empty() {
-        server.broadcast_chan1(&ServMsg {
-            text: "Trap edit ended with no changes detected.".lossy_cubestring(),
-        });
-        return;
-    }
-
-    // Compute tight bounding box from the actual changed cells (no apply_region artifacts).
     let mut tight_min = [i32::MAX; 3];
     let mut tight_max = [i32::MIN; 3];
-    for &(pos, size, _) in &trigger_cells {
+
+    let mut diff_cells: Vec<([i32; 3], i32, sauer_map::Node)> = Vec::new();
+    sauer_map::octree::collect_diff_cells(&edit_state.original_map.root, &current_map.root, [0, 0, 0], world_size, &mut diff_cells);
+    
+    for &(pos, size, _) in &diff_cells {
         for i in 0..3 {
             tight_min[i] = tight_min[i].min(pos[i]);
             tight_max[i] = tight_max[i].max(pos[i] + size);
         }
     }
-    let tight_min = std::array::from_fn(|i| tight_min[i].max(0));
-    let tight_max = std::array::from_fn(|i| tight_max[i].min(world_size));
 
-    let (
-        clip_pos,
-        clip_s,
-        clip_grid,
-        trigger_payload,
-        restore_payload,
-    ) = if !trigger_cells.is_empty() {
-        // Trigger clipboard from the post-edit map (tight bounds only).
-        let (cp, cs, cg, tc) = sauer_map::clipboard::generate_region_clipboard(
-            current_map,
-            tight_min,
-            tight_max,
-        );
-
-        // Restore clipboard from original map (same region dims for consistency).
-        let rc = sauer_map::clipboard::generate_clipboard_for_region(
-            &edit_state.original_map,
-            cp,
-            cs,
-            cg,
-        );
-
-        (cp, cs, cg, Some(tc), Some(rc))
-    } else {
-        ([0; 3], [0; 3], 1, None, None)
-    };
-
-    // Collect trigger entities (post-edit state).
-    let empty_ent = ogz_rs::data::Entity {
-        position: [0.0; 3],
-        attrs: [0; 5],
-        ent_type: ogz_rs::data::EntityType::Empty,
-        extra_data: vec![],
-    };
-
-    let mut trigger_entities_mod = Vec::new();
-    let mut trigger_entities_add = Vec::new();
-
-    for &ent_id in &edit_state.affected_entities {
-        let curr = current_map.entities.get(ent_id).unwrap_or(&empty_ent);
-        if ent_id < edit_state.original_map.entities.len() {
-            trigger_entities_mod.push((ent_id, curr.clone()));
-        } else if curr.ent_type != ogz_rs::data::EntityType::Empty {
-            trigger_entities_add.push(curr.clone());
+    let mut diff_ent_ids = std::collections::HashSet::new();
+    for i in 0..current_map.entities.len().max(edit_state.original_map.entities.len()) {
+        let c = current_map.entities.get(i).unwrap_or(&empty_ent);
+        let o = edit_state.original_map.entities.get(i).unwrap_or(&empty_ent);
+        if c != o {
+            diff_ent_ids.insert(i);
+            if c.ent_type != ogz_rs::data::EntityType::Empty {
+                for j in 0..3 {
+                    tight_min[j] = tight_min[j].min(c.position[j].floor() as i32);
+                    tight_max[j] = tight_max[j].max(c.position[j].ceil() as i32 + 1);
+                }
+            }
+            if o.ent_type != ogz_rs::data::EntityType::Empty {
+                for j in 0..3 {
+                    tight_min[j] = tight_min[j].min(o.position[j].floor() as i32);
+                    tight_max[j] = tight_max[j].max(o.position[j].ceil() as i32 + 1);
+                }
+            }
         }
     }
 
-    // Compute reset (base-state) data so a save-while-active can be recovered.
-    let reset_cells: Vec<([i32; 3], i32, sauer_map::Node)> = trigger_cells
-        .iter()
-        .map(|&(pos, size, _)| {
-            let node = sauer_map::octree::extract_node_at(
-                &edit_state.original_map.root,
-                [0, 0, 0],
-                world_size,
-                pos,
-                size,
-            );
-            (pos, size, node)
-        })
-        .collect();
-    let reset_entities_mod: Vec<(usize, ogz_rs::data::Entity)> = trigger_entities_mod
-        .iter()
-        .map(|(id, _)| {
-            let ent = edit_state
-                .original_map
-                .entities
-                .get(*id)
-                .cloned()
-                .unwrap_or_else(|| empty_ent.clone());
-            (*id, ent)
-        })
-        .collect();
+    if edit_state.is_edit {
+        let trap = &state.traps[edit_state.trap_idx];
+        if trap.clip_s != [0, 0, 0] {
+            let o_min = trap.clip_pos;
+            let o_max = [
+                o_min[0] + trap.clip_s[0] * trap.clip_grid,
+                o_min[1] + trap.clip_s[1] * trap.clip_grid,
+                o_min[2] + trap.clip_s[2] * trap.clip_grid,
+            ];
+            for i in 0..3 {
+                tight_min[i] = tight_min[i].min(o_min[i]);
+                tight_max[i] = tight_max[i].max(o_max[i]);
+            }
+        }
+    }
+
+    if tight_min[0] == i32::MAX {
+        server.broadcast_chan1(&ServMsg { text: "Trap edit ended with no changes detected.".lossy_cubestring() });
+        return;
+    }
+
+    let tight_min = std::array::from_fn(|i| tight_min[i].max(0));
+    let tight_max = std::array::from_fn(|i| tight_max[i].min(world_size));
+
+    let (clip_pos, clip_s, clip_grid, trigger_payload) = sauer_map::clipboard::generate_region_clipboard(current_map, tight_min, tight_max);
+
+    let mut trigger_entities = Vec::new();
+    for ent in &current_map.entities {
+        if ent.ent_type != ogz_rs::data::EntityType::Empty && super::trigger::in_aabb(ent.position, tight_min, tight_max) {
+            trigger_entities.push(ent.clone());
+        }
+    }
 
     let stored_candidate = crate::trap::StoredTrap {
         button_pos: state.traps[edit_state.trap_idx].button_pos,
         button_size: state.traps[edit_state.trap_idx].button_size,
         button_orient: state.traps[edit_state.trap_idx].button_orient,
-        trigger_payload: trigger_payload.clone(),
-        trigger_cells: trigger_cells.iter().map(|(pos, size, node)| {
-            let mut packed = Vec::new();
-            sauer_proto::data::clipboard::pack_cube(node, &mut packed);
-            (*pos, *size, packed)
-        }).collect(),
-        trigger_entities_mod: trigger_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
-        trigger_entities_add: trigger_entities_add.iter().map(|e| crate::trap::stored::StoredEntity::from(e)).collect(),
-        clip_pos,
-        clip_s,
-        clip_grid,
+        trigger_payload: Some(trigger_payload.clone()),
+        trigger_entities: trigger_entities.iter().map(crate::trap::stored::StoredEntity::from).collect(),
+        clip_pos, clip_s, clip_grid,
         time: state.traps[edit_state.trap_idx].time,
         timeout: state.traps[edit_state.trap_idx].timeout,
-        reset_payload: restore_payload.clone(),
-        reset_cells: reset_cells.iter().map(|(pos, size, node)| {
-            let mut packed = Vec::new();
-            sauer_proto::data::clipboard::pack_cube(node, &mut packed);
-            (*pos, *size, packed)
-        }).collect(),
-        reset_entities_mod: reset_entities_mod.iter().map(|(id, e)| (*id, crate::trap::stored::StoredEntity::from(e))).collect(),
     };
 
     let payload = sauer_map::Map::db_compress(&stored_candidate).unwrap_or_default();
     let payload_len = payload.len();
-
     let mut is_too_large = false;
+
     if payload_len > 1_000_000 {
         is_too_large = true;
-        server.send_chan1(id, &ServMsg {
-            text: format!("\x0C3[ERROR]\x0C7 Trap edit discarded! Payload size ({} KB) exceeds the 1MB engine limit. Please make smaller edits.", payload_len / 1024).lossy_cubestring(),
-        });
+        server.send_chan1(id, &ServMsg { text: format!("\x0C3[ERROR]\x0C7 Trap edit discarded! Payload size ({} KB) exceeds 1MB limit.", payload_len / 1024).lossy_cubestring() });
     } else {
         if payload_len > 600_000 {
-            server.send_chan1(id, &ServMsg {
-                text: format!("\x0C6[WARNING]\x0C7 Trap payload size is {} KB. Values over 1000 KB will be rejected to prevent map corruption.", payload_len / 1024).lossy_cubestring(),
-            });
+            server.send_chan1(id, &ServMsg { text: format!("\x0C6[WARNING]\x0C7 Trap payload size is {} KB. Keep edits smaller.", payload_len / 1024).lossy_cubestring() });
         }
-        
         let trap = &mut state.traps[edit_state.trap_idx];
-        trap.trigger_payload = trigger_payload;
-        trap.trigger_cells = trigger_cells.clone();
-        trap.trigger_entities_mod = trigger_entities_mod;
-        trap.trigger_entities_add = trigger_entities_add;
+        trap.trigger_payload = Some(trigger_payload);
+        trap.trigger_entities = trigger_entities;
         trap.clip_pos = clip_pos;
         trap.clip_s = clip_s;
         trap.clip_grid = clip_grid;
-        trap.reset_payload = restore_payload.clone();
-        trap.reset_cells = reset_cells;
-        trap.reset_entities_mod = reset_entities_mod;
     }
 
     let target_cn = crate::SERVER_BOT_CN as i32;
-    let region_sel = SelInfo {
-        o: sauer_proto::data::Vec3 {
-            x: clip_pos[0],
-            y: clip_pos[1],
-            z: clip_pos[2],
-        },
-        s: sauer_proto::data::Vec3 {
-            x: clip_s[0],
-            y: clip_s[1],
-            z: clip_s[2],
-        },
-        grid: clip_grid,
-        orient: sauer_proto::data::Orient::Left,
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
-    };
-
-    // Revert clients: chunk original state and broadcast.
-    if !trigger_cells.is_empty() {
-        let min = [region_sel.o.x, region_sel.o.y, region_sel.o.z];
-        let max = [
-            min[0] + region_sel.s.x * region_sel.grid,
-            min[1] + region_sel.s.y * region_sel.grid,
-            min[2] + region_sel.s.z * region_sel.grid,
-        ];
-        let payloads = sauer_map::chunking::chunk_region(
-            &edit_state.original_map,
-            min,
-            max,
-            4000,
-        );
-        let s_clone = server.clone();
-        tokio::spawn(async move {
-            crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
-        });
+    let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
+    state.map = Some(*edit_state.original_map.clone());
+    if let Some(map) = state.map.as_mut() {
+        if merged_vslots.len() > map.vslots.len() { map.vslots = merged_vslots; }
+        crate::map_state::update_server_items(map, server);
     }
+    drop(state);
 
-    // Restore entities to pre-recording state.
     let mut batch = Vec::new();
-    for &ent_id in &edit_state.affected_entities {
-        let ent = edit_state
-            .original_map
-            .entities
-            .get(ent_id)
-            .unwrap_or(&empty_ent);
-        let ent_type = ent.ent_type;
+    for &ent_id in &diff_ent_ids {
+        let ent = edit_state.original_map.entities.get(ent_id).unwrap_or(&empty_ent);
         batch.push(Client {
             client_num: target_cn,
             packet: channel1::EditEnt {
                 ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent_type,
+                pos: sauer_proto::data::Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                type_: ent.ent_type,
                 attrs: ent.attrs.map(|x| x as i32),
             },
         });
@@ -826,31 +591,17 @@ pub fn cmd_endtrap(ctx: &Context) {
             batch.clear();
         }
     }
-    if !batch.is_empty() {
-        server.broadcast_chan1(batch);
-    }
+    if !batch.is_empty() { server.broadcast_chan1(batch); }
 
-    // Restore server geometry to original, keeping the expanded vslot table so indices
-    // stay in sync with clients (recording may have appended new vslot entries).
-    let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
-    state.map = Some(*edit_state.original_map);
-    if let Some(map) = state.map.as_mut() {
-        if merged_vslots.len() > map.vslots.len() {
-            map.vslots = merged_vslots;
-        }
-        crate::map_state::update_server_items(map, server);
+    if diff_cells.len() > 0 {
+        let payloads = sauer_map::chunking::chunk_region(&edit_state.original_map, tight_min, tight_max, 4000);
+        let s_clone = server.clone();
+        tokio::spawn(async move { crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await; });
     }
-    drop(state);
 
     sync_traps_to_map(server, id);
 
     if !is_too_large {
-        server.broadcast_chan1(&ServMsg {
-            text: "Trap recorded and area reverted successfully.".lossy_cubestring(),
-        });
-    } else {
-        server.broadcast_chan1(&ServMsg {
-            text: "Area reverted. Trap changes were discarded due to payload size limits.".lossy_cubestring(),
-        });
+        server.broadcast_chan1(&ServMsg { text: "Trap recorded and area reverted successfully.".lossy_cubestring() });
     }
 }
