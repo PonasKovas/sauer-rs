@@ -212,6 +212,7 @@ impl PlayMaps {
 pub struct DeathrunPlay {
     maps: Arc<RwLock<PlayMaps>>,
     config: PlayConfig,
+    trap_highlights: dashmap::DashMap<u64, crate::edit::TrapHighlightState>,
 }
 
 impl DeathrunPlay {
@@ -219,6 +220,7 @@ impl DeathrunPlay {
         Self {
             maps: Arc::new(RwLock::new(PlayMaps::default())),
             config,
+            trap_highlights: dashmap::DashMap::new(),
         }
     }
 
@@ -786,15 +788,167 @@ impl Plugin for DeathrunPlay {
             .unwrap()
             .update_afk_pos(id, [packet.pos.x, packet.pos.y, packet.pos.z]);
 
-        let (is_playing, is_good, not_finished, round_start) = {
+        let (is_playing, is_good, not_finished, round_start, is_evil) = {
             let lock = maps.read().unwrap();
             (
                 lock.round_state == RoundState::Playing,
                 lock.evil_id != Some(id),
                 !lock.finished_players.iter().any(|(f_id, _)| *f_id == id),
                 lock.round_start_time,
+                lock.evil_id == Some(id),
             )
         };
+
+        if is_evil && is_playing {
+            let state = crate::map_state::get_server_state(server).read().unwrap();
+            let yaw_rad = (packet.dir.yaw as f32).to_radians();
+            let pitch_rad = (packet.dir.pitch as f32).to_radians();
+            let forward = [
+                -yaw_rad.sin() * pitch_rad.cos(),
+                yaw_rad.cos() * pitch_rad.cos(),
+                pitch_rad.sin(),
+            ];
+            let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
+            
+            let mut dist = 2048.0;
+            if let Some(map) = state.map.as_ref() {
+                if let Some(hit) = sauer_map::raycast::raycast_with_filter(
+                    map, origin, forward, 2048.0,
+                    |c| !c.is_empty() || c.material.volume == sauer_core::Volume::Glass,
+                ) {
+                    dist = hit.dist;
+                }
+            }
+            let hit_pt = [
+                origin[0] + forward[0] * dist,
+                origin[1] + forward[1] * dist,
+                origin[2] + forward[2] * dist,
+            ];
+
+            let hit_trap = state.traps.iter().position(|trap| {
+                let b_min = trap.button_pos;
+                let b_max = [
+                    b_min[0] + trap.button_size,
+                    b_min[1] + trap.button_size,
+                    b_min[2] + trap.button_size,
+                ];
+                (0..3).all(|ax| hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5)
+            });
+
+            let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| crate::edit::TrapHighlightState {
+                trap_idx: None,
+                look_start: tokio::time::Instant::now(),
+                last_sent: tokio::time::Instant::now(),
+                active: false,
+            });
+
+            if hl_state.trap_idx != hit_trap {
+                if hl_state.active {
+                    let mut batch = Vec::new();
+                    for i in 0..12 {
+                        batch.push(sauer_proto::Client {
+                            client_num: crate::SERVER_BOT_CN as i32,
+                            packet: sauer_proto::channel1::EditEnt {
+                                ent_id: 9980 + i as i32,
+                                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                                type_: sauer_proto::data::EntityType::Empty,
+                                attrs: [0, 0, 0, 0, 0],
+                            },
+                        });
+                    }
+                    server.send_chan1(id, batch);
+                }
+                hl_state.trap_idx = hit_trap;
+                hl_state.look_start = tokio::time::Instant::now();
+                hl_state.active = false;
+            }
+
+            if let Some(idx) = hit_trap {
+                if hl_state.last_sent.elapsed().as_millis() > 100 {
+                    let trap = &state.traps[idx];
+                    if trap.clip_s != [0, 0, 0] {
+                        let t_min = trap.clip_pos;
+                        let t_max = [
+                            t_min[0] + trap.clip_s[0] * trap.clip_grid,
+                            t_min[1] + trap.clip_s[1] * trap.clip_grid,
+                            t_min[2] + trap.clip_s[2] * trap.clip_grid,
+                        ];
+                        let len_x = t_max[0] - t_min[0];
+                        let len_y = t_max[1] - t_min[1];
+                        let len_z = t_max[2] - t_min[2];
+
+                        let edges = [
+                            (t_min[0], t_min[1], t_min[2], 1, len_x),
+                            (t_min[0], t_max[1], t_min[2], 1, len_x),
+                            (t_min[0], t_min[1], t_max[2], 1, len_x),
+                            (t_min[0], t_max[1], t_max[2], 1, len_x),
+                            (t_min[0], t_min[1], t_min[2], 2, len_y),
+                            (t_max[0], t_min[1], t_min[2], 2, len_y),
+                            (t_min[0], t_min[1], t_max[2], 2, len_y),
+                            (t_max[0], t_min[1], t_max[2], 2, len_y),
+                            (t_min[0], t_min[1], t_min[2], 0, len_z),
+                            (t_max[0], t_min[1], t_min[2], 0, len_z),
+                            (t_min[0], t_max[1], t_min[2], 0, len_z),
+                            (t_max[0], t_max[1], t_min[2], 0, len_z),
+                        ];
+
+                        let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+                        let hue = (time_ms % 2000) as f32 / 2000.0;
+                        let h = hue * 6.0;
+                        let x = 1.0 - ((h % 2.0) - 1.0).abs();
+                        let (r, g, b) = match h as i32 {
+                            0 => (1.0, x, 0.0),
+                            1 => (x, 1.0, 0.0),
+                            2 => (0.0, 1.0, x),
+                            3 => (0.0, x, 1.0),
+                            4 => (x, 0.0, 1.0),
+                            _ => (1.0, 0.0, x),
+                        };
+                        let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
+
+                        let mut batch = Vec::new();
+                        for (i, edge) in edges.iter().enumerate() {
+                            batch.push(sauer_proto::Client {
+                                client_num: crate::SERVER_BOT_CN as i32,
+                                packet: sauer_proto::channel1::EditEnt {
+                                    ent_id: 9980 + i as i32,
+                                    pos: sauer_proto::data::Vec3 {
+                                        x: edge.0 as f32,
+                                        y: edge.1 as f32,
+                                        z: edge.2 as f32,
+                                    },
+                                    type_: sauer_proto::data::EntityType::Particles,
+                                    attrs: [7, edge.3, edge.4, color_int, 0],
+                                },
+                            });
+                        }
+                        server.send_chan1(id, batch);
+                        hl_state.active = true;
+                        hl_state.last_sent = tokio::time::Instant::now();
+                    }
+                }
+            }
+        } else {
+            if let Some(mut hl) = self.trap_highlights.get_mut(&id) {
+                if hl.active {
+                    let mut batch = Vec::new();
+                    for i in 0..12 {
+                        batch.push(sauer_proto::Client {
+                            client_num: crate::SERVER_BOT_CN as i32,
+                            packet: sauer_proto::channel1::EditEnt {
+                                ent_id: 9980 + i as i32,
+                                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                                type_: sauer_proto::data::EntityType::Empty,
+                                attrs: [0, 0, 0, 0, 0],
+                            },
+                        });
+                    }
+                    server.send_chan1(id, batch);
+                    hl.active = false;
+                    hl.trap_idx = None;
+                }
+            }
+        }
 
         if is_playing && is_good && not_finished {
             let mut reached_flag = false;
@@ -961,6 +1115,7 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.write().unwrap().remove_player_afk(id);
+        self.trap_highlights.remove(&id);
         check_win_conditions(server, &maps, Some(id));
     }
 
