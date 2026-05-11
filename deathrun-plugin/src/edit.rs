@@ -150,6 +150,9 @@ impl Plugin for DeathrunEdit {
             })
         };
 
+        let edited_trap = state.trap_edit.as_ref().map(|e| e.trap_idx);
+        let target_trap = edited_trap.or(hit_trap);
+
         // 2. Process Trap Highlight
         let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| TrapHighlightState {
             trap_idx: None,
@@ -158,7 +161,7 @@ impl Plugin for DeathrunEdit {
             active: false,
         });
 
-        if hl_state.trap_idx != hit_trap {
+        if hl_state.trap_idx != target_trap {
             if hl_state.active {
                 let mut batch = Vec::new();
                 for i in 0..12 {
@@ -174,80 +177,156 @@ impl Plugin for DeathrunEdit {
                 }
                 server.send_chan1(id, batch);
             }
-            hl_state.trap_idx = hit_trap;
+            hl_state.trap_idx = target_trap;
             hl_state.look_start = tokio::time::Instant::now();
             hl_state.active = false;
         }
 
-        if let Some(idx) = hit_trap {
-    if hl_state.last_sent.elapsed().as_millis() > 100 {
+        if let Some(idx) = target_trap {
+            if hl_state.last_sent.elapsed().as_millis() > 100 {
+                let mut show_box = false;
+                let mut t_min = [0; 3];
+                let mut t_max = [0; 3];
+
+                if let Some(edit_state) = state.trap_edit.as_ref().filter(|e| e.trap_idx == idx) {
+                    let current_map = state.map.as_ref().unwrap();
+                    let world_size = current_map.size;
+                    let mut tight_min = [i32::MAX; 3];
+                    let mut tight_max = [i32::MIN; 3];
+                    
+                    sauer_map::octree::diff_bounds(&edit_state.original_map.root, &current_map.root, [0, 0, 0], world_size, &mut tight_min, &mut tight_max);
+                    
+                    let empty_ent = ogz_rs::data::Entity { position: [0.0; 3], attrs: [0; 5], ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![] };
+                    for i in 0..current_map.entities.len().max(edit_state.original_map.entities.len()) {
+                        if Some(i) == state.trap_edit_particle_ent { continue; }
+                        let c = current_map.entities.get(i).unwrap_or(&empty_ent);
+                        let o = edit_state.original_map.entities.get(i).unwrap_or(&empty_ent);
+                        if c != o {
+                            if c.ent_type != ogz_rs::data::EntityType::Empty {
+                                for j in 0..3 {
+                                    tight_min[j] = tight_min[j].min(c.position[j].floor() as i32);
+                                    tight_max[j] = tight_max[j].max(c.position[j].ceil() as i32 + 1);
+                                }
+                            }
+                            if o.ent_type != ogz_rs::data::EntityType::Empty {
+                                for j in 0..3 {
+                                    tight_min[j] = tight_min[j].min(o.position[j].floor() as i32);
+                                    tight_max[j] = tight_max[j].max(o.position[j].ceil() as i32 + 1);
+                                }
+                            }
+                        }
+                    }
+
+                    if edit_state.is_edit {
+                        let trap = &state.traps[idx];
+                        if trap.clip_s != [0, 0, 0] {
+                            let o_min = trap.clip_pos;
+                            let o_max = [
+                                o_min[0] + trap.clip_s[0] * trap.clip_grid,
+                                o_min[1] + trap.clip_s[1] * trap.clip_grid,
+                                o_min[2] + trap.clip_s[2] * trap.clip_grid,
+                            ];
+                            for i in 0..3 {
+                                tight_min[i] = tight_min[i].min(o_min[i]);
+                                tight_max[i] = tight_max[i].max(o_max[i]);
+                            }
+                        }
+                    }
+
+                    if tight_min[0] != i32::MAX {
+                        t_min = std::array::from_fn(|i| tight_min[i].max(0));
+                        t_max = std::array::from_fn(|i| tight_max[i].min(world_size));
+                        show_box = true;
+                    }
+                }
+                
+                if !show_box {
                     let trap = &state.traps[idx];
                     if trap.clip_s != [0, 0, 0] {
-                        let t_min = trap.clip_pos;
-                        let t_max = [
+                        t_min = trap.clip_pos;
+                        t_max = [
                             t_min[0] + trap.clip_s[0] * trap.clip_grid,
                             t_min[1] + trap.clip_s[1] * trap.clip_grid,
                             t_min[2] + trap.clip_s[2] * trap.clip_grid,
                         ];
-                        let len_x = t_max[0] - t_min[0];
-                        let len_y = t_max[1] - t_min[1];
-                        let len_z = t_max[2] - t_min[2];
-
-                        let edges = [
-    // X edges (using dir 1 instead of 2)
-    (t_min[0], t_min[1], t_min[2], 1, len_x),
-    (t_min[0], t_max[1], t_min[2], 1, len_x),
-    (t_min[0], t_min[1], t_max[2], 1, len_x),
-    (t_min[0], t_max[1], t_max[2], 1, len_x),
-
-    // Y edges (using dir 2 instead of 1)
-    (t_min[0], t_min[1], t_min[2], 2, len_y),
-    (t_max[0], t_min[1], t_min[2], 2, len_y),
-    (t_min[0], t_min[1], t_max[2], 2, len_y),
-    (t_max[0], t_min[1], t_max[2], 2, len_y),
-
-    // Z edges (confirmed correct)
-    (t_min[0], t_min[1], t_min[2], 0, len_z),
-    (t_max[0], t_min[1], t_min[2], 0, len_z),
-    (t_min[0], t_max[1], t_min[2], 0, len_z),
-    (t_max[0], t_max[1], t_min[2], 0, len_z),
-];
-
-                        let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-                        let hue = (time_ms % 2000) as f32 / 2000.0;
-                        let h = hue * 6.0;
-                        let x = 1.0 - ((h % 2.0) - 1.0).abs();
-                        let (r, g, b) = match h as i32 {
-                            0 => (1.0, x, 0.0),
-                            1 => (x, 1.0, 0.0),
-                            2 => (0.0, 1.0, x),
-                            3 => (0.0, x, 1.0),
-                            4 => (x, 0.0, 1.0),
-                            _ => (1.0, 0.0, x),
-                        };
-                        let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
-
-                        let mut batch = Vec::new();
-                        for (i, edge) in edges.iter().enumerate() {
-                            batch.push(sauer_proto::Client {
-                                client_num: crate::SERVER_BOT_CN as i32,
-                                packet: sauer_proto::channel1::EditEnt {
-                                    ent_id: 9980 + i as i32,
-                                    pos: sauer_proto::data::Vec3 {
-                                        x: edge.0 as f32,
-                                        y: edge.1 as f32,
-                                        z: edge.2 as f32,
-                                    },
-                                    type_: sauer_proto::data::EntityType::Particles,
-                                    attrs: [7, edge.3, edge.4, color_int, 0],
-                                },
-                            });
-                        }
-                        server.send_chan1(id, batch);
-                        hl_state.active = true;
-                        hl_state.last_sent = tokio::time::Instant::now();
+                        show_box = true;
                     }
+                }
 
+                if show_box {
+                    let len_x = t_max[0] - t_min[0];
+                    let len_y = t_max[1] - t_min[1];
+                    let len_z = t_max[2] - t_min[2];
+
+                    let edges = [
+                        // X edges (using dir 1 instead of 2)
+                        (t_min[0], t_min[1], t_min[2], 1, len_x),
+                        (t_min[0], t_max[1], t_min[2], 1, len_x),
+                        (t_min[0], t_min[1], t_max[2], 1, len_x),
+                        (t_min[0], t_max[1], t_max[2], 1, len_x),
+
+                        // Y edges (using dir 2 instead of 1)
+                        (t_min[0], t_min[1], t_min[2], 2, len_y),
+                        (t_max[0], t_min[1], t_min[2], 2, len_y),
+                        (t_min[0], t_min[1], t_max[2], 2, len_y),
+                        (t_max[0], t_min[1], t_max[2], 2, len_y),
+
+                        // Z edges (confirmed correct)
+                        (t_min[0], t_min[1], t_min[2], 0, len_z),
+                        (t_max[0], t_min[1], t_min[2], 0, len_z),
+                        (t_min[0], t_max[1], t_min[2], 0, len_z),
+                        (t_max[0], t_max[1], t_min[2], 0, len_z),
+                    ];
+
+                    let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+                    let hue = (time_ms % 2000) as f32 / 2000.0;
+                    let h = hue * 6.0;
+                    let x = 1.0 - ((h % 2.0) - 1.0).abs();
+                    let (r, g, b) = match h as i32 {
+                        0 => (1.0, x, 0.0),
+                        1 => (x, 1.0, 0.0),
+                        2 => (0.0, 1.0, x),
+                        3 => (0.0, x, 1.0),
+                        4 => (x, 0.0, 1.0),
+                        _ => (1.0, 0.0, x),
+                    };
+                    let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
+
+                    let mut batch = Vec::new();
+                    for (i, edge) in edges.iter().enumerate() {
+                        batch.push(sauer_proto::Client {
+                            client_num: crate::SERVER_BOT_CN as i32,
+                            packet: sauer_proto::channel1::EditEnt {
+                                ent_id: 9980 + i as i32,
+                                pos: sauer_proto::data::Vec3 {
+                                    x: edge.0 as f32,
+                                    y: edge.1 as f32,
+                                    z: edge.2 as f32,
+                                },
+                                type_: sauer_proto::data::EntityType::Particles,
+                                attrs: [7, edge.3, edge.4, color_int, 0],
+                            },
+                        });
+                    }
+                    server.send_chan1(id, batch);
+                    hl_state.active = true;
+                } else if hl_state.active {
+                    let mut batch = Vec::new();
+                    for i in 0..12 {
+                        batch.push(sauer_proto::Client {
+                            client_num: crate::SERVER_BOT_CN as i32,
+                            packet: sauer_proto::channel1::EditEnt {
+                                ent_id: 9980 + i as i32,
+                                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                                type_: sauer_proto::data::EntityType::Empty,
+                                attrs: [0, 0, 0, 0, 0],
+                            },
+                        });
+                    }
+                    server.send_chan1(id, batch);
+                    hl_state.active = false;
+                }
+                hl_state.last_sent = tokio::time::Instant::now();
             }
         }
 
