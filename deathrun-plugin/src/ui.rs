@@ -144,6 +144,16 @@ pub fn send_welcome_edit(server: &Server, id: u64) {
                 "/savemap",
                 "like a normal map. It must be edited on deathrun server for the traps to work.",
             ),
+            body(""),
+            b().color(THEME.evil)
+                .push_str("  WARNING: DO NOT /savemap while ANY trap is active!")
+                .build(),
+            b().color(THEME.dim)
+                .push_str("  Wait for all triggered traps to finish and revert first,")
+                .build(),
+            b().color(THEME.dim)
+                .push_str("  otherwise the map will be permanently broken.")
+                .build(),
         ],
     );
 }
