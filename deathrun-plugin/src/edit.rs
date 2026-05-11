@@ -975,12 +975,6 @@ impl Plugin for DeathrunEdit {
                     *server_clone.map_name.write().unwrap() = uploading_map_name.clone();
                     *server_clone.game_mode.write().unwrap() = GameMode::CoopEdit;
 
-                    server_clone.broadcast_chan1(&sauer_proto::channel1::MapChange {
-                        map_name: uploading_map_name,
-                        mode: GameMode::CoopEdit,
-                        has_items: false,
-                    });
-
                     server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
                     text: format!(
                         "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps. Size: \x0C2{:.1} KB\x0C7 comp / \x0C2{:.1} KB\x0C7 uncomp (\x0C2{:.1}%\x0C7 of OGZ).",
