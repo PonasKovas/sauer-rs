@@ -279,26 +279,11 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         // --- 1. APPLY ACTIVE ---
         recompose_traps(&server_clone);
 
-        if let Some(epos) = server_clone.players.try_get(actor_id).map(|p| p.position) {
-            for target_id in server_clone.client_ids() {
-                if let Some(p) = server_clone.players.try_get(target_id) {
-                    let d = [
-                        p.position.x - epos.x,
-                        p.position.y - epos.y,
-                        p.position.z - epos.z,
-                    ];
-                    let dist_sq = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                    if dist_sq < 500.0 * 500.0 {
-                        server_clone.send_chan1(
-                            target_id,
-                            &sauer_proto::Client {
-                                client_num: actor_cn,
-                                packet: sauer_proto::channel1::Sound { sound_id: 64 },
-                            },
-                        );
-                    }
-                }
-            }
+        if let Some(trigger_cn) = server_clone.get_cn(actor_id) {
+            server_clone.broadcast_chan1(&sauer_proto::Client {
+                client_num: trigger_cn as i32,
+                packet: sauer_proto::channel1::Sound { sound_id: 64 },
+            });
         }
 
         set_button_color(
@@ -322,7 +307,11 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             // Check if map was reloaded or round reset logic deleted the trap.
             let is_valid = {
                 let state = get_server_state(&server_clone).read().unwrap();
-                state.traps.get(trap_idx).map(|t| t.is_active) == Some(true)
+                if let Some(t) = state.traps.get(trap_idx) {
+                    t.is_active || reverted
+                } else {
+                    false
+                }
             };
             if !is_valid {
                 return; // Abort immediately, map changed!
