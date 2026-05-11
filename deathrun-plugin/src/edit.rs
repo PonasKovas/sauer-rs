@@ -404,16 +404,41 @@ impl Plugin for DeathrunEdit {
         }
 
         if should_update_pos {
-            let yaw_edit = (packet.dir.yaw as f32) + TRAP_EDIT_PARTICLE_YAW_OFFSET;
-            let pitch_edit = ((packet.dir.pitch as f32) + TRAP_EDIT_PARTICLE_PITCH_OFFSET).clamp(-90.0, 90.0);
-            
-            let yaw_rad_edit = yaw_edit.to_radians();
-            let pitch_rad_edit = pitch_edit.to_radians();
+            let yaw_rad = (packet.dir.yaw as f32).to_radians();
+            let pitch_rad = (packet.dir.pitch as f32).to_radians();
 
+            let yaw_off_rad = TRAP_EDIT_PARTICLE_YAW_OFFSET.to_radians();
+            let pitch_off_rad = TRAP_EDIT_PARTICLE_PITCH_OFFSET.to_radians();
+
+            // Calculate the orthonormal basis vectors for the camera
+            let f = [
+                -yaw_rad.sin() * pitch_rad.cos(),
+                yaw_rad.cos() * pitch_rad.cos(),
+                pitch_rad.sin(),
+            ];
+
+            let r = [
+                yaw_rad.cos(),
+                yaw_rad.sin(),
+                0.0,
+            ];
+
+            let u = [
+                yaw_rad.sin() * pitch_rad.sin(),
+                -yaw_rad.cos() * pitch_rad.sin(),
+                pitch_rad.cos(),
+            ];
+
+            // Calculate the offset vector in local camera space
+            let local_x = -yaw_off_rad.sin() * pitch_off_rad.cos();
+            let local_y = yaw_off_rad.cos() * pitch_off_rad.cos();
+            let local_z = pitch_off_rad.sin();
+
+            // Transform back to world space
             let forward_edit = [
-                -yaw_rad_edit.sin() * pitch_rad_edit.cos(),
-                yaw_rad_edit.cos() * pitch_rad_edit.cos(),
-                pitch_rad_edit.sin(),
+                r[0] * local_x + f[0] * local_y + u[0] * local_z,
+                r[1] * local_x + f[1] * local_y + u[1] * local_z,
+                r[2] * local_x + f[2] * local_y + u[2] * local_z,
             ];
 
             let mut dist_edit = TRAP_EDIT_PARTICLE_MAX_DIST;
