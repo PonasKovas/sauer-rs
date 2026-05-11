@@ -308,7 +308,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             let is_valid = {
                 let state = get_server_state(&server_clone).read().unwrap();
                 if let Some(t) = state.traps.get(trap_idx) {
-                    t.is_active || reverted
+                    t.is_active // Retains is_active == true during cooldown phase
                 } else {
                     false
                 }
@@ -325,7 +325,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             if !reverted && elapsed >= revert_dur {
                 {
                     let mut state = get_server_state(&server_clone).write().unwrap();
-                    state.traps[trap_idx].is_active = false;
+                    // We intentionally keep `is_active = true` to enforce the timeout cooldown
                     state.active_trap_stack.retain(|&id| id != trap_idx);
                 }
 
@@ -427,6 +427,12 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 if state.active_trap_stack.is_empty() {
                     state.base_map = None;
                 }
+            }
+        } else {
+            // End of the timeout cooldown
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            if state.traps.get(trap_idx).map_or(false, |t| t.is_active) {
+                state.traps[trap_idx].is_active = false;
             }
         }
 
