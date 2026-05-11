@@ -37,6 +37,8 @@ pub struct Map {
     pub blendmap_resolution: i32,
     pub blendmap_data: Option<Vec<u8>>,
     pub config: MapConfig,
+    
+    pub virt_state: crate::virt_ents::VirtEntState,
 }
 
 impl Map {
@@ -91,6 +93,7 @@ impl Map {
             blendmap_data: None,
             config: MapConfig::Modern { variables: vec![] },
             protected_regions: vec![],
+            virt_state: Default::default(),
         }
     }
 
@@ -119,6 +122,7 @@ impl Map {
             blendmap_data: ogz.blendmap_data,
             config: ogz.config,
             protected_regions: vec![],
+            virt_state: Default::default(),
         };
 
         map.compact_vslots();

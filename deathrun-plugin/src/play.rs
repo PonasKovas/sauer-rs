@@ -800,71 +800,47 @@ impl Plugin for DeathrunPlay {
         };
 
         if is_evil && is_playing {
-            let state = crate::map_state::get_server_state(server).read().unwrap();
-            let yaw_rad = (packet.dir.yaw as f32).to_radians();
-            let pitch_rad = (packet.dir.pitch as f32).to_radians();
-            let forward = [
-                -yaw_rad.sin() * pitch_rad.cos(),
-                yaw_rad.cos() * pitch_rad.cos(),
-                pitch_rad.sin(),
-            ];
-            let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
+            // --- READ PHASE: Raycast & AABB Calc ---
+            let mut target_trap = None;
+            let mut edges_to_draw = None;
             
-            let mut dist = 2048.0;
-            if let Some(map) = state.map.as_ref() {
-                if let Some(hit) = sauer_map::raycast::raycast_with_filter(
-                    map, origin, forward, 2048.0,
-                    |c| !c.is_empty() || c.material.volume == sauer_core::Volume::Glass,
-                ) {
-                    dist = hit.dist;
-                }
-            }
-            let hit_pt = [
-                origin[0] + forward[0] * dist,
-                origin[1] + forward[1] * dist,
-                origin[2] + forward[2] * dist,
-            ];
-
-            let hit_trap = state.traps.iter().position(|trap| {
-                let b_min = trap.button_pos;
-                let b_max = [
-                    b_min[0] + trap.button_size,
-                    b_min[1] + trap.button_size,
-                    b_min[2] + trap.button_size,
+            {
+                let state = crate::map_state::get_server_state(server).read().unwrap();
+                let yaw_rad = (packet.dir.yaw as f32).to_radians();
+                let pitch_rad = (packet.dir.pitch as f32).to_radians();
+                let forward = [
+                    -yaw_rad.sin() * pitch_rad.cos(),
+                    yaw_rad.cos() * pitch_rad.cos(),
+                    pitch_rad.sin(),
                 ];
-                (0..3).all(|ax| hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5)
-            });
-
-            let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| crate::edit::TrapHighlightState {
-                trap_idx: None,
-                look_start: tokio::time::Instant::now(),
-                last_sent: tokio::time::Instant::now(),
-                active: false,
-            });
-
-            if hl_state.trap_idx != hit_trap {
-                if hl_state.active {
-                    let mut batch = Vec::new();
-                    for i in 0..12 {
-                        batch.push(sauer_proto::Client {
-                            client_num: crate::SERVER_BOT_CN as i32,
-                            packet: sauer_proto::channel1::EditEnt {
-                                ent_id: 9980 + i as i32,
-                                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-                                type_: sauer_proto::data::EntityType::Empty,
-                                attrs: [0, 0, 0, 0, 0],
-                            },
-                        });
+                let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
+                
+                let mut dist = 2048.0;
+                if let Some(map) = state.map.as_ref() {
+                    if let Some(hit) = sauer_map::raycast::raycast_with_filter(
+                        map, origin, forward, 2048.0,
+                        |c| !c.is_empty() || c.material.volume == sauer_core::Volume::Glass,
+                    ) {
+                        dist = hit.dist;
                     }
-                    server.send_chan1(id, batch);
                 }
-                hl_state.trap_idx = hit_trap;
-                hl_state.look_start = tokio::time::Instant::now();
-                hl_state.active = false;
-            }
+                let hit_pt = [
+                    origin[0] + forward[0] * dist,
+                    origin[1] + forward[1] * dist,
+                    origin[2] + forward[2] * dist,
+                ];
 
-            if let Some(idx) = hit_trap {
-                if hl_state.last_sent.elapsed().as_millis() > 100 {
+                target_trap = state.traps.iter().position(|trap| {
+                    let b_min = trap.button_pos;
+                    let b_max = [
+                        b_min[0] + trap.button_size,
+                        b_min[1] + trap.button_size,
+                        b_min[2] + trap.button_size,
+                    ];
+                    (0..3).all(|ax| hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5)
+                });
+
+                if let Some(idx) = target_trap {
                     let trap = &state.traps[idx];
                     if trap.clip_s != [0, 0, 0] {
                         let t_min = trap.clip_pos;
@@ -877,7 +853,7 @@ impl Plugin for DeathrunPlay {
                         let len_y = t_max[1] - t_min[1];
                         let len_z = t_max[2] - t_min[2];
 
-                        let edges = [
+                        edges_to_draw = Some([
                             (t_min[0], t_min[1], t_min[2], 1, len_x),
                             (t_min[0], t_max[1], t_min[2], 1, len_x),
                             (t_min[0], t_min[1], t_max[2], 1, len_x),
@@ -890,62 +866,124 @@ impl Plugin for DeathrunPlay {
                             (t_max[0], t_min[1], t_min[2], 0, len_z),
                             (t_min[0], t_max[1], t_min[2], 0, len_z),
                             (t_max[0], t_max[1], t_min[2], 0, len_z),
-                        ];
+                        ]);
+                    }
+                }
+            } // Drop read lock
 
-                        let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-                        let hue = (time_ms % 2000) as f32 / 2000.0;
-                        let h = hue * 6.0;
-                        let x = 1.0 - ((h % 2.0) - 1.0).abs();
-                        let (r, g, b) = match h as i32 {
-                            0 => (1.0, x, 0.0),
-                            1 => (x, 1.0, 0.0),
-                            2 => (0.0, 1.0, x),
-                            3 => (0.0, x, 1.0),
-                            4 => (x, 0.0, 1.0),
-                            _ => (1.0, 0.0, x),
-                        };
-                        let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
+            // --- WRITE PHASE: DashMap & Virtual Entities ---
+            let mut clear_highlight = false;
+            let mut update_highlight = false;
 
-                        let mut batch = Vec::new();
-                        for (i, edge) in edges.iter().enumerate() {
-                            batch.push(sauer_proto::Client {
-                                client_num: crate::SERVER_BOT_CN as i32,
-                                packet: sauer_proto::channel1::EditEnt {
-                                    ent_id: 9980 + i as i32,
-                                    pos: sauer_proto::data::Vec3 {
-                                        x: edge.0 as f32,
-                                        y: edge.1 as f32,
-                                        z: edge.2 as f32,
-                                    },
-                                    type_: sauer_proto::data::EntityType::Particles,
-                                    attrs: [7, edge.3, edge.4, color_int, 0],
-                                },
-                            });
-                        }
-                        server.send_chan1(id, batch);
-                        hl_state.active = true;
+            let mut hl_state_clone = {
+                let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| crate::edit::TrapHighlightState {
+                    trap_idx: None,
+                    look_start: tokio::time::Instant::now(),
+                    last_sent: tokio::time::Instant::now(),
+                    active: false,
+                });
+
+                if hl_state.trap_idx != target_trap {
+                    if hl_state.active {
+                        clear_highlight = true;
+                    }
+                    hl_state.trap_idx = target_trap;
+                    hl_state.look_start = tokio::time::Instant::now();
+                    hl_state.active = false;
+                }
+
+                if target_trap.is_some() {
+                    if hl_state.last_sent.elapsed().as_millis() > 100 {
+                        update_highlight = true;
                         hl_state.last_sent = tokio::time::Instant::now();
                     }
                 }
+                
+                crate::edit::TrapHighlightState {
+                    trap_idx: hl_state.trap_idx,
+                    look_start: hl_state.look_start,
+                    last_sent: hl_state.last_sent,
+                    active: hl_state.active,
+                }
+            };
+
+            if clear_highlight {
+                let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+                if let Some(map) = state_w.map.as_mut() {
+                    let up = map.clear_virt_ents(id, "highlight");
+                    let cn = crate::SERVER_BOT_CN as i32;
+                    if !up.global_broadcast.is_empty() {
+                        server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                    }
+                    if !up.personal.is_empty() {
+                        server.send_chan1(id, up.personal.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                    }
+                }
+                hl_state_clone.active = false;
             }
-        } else {
-            if let Some(mut hl) = self.trap_highlights.get_mut(&id) {
-                if hl.active {
-                    let mut batch = Vec::new();
-                    for i in 0..12 {
-                        batch.push(sauer_proto::Client {
-                            client_num: crate::SERVER_BOT_CN as i32,
-                            packet: sauer_proto::channel1::EditEnt {
-                                ent_id: 9980 + i as i32,
-                                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-                                type_: sauer_proto::data::EntityType::Empty,
-                                attrs: [0, 0, 0, 0, 0],
-                            },
+
+            if update_highlight {
+                if let Some(edges) = edges_to_draw {
+                    let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+                    let hue = (time_ms % 2000) as f32 / 2000.0;
+                    let h = hue * 6.0;
+                    let x = 1.0 - ((h % 2.0) - 1.0).abs();
+                    let (r, g, b) = match h as i32 {
+                        0 => (1.0, x, 0.0),
+                        1 => (x, 1.0, 0.0),
+                        2 => (0.0, 1.0, x),
+                        3 => (0.0, x, 1.0),
+                        4 => (x, 0.0, 1.0),
+                        _ => (1.0, 0.0, x),
+                    };
+                    let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
+
+                    let mut fake_ents = Vec::new();
+                    for edge in &edges {
+                        fake_ents.push(sauer_map::virt_ents::FakeEnt {
+                            ent_type: sauer_proto::data::EntityType::Particles,
+                            position: [edge.0 as f32, edge.1 as f32, edge.2 as f32],
+                            attrs: [7, edge.3, edge.4, color_int, 0],
                         });
                     }
-                    server.send_chan1(id, batch);
+                    let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+                    if let Some(map) = state_w.map.as_mut() {
+                        let up = map.update_virt_ents(id, "highlight", fake_ents);
+                        let cn = crate::SERVER_BOT_CN as i32;
+                        if !up.global_broadcast.is_empty() {
+                            server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                        }
+                        if !up.personal.is_empty() {
+                            server.send_chan1(id, up.personal.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                        }
+                    }
+                    hl_state_clone.active = true;
+                }
+            }
+
+            if let Some(mut entry) = self.trap_highlights.get_mut(&id) {
+                entry.active = hl_state_clone.active;
+            }
+        } else {
+            let mut clear_highlight = false;
+            if let Some(mut hl) = self.trap_highlights.get_mut(&id) {
+                if hl.active {
+                    clear_highlight = true;
                     hl.active = false;
                     hl.trap_idx = None;
+                }
+            }
+            if clear_highlight {
+                let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+                if let Some(map) = state_w.map.as_mut() {
+                    let up = map.clear_virt_ents(id, "highlight");
+                    let cn = crate::SERVER_BOT_CN as i32;
+                    if !up.global_broadcast.is_empty() {
+                        server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                    }
+                    if !up.personal.is_empty() {
+                        server.send_chan1(id, up.personal.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                    }
                 }
             }
         }
@@ -1116,6 +1154,17 @@ impl Plugin for DeathrunPlay {
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.write().unwrap().remove_player_afk(id);
         self.trap_highlights.remove(&id);
+
+        let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+        if let Some(map) = state_w.map.as_mut() {
+            let up = map.clear_all_virt_ents_for_player(id);
+            let cn = crate::SERVER_BOT_CN as i32;
+            if !up.global_broadcast.is_empty() {
+                server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+            }
+        }
+        drop(state_w);
+
         check_win_conditions(server, &maps, Some(id));
     }
 

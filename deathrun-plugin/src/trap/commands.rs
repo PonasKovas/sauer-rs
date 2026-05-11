@@ -501,22 +501,19 @@ pub fn cmd_endtrap(ctx: &Context) {
         }
     };
 
-    if let Some(ent_id) = state.trap_edit_particle_ent.take() {
-        server.broadcast_chan1(&Client {
-            client_num: crate::SERVER_BOT_CN as i32,
-            packet: channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-                type_: sauer_proto::data::EntityType::Empty,
-                attrs: [0; 5],
-            },
-        });
-        if let Some(map) = state.map.as_mut() {
-            if let Some(ent) = map.entities.get_mut(ent_id) {
-                ent.ent_type = ogz_rs::data::EntityType::Empty;
-                ent.attrs = [0; 5];
-            }
-        }
+    let mut glob = Vec::new();
+    let mut pers = Vec::new();
+    if let Some(map) = state.map.as_mut() {
+        let up = map.clear_virt_ents(id, "edit_particle");
+        glob = up.global_broadcast;
+        pers = up.personal;
+    }
+    let cn = crate::SERVER_BOT_CN as i32;
+    if !glob.is_empty() {
+        server.broadcast_chan1(glob.into_iter().map(|p| Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+    }
+    if !pers.is_empty() {
+        server.send_chan1(id, pers.into_iter().map(|p| Client { client_num: cn, packet: p }).collect::<Vec<_>>());
     }
 
     let current_map = state.map.as_ref().unwrap();
@@ -538,6 +535,7 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     let mut diff_ent_ids = std::collections::HashSet::new();
     for i in 0..current_map.entities.len().max(edit_state.original_map.entities.len()) {
+        if current_map.virt_state.global_pool.contains(&i) { continue; } // Ignore virtual entities
         let c = current_map.entities.get(i).unwrap_or(&empty_ent);
         let o = edit_state.original_map.entities.get(i).unwrap_or(&empty_ent);
         if c != o {
@@ -622,9 +620,11 @@ pub fn cmd_endtrap(ctx: &Context) {
 
     let target_cn = crate::SERVER_BOT_CN as i32;
     let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
+    let virt_state = std::mem::take(&mut state.map.as_mut().unwrap().virt_state);
     state.map = Some(*edit_state.original_map.clone());
     if let Some(map) = state.map.as_mut() {
         if merged_vslots.len() > map.vslots.len() { map.vslots = merged_vslots; }
+        map.virt_state = virt_state;
         crate::map_state::update_server_items(map, server);
     }
     drop(state);

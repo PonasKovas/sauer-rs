@@ -21,6 +21,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         None => return, // Nothing to recompose
     };
 
+    let virt_state = std::mem::take(&mut state.map.as_mut().unwrap().virt_state);
     let old_map = state.map.clone().unwrap();
     let mut new_map = *base_map;
 
@@ -70,7 +71,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     let mut diff_ent_ids = std::collections::HashSet::new();
     let empty_ent = ogz_rs::data::Entity { position: [0.0; 3], attrs: [0; 5], ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![] };
     for i in 0..new_map.entities.len().max(old_map.entities.len()) {
-        if Some(i) == state.trap_edit_particle_ent { continue; } // Ignore edit particle!
+        if virt_state.global_pool.contains(&i) { continue; } // Ignore virtual entities
         let c = new_map.entities.get(i).unwrap_or(&empty_ent);
         let o = old_map.entities.get(i).unwrap_or(&empty_ent);
         if c != o {
@@ -78,6 +79,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         }
     }
 
+    new_map.virt_state = virt_state;
     state.map = Some(new_map);
     crate::map_state::update_server_items(state.map.as_ref().unwrap(), server);
 
@@ -171,31 +173,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             pz = button_pos[2] as f32 + offset;
         }
 
-        let ent_id = {
-            let mut state = get_server_state(&server_clone).write().unwrap();
-            let mut id = None;
-            if let Some(map) = state.map.as_mut() {
-                let blank = ogz_rs::data::Entity {
-                    position: [px, py, pz],
-                    attrs: [0, 0, 0, 1337, 7331],
-                    ent_type: ogz_rs::data::EntityType::Particles, // Secured immediately
-                    extra_data: vec![],
-                };
-                let i = map
-                    .entities
-                    .iter()
-                    .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
-                    .unwrap_or_else(|| {
-                        let idx = map.entities.len();
-                        map.entities.push(blank.clone());
-                        idx
-                    });
-                map.entities[i] = blank;
-                id = Some(i);
-            }
-            id
-        };
-
+        let namespace = format!("trap_prog_{}", trap_idx);
         let actor_cn = crate::SERVER_BOT_CN as i32;
 
         let target_ids = {
@@ -214,25 +192,30 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         };
 
         // Send initial 100% progress BEFORE applying trigger (beats client PasteServer freeze)
-        if let Some(id) = ent_id {
-            let color = (0 << 8) | (15 << 4); // Full green
-            for &target_id in &target_ids {
-                server_clone.send_chan1(
-                    target_id,
-                    &sauer_proto::Client {
-                        client_num: actor_cn,
-                        packet: sauer_proto::channel1::EditEnt {
-                            ent_id: id as i32,
-                            pos: sauer_proto::data::Vec3 {
-                                x: px,
-                                y: py,
-                                z: pz,
-                            },
-                            type_: sauer_proto::data::EntityType::Particles,
-                            attrs: [5, 100, color as i32, 1337, 7331],
-                        },
-                    },
-                );
+        let color = (0 << 8) | (15 << 4); // Full green
+        let initial_fake_ent = sauer_map::virt_ents::FakeEnt {
+            ent_type: sauer_proto::data::EntityType::Particles,
+            position: [px, py, pz],
+            attrs: [5, 100, color as i32, 1337, 7331],
+        };
+        {
+            let mut state = get_server_state(&server_clone).write().unwrap();
+            if let Some(map) = state.map.as_mut() {
+                let mut glob = Vec::new();
+                let mut pers = std::collections::HashMap::new();
+                for &target_id in &target_ids {
+                    let mut up = map.update_virt_ents(target_id, &namespace, vec![initial_fake_ent.clone()]);
+                    glob.append(&mut up.global_broadcast);
+                    pers.insert(target_id, up.personal);
+                }
+                if !glob.is_empty() {
+                    server_clone.broadcast_chan1(glob.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                }
+                for (tid, pkts) in pers {
+                    if !pkts.is_empty() {
+                        server_clone.send_chan1(tid, pkts.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                    }
+                }
             }
         }
 
@@ -324,34 +307,39 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 reverted = true;
             }
 
-            if let Some(id) = ent_id {
-                let remaining = total_dur.saturating_sub(elapsed).as_millis() as i32;
-                let progress = (remaining * 100 / effective_timeout as i32).clamp(0, 100);
+            let remaining = total_dur.saturating_sub(elapsed).as_millis() as i32;
+            let progress = (remaining * 100 / effective_timeout as i32).clamp(0, 100);
 
-                if progress != last_progress {
-                    last_progress = progress;
+            if progress != last_progress {
+                last_progress = progress;
 
-                    let g = (progress * 15 / 100).clamp(0, 15);
-                    let r = ((100 - progress) * 15 / 100).clamp(0, 15);
-                    let color = (r << 8) | (g << 4);
+                let g = (progress * 15 / 100).clamp(0, 15);
+                let r = ((100 - progress) * 15 / 100).clamp(0, 15);
+                let color = (r << 8) | (g << 4);
+                let prog_fake_ent = sauer_map::virt_ents::FakeEnt {
+                    ent_type: sauer_proto::data::EntityType::Particles,
+                    position: [px, py, pz],
+                    attrs: [5, progress as i32, color as i32, 1337, 7331],
+                };
 
-                    for &target_id in &target_ids {
-                        server_clone.send_chan1(
-                            target_id,
-                            &sauer_proto::Client {
-                                client_num: actor_cn,
-                                packet: sauer_proto::channel1::EditEnt {
-                                    ent_id: id as i32,
-                                    pos: sauer_proto::data::Vec3 {
-                                        x: px,
-                                        y: py,
-                                        z: pz,
-                                    },
-                                    type_: sauer_proto::data::EntityType::Particles,
-                                    attrs: [5, progress as i32, color as i32, 1337, 7331],
-                                },
-                            },
-                        );
+                let mut glob = Vec::new();
+                let mut pers = std::collections::HashMap::new();
+                {
+                    let mut state = get_server_state(&server_clone).write().unwrap();
+                    if let Some(map) = state.map.as_mut() {
+                        for &target_id in &target_ids {
+                            let mut up = map.update_virt_ents(target_id, &namespace, vec![prog_fake_ent.clone()]);
+                            glob.append(&mut up.global_broadcast);
+                            pers.insert(target_id, up.personal);
+                        }
+                    }
+                }
+                if !glob.is_empty() {
+                    server_clone.broadcast_chan1(glob.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                }
+                for (tid, pkts) in pers {
+                    if !pkts.is_empty() {
+                        server_clone.send_chan1(tid, pkts.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
                     }
                 }
             }
@@ -377,33 +365,25 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
         }
 
-        if let Some(id) = ent_id {
+        {
+            let mut glob = Vec::new();
+            let mut pers = std::collections::HashMap::new();
             let mut state = get_server_state(&server_clone).write().unwrap();
             if let Some(map) = state.map.as_mut() {
-                if let Some(ent) = map.entities.get_mut(id) {
-                    ent.ent_type = ogz_rs::data::EntityType::Empty;
-                    ent.attrs = [0; 5];
+                for &target_id in &target_ids {
+                    let mut up = map.clear_virt_ents(target_id, &namespace);
+                    glob.append(&mut up.global_broadcast);
+                    pers.insert(target_id, up.personal);
                 }
             }
             drop(state);
-
-            for &target_id in &target_ids {
-                server_clone.send_chan1(
-                    target_id,
-                    &sauer_proto::Client {
-                        client_num: actor_cn,
-                        packet: sauer_proto::channel1::EditEnt {
-                            ent_id: id as i32,
-                            pos: sauer_proto::data::Vec3 {
-                                x: 0.0,
-                                y: 0.0,
-                                z: 0.0,
-                            },
-                            type_: sauer_proto::data::EntityType::Empty,
-                            attrs: [0; 5],
-                        },
-                    },
-                );
+            if !glob.is_empty() {
+                server_clone.broadcast_chan1(glob.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+            }
+            for (tid, pkts) in pers {
+                if !pkts.is_empty() {
+                    server_clone.send_chan1(tid, pkts.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                }
             }
         }
 
