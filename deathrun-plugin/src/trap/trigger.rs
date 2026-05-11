@@ -121,6 +121,10 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
 
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
+    if state.trap_edit.is_some() {
+        return;
+    }
+
     if trap_idx >= state.traps.len() {
         return;
     }

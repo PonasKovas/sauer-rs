@@ -801,7 +801,7 @@ impl Plugin for DeathrunPlay {
 
         if is_evil && is_playing {
             // --- READ PHASE: Raycast & AABB Calc ---
-            let mut target_trap = None;
+            let target_trap;
             let mut edges_to_draw = None;
             
             {
@@ -1245,6 +1245,9 @@ impl Plugin for DeathrunPlay {
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
         let trap_idx = {
             let state = crate::map_state::get_server_state(server).read().unwrap();
+            if state.trap_edit.is_some() {
+                return;
+            }
             state.traps.iter().position(|trap| {
                 let b_min = trap.button_pos;
                 let b_max = [

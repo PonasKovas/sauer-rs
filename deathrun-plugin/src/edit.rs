@@ -119,9 +119,9 @@ impl Plugin for DeathrunEdit {
         let is_spectator = server.players.try_get(id).map_or(true, |p| p.client_state == ClientState::Spectator);
 
         // --- READ PHASE 1: Target Trap & AABB ---
-        let mut target_trap = None;
+        let target_trap;
         let mut edges_to_draw = None;
-        let mut is_trap_edit_active = false;
+        let is_trap_edit_active;
 
         let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
 
@@ -580,6 +580,9 @@ impl Plugin for DeathrunEdit {
 
         let trap_to_trigger = {
             let state = crate::map_state::get_server_state(&server).read().unwrap();
+            if state.trap_edit.is_some() {
+                return;
+            }
 
             state.traps.iter().position(|trap| {
                 let b_min = trap.button_pos;
