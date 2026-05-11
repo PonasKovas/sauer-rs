@@ -51,36 +51,30 @@ pub fn swap_aabb_state(
     map.invalidate_cache();
     crate::map_state::update_server_items(map, server);
 
-    let actor_cn = crate::SERVER_BOT_CN as i32;
-    let mut batch = Vec::new();
-    for &id in &modified_ids {
-        let ent = &map.entities[id];
-        batch.push(Client {
-            client_num: actor_cn,
-            packet: channel1::EditEnt {
-                ent_id: id as i32,
-                pos: Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
-                type_: ent.ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
+        let actor_cn = crate::SERVER_BOT_CN as i32;
+        let mut batch = Vec::new();
+        for &id in &modified_ids {
+            let ent = &map.entities[id];
+            batch.push(Client {
+                client_num: actor_cn,
+                packet: channel1::EditEnt {
+                    ent_id: id as i32,
+                    pos: Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                    type_: ent.ent_type,
+                    attrs: ent.attrs.map(|x| x as i32),
+                }
+            });
+            if batch.len() >= 50 {
+                server.broadcast_chan1(batch.clone());
+                batch.clear();
             }
-        });
-        if batch.len() >= 50 {
-            server.broadcast_chan1(batch.clone());
-            batch.clear();
         }
-    }
-    if !batch.is_empty() {
-        server.broadcast_chan1(batch);
-    }
+        if !batch.is_empty() {
+            server.broadcast_chan1(batch);
+        }
 
-    let payloads = sauer_map::chunking::chunk_region(map, min, max, 4000);
-    let s_clone = server.clone();
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
-    });
-
-    modified_ids.into_iter().collect()
-}
+        modified_ids.into_iter().collect()
+    }
 
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
@@ -281,6 +275,15 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             BUTTON_COLOR_ACTIVE,
         );
 
+        let payloads = {
+            let state = get_server_state(&server_clone).read().unwrap();
+            sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), min, max, 4000)
+        };
+        let s_clone = server_clone.clone();
+        tokio::spawn(async move {
+            crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
+        });
+
         let start = tokio::time::Instant::now();
         let total_dur = std::time::Duration::from_millis(effective_timeout as u64);
         let revert_dur = std::time::Duration::from_millis(trap_time as u64);
@@ -327,6 +330,16 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                         BUTTON_COLOR_ACTIVE,
                     );
                 }
+                
+                let payloads = {
+                    let state = get_server_state(&server_clone).read().unwrap();
+                    sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), min, max, 4000)
+                };
+                let s_clone = server_clone.clone();
+                tokio::spawn(async move {
+                    crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
+                });
+                
                 reverted = true;
             }
 
@@ -365,15 +378,25 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         }
 
         if !reverted {
-            let mut state = get_server_state(&server_clone).write().unwrap();
-            swap_aabb_state(
-                &server_clone,
-                state.map.as_mut().unwrap(),
-                min,
-                max,
-                &ready_payload,
-                &ready_entities,
-            );
+            {
+                let mut state = get_server_state(&server_clone).write().unwrap();
+                swap_aabb_state(
+                    &server_clone,
+                    state.map.as_mut().unwrap(),
+                    min,
+                    max,
+                    &ready_payload,
+                    &ready_entities,
+                );
+            }
+            let payloads = {
+                let state = get_server_state(&server_clone).read().unwrap();
+                sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), min, max, 4000)
+            };
+            let s_clone = server_clone.clone();
+            tokio::spawn(async move {
+                crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
+            });
         }
 
         if let Some(id) = ent_id {

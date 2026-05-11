@@ -386,15 +386,27 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         if let Some(payload) = &trigger_payload {
             let min = clip_pos;
             let max = [min[0] + clip_s[0]*clip_grid, min[1] + clip_s[1]*clip_grid, min[2] + clip_s[2]*clip_grid];
-            let mut state = get_server_state(server).write().unwrap();
-            super::trigger::swap_aabb_state(
-                &std::sync::Arc::clone(&server),
-                state.map.as_mut().unwrap(),
-                min,
-                max,
-                payload,
-                &trigger_entities,
-            );
+            {
+                let mut state = get_server_state(server).write().unwrap();
+                super::trigger::swap_aabb_state(
+                    &std::sync::Arc::clone(&server),
+                    state.map.as_mut().unwrap(),
+                    min,
+                    max,
+                    payload,
+                    &trigger_entities,
+                );
+            }
+            
+            let payloads = {
+                let state = get_server_state(server).read().unwrap();
+                sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), min, max, 4000)
+            };
+            let s_clone = server.clone();
+            let target_cn = crate::SERVER_BOT_CN as i32;
+            tokio::spawn(async move {
+                crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
+            });
         }
     }
 
