@@ -63,6 +63,7 @@ pub struct PlayMaps {
     pub evil_id: Option<u64>,
     pub round_state: RoundState,
     pub round_epoch: u64,
+    pub round_task: Option<tokio::task::JoinHandle<()>>,
     pub spawned_this_round: HashSet<u64>,
     pub round_start_time: Option<Instant>,
     pub finished_players: Vec<(u64, Duration)>,
@@ -84,6 +85,7 @@ impl Default for PlayMaps {
             evil_id: None,
             round_state: RoundState::NotStarted,
             round_epoch: 0,
+            round_task: None,
             spawned_this_round: HashSet::new(),
             round_start_time: None,
             finished_players: Vec::new(),
@@ -248,16 +250,23 @@ impl DeathrunPlay {
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
-    let (map, my_epoch) = {
+    let (map, my_epoch, initial_participants) = {
         let mut lock = maps.write().unwrap();
         if lock.rotation.is_empty() {
             return;
         }
+
+        // Abort previous loading task if any, to prevent geometry interleaving
+        if let Some(task) = lock.round_task.take() {
+            task.abort();
+        }
+
         lock.round_epoch += 1;
         let epoch = lock.round_epoch;
         lock.round_state = RoundState::MapLoading;
         lock.spawned_this_round.clear();
         lock.finished_players.clear();
+        lock.evil_id = None;
 
         if lock.rotation_idx >= lock.rotation.len() {
             lock.rotation.shuffle(&mut rand::thread_rng());
@@ -273,13 +282,14 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         let state_lock = get_server_state(&server);
         let state_read = state_lock.read().unwrap();
         let map = state_read.map.as_ref().unwrap();
-        (map.clone(), epoch)
+        (map.clone(), epoch, server.client_ids())
     };
 
-    tokio::spawn(async move {
-        let ids = server.client_ids();
+    let maps_clone = Arc::clone(&maps);
+    let handle = tokio::spawn(async move {
+        let ids = initial_participants;
         if ids.is_empty() {
-            let mut lock = maps.write().unwrap();
+            let mut lock = maps_clone.write().unwrap();
             if lock.round_epoch == my_epoch {
                 lock.round_state = RoundState::NotStarted;
                 server.set_master_mode(MasterMode::Veto);
@@ -294,7 +304,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         };
 
         {
-            let mut lock = maps.write().unwrap();
+            let mut lock = maps_clone.write().unwrap();
             if lock.round_epoch != my_epoch {
                 return;
             }
@@ -366,20 +376,22 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         )
         .await;
 
-        let current_ids;
         let current_evil;
         {
-            let mut lock = maps.write().unwrap();
+            let mut lock = maps_clone.write().unwrap();
             if lock.round_epoch != my_epoch {
                 return;
             }
             lock.round_state = RoundState::Playing;
             lock.round_start_time = Some(Instant::now());
-            current_ids = server.client_ids();
             current_evil = lock.evil_id;
         }
 
-        for &id in &current_ids {
+        for &id in &ids {
+            if server.players.try_get(id).is_none() {
+                continue;
+            }
+
             server.set_spectator(id, false); // Moves them into Dead state safely
             if let Some(cn) = server.get_cn(id) {
                 server.send_chan1(
@@ -396,7 +408,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
                     state.ammo.grenade_launcher = 0;
                 }
             });
-            maps.write().unwrap().spawned_this_round.insert(id);
+            maps_clone.write().unwrap().spawned_this_round.insert(id);
         }
 
         let evil_name = current_evil
@@ -405,16 +417,25 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
         // Send the generic connection welcome rules to the new player first
         if let Some(w_id) = welcome_id {
-            let (is_solo, map_name) = {
-                let lock = maps.read().unwrap();
-                (lock.evil_id.is_none(), lock.current_map.clone())
-            };
-            ui::send_welcome_play(&server, w_id, map_name.as_deref(), is_solo);
+            if server.players.try_get(w_id).is_some() {
+                let (is_solo, map_name) = {
+                    let lock = maps_clone.read().unwrap();
+                    (lock.evil_id.is_none(), lock.current_map.clone())
+                };
+                ui::send_welcome_play(&server, w_id, map_name.as_deref(), is_solo);
+            }
         }
 
         // Then broadcast the round state/gamemode to everyone
         ui::broadcast_round_start(&server, evil_name.as_deref());
+
+        let mut lock = maps_clone.write().unwrap();
+        if lock.round_epoch == my_epoch {
+            lock.round_task = None;
+        }
     });
+
+    maps.write().unwrap().round_task = Some(handle);
 }
 
 fn check_win_conditions(
@@ -761,7 +782,7 @@ impl Plugin for DeathrunPlay {
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
-            let is_solo_round = lock.round_state == RoundState::Playing && lock.evil_id.is_none();
+            let is_solo_round = (lock.round_state == RoundState::Playing || lock.round_state == RoundState::MapLoading) && lock.evil_id.is_none();
             let is_waiting =
                 lock.round_state == RoundState::NotStarted && server.client_count() > 1;
             (is_first, is_solo_round, is_waiting)
