@@ -448,18 +448,14 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        if cmd == "#newtrap" || cmd == "#deltrap" {
-            if get_server_state(&server)
-                .read()
-                .unwrap()
-                .trap_edit
-                .is_some()
-            {
-                ui::send_warn(
-                    &server,
-                    id,
-                    "Cannot add or remove traps while editing one. Use #endtrap first.",
-                );
+        if cmd == "#newtrap" || cmd == "#deltrap" || cmd == "#settrap" || cmd == "#edittrap" {
+            let state = get_server_state(&server).read().unwrap();
+            if state.trap_edit.is_some() {
+                ui::send_warn(&server, id, "Cannot edit traps while #edittrap is active. Use #endtrap first.");
+                return;
+            }
+            if !state.active_trap_stack.is_empty() {
+                ui::send_warn(&server, id, "Cannot edit traps while a trap is currently activated. Wait for it to reset.");
                 return;
             }
         }
@@ -610,7 +606,8 @@ impl Plugin for DeathrunEdit {
             state.waiting_for_map = true;
         state.traps.clear();
         state.trap_edit = None;
-        state.active_traps.clear();
+        state.base_map = None;
+        state.active_trap_stack.clear();
         state.client_vslot_bloat.clear();
     }
     for client_id in server.client_ids() {
@@ -768,7 +765,8 @@ impl Plugin for DeathrunEdit {
                     s.traps = loaded_traps;
                     s.waiting_for_map = false;
                     s.trap_edit = None;
-                    s.active_traps.clear();
+                    s.base_map = None;
+                    s.active_trap_stack.clear();
                 }
                 info!("id {id} uploaded a map (world_size={world_size}); state loaded");
 
@@ -1072,8 +1070,9 @@ impl Plugin for DeathrunEdit {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
             state.map = Some(Map::new_empty(world_size));
             state.traps.clear();
-        state.active_traps.clear();
+        state.active_trap_stack.clear();
         state.trap_edit = None;
+        state.base_map = None;
         state.trap_edit_particle_ent = None;
         state.client_vslot_bloat.clear();
     } else if let Some(map) = state.map.as_mut() {

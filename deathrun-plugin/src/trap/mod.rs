@@ -19,13 +19,6 @@ pub const BUTTON_SIDE_TEX: u16 = 242;
 pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
 pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct ActiveTrap {
-    pub trap_idx: usize,
-    pub progress_bar_ent_id: Option<usize>,
-    pub assigned_ids: Vec<usize>,
-}
-
 pub struct TrapEditState {
     pub trap_idx: usize,
     pub original_map: Box<sauer_map::Map>,

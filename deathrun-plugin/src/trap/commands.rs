@@ -386,18 +386,61 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         if let Some(payload) = &trigger_payload {
             let min = clip_pos;
             let max = [min[0] + clip_s[0]*clip_grid, min[1] + clip_s[1]*clip_grid, min[2] + clip_s[2]*clip_grid];
+            
+            let mut diff_ent_ids = std::collections::HashSet::new();
             {
                 let mut state = get_server_state(server).write().unwrap();
-                super::trigger::swap_aabb_state(
-                    &std::sync::Arc::clone(&server),
-                    state.map.as_mut().unwrap(),
-                    min,
-                    max,
-                    payload,
-                    &trigger_entities,
-                );
+                let map = state.map.as_mut().unwrap();
+
+                for (id, ent) in map.entities.iter_mut().enumerate() {
+                    if ent.ent_type != sauer_proto::data::EntityType::Empty && super::trigger::in_aabb(ent.position, min, max) {
+                        ent.ent_type = sauer_proto::data::EntityType::Empty;
+                        ent.attrs = [0; 5];
+                        diff_ent_ids.insert(id);
+                    }
+                }
+
+                for new_ent in &trigger_entities {
+                    if let Some(id) = map.entities.iter().position(|e| e.ent_type == sauer_proto::data::EntityType::Empty) {
+                        map.entities[id] = new_ent.clone();
+                        diff_ent_ids.insert(id);
+                    } else {
+                        let id = map.entities.len();
+                        map.entities.push(new_ent.clone());
+                        diff_ent_ids.insert(id);
+                    }
+                }
+
+                let mut paste_sel = payload.sel.clone();
+                paste_sel.o = sauer_proto::data::Vec3 { x: min[0], y: min[1], z: min[2] };
+                map.apply_block(&paste_sel, payload.nodes.clone(), false);
+                map.invalidate_cache();
+                crate::map_state::update_server_items(map, server);
             }
             
+            let actor_cn = crate::SERVER_BOT_CN as i32;
+            let mut batch = Vec::new();
+            for id in diff_ent_ids {
+                let state = get_server_state(server).read().unwrap();
+                let ent = &state.map.as_ref().unwrap().entities[id];
+                batch.push(Client {
+                    client_num: actor_cn,
+                    packet: channel1::EditEnt {
+                        ent_id: id as i32,
+                        pos: sauer_proto::data::Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                        type_: ent.ent_type,
+                        attrs: ent.attrs.map(|x| x as i32),
+                    }
+                });
+                if batch.len() >= 50 {
+                    server.broadcast_chan1(batch.clone());
+                    batch.clear();
+                }
+            }
+            if !batch.is_empty() {
+                server.broadcast_chan1(batch);
+            }
+
             let payloads = {
                 let state = get_server_state(server).read().unwrap();
                 sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), min, max, 4000)

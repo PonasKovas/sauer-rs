@@ -62,7 +62,8 @@ pub struct DeathrunState {
     pub traps: Vec<Trap>,
     pub trap_edit: Option<crate::trap::TrapEditState>,
     pub trap_edit_particle_ent: Option<usize>,
-    pub active_traps: Vec<crate::trap::ActiveTrap>,
+    pub base_map: Option<Box<sauer_map::Map>>,
+    pub active_trap_stack: Vec<usize>,
     pub client_vslot_bloat: dashmap::DashMap<u64, usize>,
 }
 
@@ -74,7 +75,8 @@ impl Default for DeathrunState {
             traps: Vec::new(),
             trap_edit: None,
             trap_edit_particle_ent: None,
-            active_traps: Vec::new(),
+            base_map: None,
+            active_trap_stack: Vec::new(),
             client_vslot_bloat: dashmap::DashMap::new(),
         }
     }
@@ -112,11 +114,15 @@ pub(crate) fn is_waiting_for_map(server: &Server) -> bool {
     get_server_state(server).read().unwrap().waiting_for_map
 }
 
-pub(crate) fn with_map_state_mut<F>(ctx: &Context, f: F)
+pub(crate) fn with_map_state_mut<F>(ctx: &Context, mut f: F)
 where
-    F: FnOnce(&mut sauer_map::Map),
+    F: FnMut(&mut sauer_map::Map),
 {
-    if let Some(map) = get_server_state(ctx.server()).write().unwrap().map.as_mut() {
+    let mut state = get_server_state(ctx.server()).write().unwrap();
+    if let Some(base) = state.base_map.as_mut() {
+        f(base);
+    }
+    if let Some(map) = state.map.as_mut() {
         f(map);
     }
 }
