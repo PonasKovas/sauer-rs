@@ -89,17 +89,17 @@ pub fn fill(node: &mut Node, is_solid: bool) {
     let edges = if is_solid { [0x80; 12] } else { [0x00; 12] };
 
     // In a map editor, filled sections inherit properties from their parent hierarchy.
-    let (textures, material) = match node {
-        Node::Leaf(c) => (c.textures, c.material),
+    let textures = match node {
+        Node::Leaf(c) => c.textures,
         Node::Branch(children) => {
             let mut curr = &children[0];
             while let Node::Branch(c) = curr {
                 curr = &c[0];
             }
             if let Node::Leaf(c) = curr {
-                (c.textures, c.material)
+                c.textures
             } else {
-                ([0; 6], Material::default())
+                [0; 6]
             }
         }
     };
@@ -107,6 +107,6 @@ pub fn fill(node: &mut Node, is_solid: bool) {
     *node = Node::Leaf(Cube {
         edges,
         textures,
-        material,
+        material: Material::default(),
     });
 }

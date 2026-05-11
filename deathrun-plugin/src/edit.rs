@@ -628,6 +628,18 @@ impl Plugin for DeathrunEdit {
         }
     }
 
+    async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) {
+        let id = ctx.id();
+        let server = ctx.server();
+        if !is_waiting_for_map(server) {
+            let is_spectator = server.players.try_get(id).map_or(false, |p| p.client_state == ClientState::Spectator);
+            if is_spectator {
+                server.set_spectator(id, false);
+                ui::send(server, id, ui::body("Map loaded. You can now spawn and edit freely."));
+            }
+        }
+    }
+
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
         let id = ctx.id();
         let cn = ctx.server().get_cn(id).unwrap_or(0) as i32;
@@ -652,32 +664,6 @@ impl Plugin for DeathrunEdit {
         if is_waiting_for_map(ctx.server()) {
             ctx.cancel();
         }
-    }
-
-    async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, _mode: GameMode) {
-        let id = ctx.id();
-        let server = ctx.server();
-        {
-            let mut state = get_server_state(server).write().unwrap();
-            state.map = None;
-            state.waiting_for_map = true;
-        state.traps.clear();
-        state.trap_edit = None;
-        state.base_map = None;
-        state.active_trap_stack.clear();
-        state.client_vslot_bloat.clear();
-    }
-    for client_id in server.client_ids() {
-            server.set_spectator(client_id, true);
-        }
-
-        let player_name = server
-            .players
-            .try_get(id)
-            .map(|p| p.name.strip_colors().to_utf8())
-            .unwrap_or_else(|| "Someone".to_string());
-        let map_str = map_name.strip_colors().to_utf8();
-        ui::broadcast_map_changed(server, &player_name, &map_str);
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
@@ -816,7 +802,7 @@ impl Plugin for DeathrunEdit {
 
                 let loaded_traps_len = loaded_traps.len();
 
-                {
+                let uploading_map_name = {
                     let mut s = get_server_state(&server_clone).write().unwrap();
                     s.map = Some(state);
                     s.traps = loaded_traps;
@@ -824,8 +810,19 @@ impl Plugin for DeathrunEdit {
                     s.trap_edit = None;
                     s.base_map = None;
                     s.active_trap_stack.clear();
-                }
+                    let name = s.uploading_map_name.take().unwrap_or_else(|| "untitled".lossy_cubestring());
+                    name
+                };
                 info!("id {id} uploaded a map (world_size={world_size}); state loaded");
+
+                *server_clone.map_name.write().unwrap() = uploading_map_name.clone();
+                *server_clone.game_mode.write().unwrap() = GameMode::CoopEdit;
+
+                server_clone.broadcast_chan1(&sauer_proto::channel1::MapChange {
+                    map_name: uploading_map_name,
+                    mode: GameMode::CoopEdit,
+                    has_items: false,
+                });
 
                 server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
                     text: format!(
@@ -842,11 +839,10 @@ impl Plugin for DeathrunEdit {
                 server_clone.send_chan2(client_id, &pkt);
             }
 
-            server_clone.set_spectator(id, false);
             ui::send(
                 &server_clone,
                 id,
-                ui::body("Map received. You can now spawn and edit freely."),
+                ui::body("Map successfully uploaded!"),
             );
         }
         Err(e) => warn!("id {id} sent an invalid map: {e}"),
@@ -865,7 +861,6 @@ impl Plugin for DeathrunEdit {
 
         if server.client_count() == 1 {
             server.set_privilege(id, Privilege::Master);
-            server.set_spectator(id, false);
         }
 
         server.send_chan1(
@@ -1164,16 +1159,35 @@ impl Plugin for DeathrunEdit {
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
         let id = ctx.id();
-        let server = ctx.server();
 
-        if get_server_state(server).read().unwrap().trap_edit.is_some() {
-            ui::send_warn(server, id, "Cannot vote map while editing a trap.");
+
+        if get_server_state(ctx.server()).read().unwrap().trap_edit.is_some() {
+            ui::send_warn(ctx.server(), id, "Cannot vote map while editing a trap.");
             ctx.cancel();
             return;
         }
         if packet.mode != GameMode::CoopEdit {
             ctx.cancel();
+            return;
         }
+
+        ctx.cancel();
+        let server = ctx.server();
+
+        let mut state = get_server_state(server).write().unwrap();
+        state.waiting_for_map = true;
+        state.uploading_map_name = Some(packet.map_name.clone());
+        drop(state);
+
+        server.send_chan1(id, &channel1::MapChange {
+            map_name: packet.map_name.clone(),
+            mode: packet.mode,
+            has_items: false,
+        });
+
+        let player_name = server.players.try_get(id).map(|p| p.name.strip_colors().to_utf8()).unwrap_or_else(|| "Someone".to_string());
+        let map_str = packet.map_name.strip_colors().to_utf8();
+        ui::broadcast_map_changed(server, &player_name, &map_str);
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {

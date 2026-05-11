@@ -59,6 +59,7 @@ pub struct DeathrunState {
     pub map: Option<sauer_map::Map>,
     /// True while waiting for a player to upload a map after a map vote.
     pub waiting_for_map: bool,
+    pub uploading_map_name: Option<cube_string::CubeString>,
     pub traps: Vec<Trap>,
     pub trap_edit: Option<crate::trap::TrapEditState>,
     pub base_map: Option<Box<sauer_map::Map>>,
@@ -71,6 +72,7 @@ impl Default for DeathrunState {
         Self {
             map: None,
             waiting_for_map: false,
+            uploading_map_name: None,
             traps: Vec::new(),
             trap_edit: None,
             base_map: None,
