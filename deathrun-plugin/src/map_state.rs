@@ -138,7 +138,9 @@ pub(crate) fn send_map_to_async(server: &std::sync::Arc<Server>, id: u64) {
         if let Some(state) = state_opt {
             let out_bytes = tokio::task::spawn_blocking(move || {
                 state.to_ogz_bytes_with(flate2::Compression::fast())
-            }).await.expect("to_ogz_bytes panicked");
+            })
+            .await
+            .expect("to_ogz_bytes panicked");
 
             match out_bytes {
                 Ok(bytes) => {

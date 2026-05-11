@@ -1,7 +1,4 @@
-use sauer_proto::{
-    Client, channel1,
-    data::ClipboardPayload,
-};
+use sauer_proto::{Client, channel1, data::ClipboardPayload};
 use sauer_server::Server;
 
 pub async fn broadcast_payloads(
@@ -12,7 +9,7 @@ pub async fn broadcast_payloads(
 ) {
     for payload in payloads {
         let sel = payload.sel.clone();
-        
+
         server.broadcast_chan1(&Client {
             client_num: owner_cn,
             packet: channel1::DelCube { sel: sel.clone() },
@@ -43,7 +40,7 @@ pub async fn send_payloads_to_clients(
 ) {
     for payload in payloads {
         let sel = payload.sel.clone();
-        
+
         let del_cube = Client {
             client_num: owner_cn,
             packet: channel1::DelCube { sel: sel.clone() },

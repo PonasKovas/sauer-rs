@@ -70,7 +70,11 @@ impl StoredTrap {
             button_size: self.button_size,
             button_orient: self.button_orient,
             trigger_payload: self.trigger_payload,
-            trigger_entities: self.trigger_entities.into_iter().map(|e| e.into_entity()).collect(),
+            trigger_entities: self
+                .trigger_entities
+                .into_iter()
+                .map(|e| e.into_entity())
+                .collect(),
             clip_pos: self.clip_pos,
             clip_s: self.clip_s,
             clip_grid: self.clip_grid,
@@ -88,10 +92,15 @@ impl StoredTrap {
         if let Some(payload) = &self.trigger_payload {
             for vslot_data in &payload.vslots {
                 let ds = sauer_proto::data::VSlotDelta {
-                    params: vslot_data.vslot.params.iter().map(|p| sauer_proto::data::VSlotDeltaParam {
-                        name: p.name.clone(),
-                        values: p.values,
-                    }).collect(),
+                    params: vslot_data
+                        .vslot
+                        .params
+                        .iter()
+                        .map(|p| sauer_proto::data::VSlotDeltaParam {
+                            name: p.name.clone(),
+                            values: p.values,
+                        })
+                        .collect(),
                     scale: vslot_data.vslot.scale,
                     rotation: vslot_data.vslot.rotation,
                     offset: vslot_data.vslot.offset,
@@ -100,14 +109,20 @@ impl StoredTrap {
                     alpha: vslot_data.vslot.alpha,
                     color: vslot_data.vslot.color,
                 };
-                let new_idx = sauer_map::vslot::resolve_vslot(&mut map.vslots, vslot_data.slot, &ds, false);
+                let new_idx =
+                    sauer_map::vslot::resolve_vslot(&mut map.vslots, vslot_data.slot, &ds, false);
                 remapping.insert(vslot_data.index, new_idx);
             }
         }
 
-        if remapping.is_empty() { return; }
+        if remapping.is_empty() {
+            return;
+        }
 
-        fn remap_node_textures(node: &mut sauer_map::Node, remap: &std::collections::HashMap<u16, u16>) {
+        fn remap_node_textures(
+            node: &mut sauer_map::Node,
+            remap: &std::collections::HashMap<u16, u16>,
+        ) {
             match node {
                 sauer_map::Node::Leaf(cube) => {
                     for t in &mut cube.textures {
@@ -133,7 +148,11 @@ impl StoredTrap {
 }
 
 pub fn generate_trap_vslot_packets(trap: &StoredTrap) -> Vec<sauer_proto::channel1::EditVSlot> {
-    let sel = crate::trap::placement::get_payload_selection(trap.button_pos, trap.button_size, trap.button_orient);
+    let sel = crate::trap::placement::get_payload_selection(
+        trap.button_pos,
+        trap.button_size,
+        trap.button_orient,
+    );
     let mut packets = Vec::new();
 
     let data_blocks = sauer_map::Map::db_encode(trap).unwrap_or_default();
@@ -175,13 +194,27 @@ pub fn sync_traps_to_map(server: &std::sync::Arc<Server>, _owner_id: u64) {
         for p in &delta.params {
             total_bytes += 1 + p.name.len() + 1 + 16;
         }
-        if delta.scale.is_some() { total_bytes += 5; }
-        if delta.rotation.is_some() { total_bytes += 5; }
-        if delta.offset.is_some() { total_bytes += 9; }
-        if delta.scroll.is_some() { total_bytes += 9; }
-        if delta.layer.is_some() { total_bytes += 5; }
-        if delta.alpha.is_some() { total_bytes += 9; }
-        if delta.color.is_some() { total_bytes += 13; }
+        if delta.scale.is_some() {
+            total_bytes += 5;
+        }
+        if delta.rotation.is_some() {
+            total_bytes += 5;
+        }
+        if delta.offset.is_some() {
+            total_bytes += 9;
+        }
+        if delta.scroll.is_some() {
+            total_bytes += 9;
+        }
+        if delta.layer.is_some() {
+            total_bytes += 5;
+        }
+        if delta.alpha.is_some() {
+            total_bytes += 9;
+        }
+        if delta.color.is_some() {
+            total_bytes += 13;
+        }
         total_bytes += 1; // 0xFF
     }
 

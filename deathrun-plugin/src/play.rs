@@ -1,8 +1,8 @@
 use crate::map_state::{DeathrunState, Trap, get_server_state};
-use sauer_map::Map;
 use crate::trap::StoredTrap;
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
+use sauer_map::Map;
 
 use rand::seq::SliceRandom;
 use sauer_proto::data::PlayerState;
@@ -115,14 +115,20 @@ impl PlayMaps {
                 let st = entry.data;
                 let bpos = st.button_pos;
                 let valid = entry.instances.iter().any(|inst| {
-                    inst.pos[0] >= bpos[0] && inst.pos[0] <= bpos[0] + 8 &&
-                    inst.pos[1] >= bpos[1] && inst.pos[1] <= bpos[1] + 8 &&
-                    inst.pos[2] >= bpos[2] && inst.pos[2] <= bpos[2] + 8
+                    inst.pos[0] >= bpos[0]
+                        && inst.pos[0] <= bpos[0] + 8
+                        && inst.pos[1] >= bpos[1]
+                        && inst.pos[1] <= bpos[1] + 8
+                        && inst.pos[2] >= bpos[2]
+                        && inst.pos[2] <= bpos[2] + 8
                 });
                 if valid {
                     stored.push(st);
                 } else {
-                    tracing::warn!("Rejected copied trap payload outside expected bounds at {:?}", entry.instances.first().map(|i| i.pos));
+                    tracing::warn!(
+                        "Rejected copied trap payload outside expected bounds at {:?}",
+                        entry.instances.first().map(|i| i.pos)
+                    );
                 }
             }
 
@@ -139,7 +145,11 @@ impl PlayMaps {
 
         crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
         for trap in &traps {
-            let b_max = [trap.button_pos[0] + trap.button_size, trap.button_pos[1] + trap.button_size, trap.button_pos[2] + trap.button_size];
+            let b_max = [
+                trap.button_pos[0] + trap.button_size,
+                trap.button_pos[1] + trap.button_size,
+                trap.button_pos[2] + trap.button_size,
+            ];
             state.protect_region(trap.button_pos, b_max);
 
             let packets = crate::trap::stored::generate_trap_vslot_packets(
@@ -263,10 +273,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         let state_lock = get_server_state(&server);
         let state_read = state_lock.read().unwrap();
         let map = state_read.map.as_ref().unwrap();
-        (
-            map.clone(),
-            epoch,
-        )
+        (map.clone(), epoch)
     };
 
     tokio::spawn(async move {
@@ -302,10 +309,12 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             server.set_spectator(id, true);
         }
 
-        let has_team_1 = map.entities
+        let has_team_1 = map
+            .entities
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 1);
-        let has_team_2 = map.entities
+        let has_team_2 = map
+            .entities
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
 
@@ -577,10 +586,7 @@ fn send_map_to_client(
             Some(m) => m,
             None => return false,
         };
-        (
-            loaded.state.clone(),
-            lock.evil_id,
-        )
+        (loaded.state.clone(), lock.evil_id)
     };
 
     let maps_arc = Arc::clone(maps);
@@ -803,7 +809,7 @@ impl Plugin for DeathrunPlay {
             // --- READ PHASE: Raycast & AABB Calc ---
             let target_trap;
             let mut edges_to_draw = None;
-            
+
             {
                 let state = crate::map_state::get_server_state(server).read().unwrap();
                 let yaw_rad = (packet.dir.yaw as f32).to_radians();
@@ -814,13 +820,14 @@ impl Plugin for DeathrunPlay {
                     pitch_rad.sin(),
                 ];
                 let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
-                
+
                 let mut dist = 2048.0;
                 if let Some(map) = state.map.as_ref() {
-                    if let Some(hit) = sauer_map::raycast::raycast_with_filter(
-                        map, origin, forward, 2048.0,
-                        |c| !c.is_empty() || c.material.volume == sauer_core::Volume::Glass,
-                    ) {
+                    if let Some(hit) =
+                        sauer_map::raycast::raycast_with_filter(map, origin, forward, 2048.0, |c| {
+                            !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
+                        })
+                    {
                         dist = hit.dist;
                     }
                 }
@@ -837,7 +844,9 @@ impl Plugin for DeathrunPlay {
                         b_min[1] + trap.button_size,
                         b_min[2] + trap.button_size,
                     ];
-                    (0..3).all(|ax| hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5)
+                    (0..3).all(|ax| {
+                        hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
+                    })
                 });
 
                 if let Some(idx) = target_trap {
@@ -876,11 +885,13 @@ impl Plugin for DeathrunPlay {
             let mut update_highlight = false;
 
             let mut hl_state_clone = {
-                let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| crate::edit::TrapHighlightState {
-                    trap_idx: None,
-                    look_start: tokio::time::Instant::now(),
-                    last_sent: tokio::time::Instant::now(),
-                    active: false,
+                let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| {
+                    crate::edit::TrapHighlightState {
+                        trap_idx: None,
+                        look_start: tokio::time::Instant::now(),
+                        last_sent: tokio::time::Instant::now(),
+                        active: false,
+                    }
                 });
 
                 if hl_state.trap_idx != target_trap {
@@ -898,7 +909,7 @@ impl Plugin for DeathrunPlay {
                         hl_state.last_sent = tokio::time::Instant::now();
                     }
                 }
-                
+
                 crate::edit::TrapHighlightState {
                     trap_idx: hl_state.trap_idx,
                     look_start: hl_state.look_start,
@@ -913,10 +924,27 @@ impl Plugin for DeathrunPlay {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN as i32;
                     if !up.global_broadcast.is_empty() {
-                        server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                        server.broadcast_chan1(
+                            up.global_broadcast
+                                .into_iter()
+                                .map(|p| sauer_proto::Client {
+                                    client_num: cn,
+                                    packet: p,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
                     }
                     if !up.personal.is_empty() {
-                        server.send_chan1(id, up.personal.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                        server.send_chan1(
+                            id,
+                            up.personal
+                                .into_iter()
+                                .map(|p| sauer_proto::Client {
+                                    client_num: cn,
+                                    packet: p,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
                     }
                 }
                 hl_state_clone.active = false;
@@ -924,7 +952,10 @@ impl Plugin for DeathrunPlay {
 
             if update_highlight {
                 if let Some(edges) = edges_to_draw {
-                    let time_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+                    let time_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis();
                     let hue = (time_ms % 2000) as f32 / 2000.0;
                     let h = hue * 6.0;
                     let x = 1.0 - ((h % 2.0) - 1.0).abs();
@@ -936,7 +967,9 @@ impl Plugin for DeathrunPlay {
                         4 => (x, 0.0, 1.0),
                         _ => (1.0, 0.0, x),
                     };
-                    let color_int = ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
+                    let color_int = ((r * 255.0) as i32) << 16
+                        | ((g * 255.0) as i32) << 8
+                        | ((b * 255.0) as i32);
 
                     let mut fake_ents = Vec::new();
                     for edge in &edges {
@@ -951,10 +984,27 @@ impl Plugin for DeathrunPlay {
                         let up = map.update_virt_ents(id, "highlight", fake_ents);
                         let cn = crate::SERVER_BOT_CN as i32;
                         if !up.global_broadcast.is_empty() {
-                            server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                            server.broadcast_chan1(
+                                up.global_broadcast
+                                    .into_iter()
+                                    .map(|p| sauer_proto::Client {
+                                        client_num: cn,
+                                        packet: p,
+                                    })
+                                    .collect::<Vec<_>>(),
+                            );
                         }
                         if !up.personal.is_empty() {
-                            server.send_chan1(id, up.personal.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                            server.send_chan1(
+                                id,
+                                up.personal
+                                    .into_iter()
+                                    .map(|p| sauer_proto::Client {
+                                        client_num: cn,
+                                        packet: p,
+                                    })
+                                    .collect::<Vec<_>>(),
+                            );
                         }
                     }
                     hl_state_clone.active = true;
@@ -979,10 +1029,27 @@ impl Plugin for DeathrunPlay {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN as i32;
                     if !up.global_broadcast.is_empty() {
-                        server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                        server.broadcast_chan1(
+                            up.global_broadcast
+                                .into_iter()
+                                .map(|p| sauer_proto::Client {
+                                    client_num: cn,
+                                    packet: p,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
                     }
                     if !up.personal.is_empty() {
-                        server.send_chan1(id, up.personal.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                        server.send_chan1(
+                            id,
+                            up.personal
+                                .into_iter()
+                                .map(|p| sauer_proto::Client {
+                                    client_num: cn,
+                                    packet: p,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
                     }
                 }
             }
@@ -1160,7 +1227,15 @@ impl Plugin for DeathrunPlay {
             let up = map.clear_all_virt_ents_for_player(id);
             let cn = crate::SERVER_BOT_CN as i32;
             if !up.global_broadcast.is_empty() {
-                server.broadcast_chan1(up.global_broadcast.into_iter().map(|p| sauer_proto::Client { client_num: cn, packet: p }).collect::<Vec<_>>());
+                server.broadcast_chan1(
+                    up.global_broadcast
+                        .into_iter()
+                        .map(|p| sauer_proto::Client {
+                            client_num: cn,
+                            packet: p,
+                        })
+                        .collect::<Vec<_>>(),
+                );
             }
         }
         drop(state_w);

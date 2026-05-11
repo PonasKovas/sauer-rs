@@ -1,7 +1,7 @@
 mod edit;
 mod geom;
-pub mod octree;
 pub mod map;
+pub mod octree;
 pub mod virt_ents;
 
 pub mod chunking;
@@ -17,5 +17,5 @@ pub mod db {
 
 pub use edit::{apply_region, fill, set_material, set_texture};
 pub use geom::subdivide;
-pub use sauer_core::{Cube, Node, Selection};
 pub use map::Map;
+pub use sauer_core::{Cube, Node, Selection};

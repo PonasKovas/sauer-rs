@@ -8,16 +8,16 @@ use num_enum::TryFromPrimitive;
 
 mod base_info;
 mod base_spawn;
+pub mod clipboard;
 mod direction;
 mod edit_var_value;
 mod flag_state;
 pub(crate) mod vec3;
 pub mod vslot_delta;
-pub mod clipboard;
 
 pub use base_info::BaseInfo;
-pub use clipboard::{ClipboardPayload, UndoPayload, UndoData, UndoEntity};
 pub use base_spawn::BaseSpawn;
+pub use clipboard::{ClipboardPayload, UndoData, UndoEntity, UndoPayload};
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};

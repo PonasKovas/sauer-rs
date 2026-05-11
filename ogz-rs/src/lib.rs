@@ -48,7 +48,10 @@ impl OgzMap {
     }
 
     /// Serializes the map using a specific compression level.
-    pub fn serialize_with(&self, compression: flate2::Compression) -> Result<Vec<u8>, crate::error::OgzError> {
+    pub fn serialize_with(
+        &self,
+        compression: flate2::Compression,
+    ) -> Result<Vec<u8>, crate::error::OgzError> {
         crate::ser::serialize_map(self, compression)
     }
 }

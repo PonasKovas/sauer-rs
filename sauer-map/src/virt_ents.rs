@@ -49,7 +49,7 @@ impl Map {
                     extra_data: Vec::new(),
                 });
             }
-            
+
             let ent = &mut self.entities[id];
             if ent.ent_type == ogz_rs::data::EntityType::Empty {
                 ent.ent_type = ogz_rs::data::EntityType::Box;
@@ -61,11 +61,23 @@ impl Map {
 
     /// Safely assigns virtual entities for a player under a specific namespace (e.g. "highlight", "progress").
     /// Uses stable ID allocations to prevent unrelated namespaces from shifting and flooding network updates.
-    pub fn update_virt_ents(&mut self, player_id: u64, namespace: &str, new_ents: Vec<FakeEnt>) -> VirtEntUpdates {
+    pub fn update_virt_ents(
+        &mut self,
+        player_id: u64,
+        namespace: &str,
+        new_ents: Vec<FakeEnt>,
+    ) -> VirtEntUpdates {
         let mut updates = VirtEntUpdates::default();
-        
-        let mut player_state = self.virt_state.players.remove(&player_id).unwrap_or_default();
-        let mut ns_state = player_state.namespaces.remove(namespace).unwrap_or_default();
+
+        let mut player_state = self
+            .virt_state
+            .players
+            .remove(&player_id)
+            .unwrap_or_default();
+        let mut ns_state = player_state
+            .namespaces
+            .remove(namespace)
+            .unwrap_or_default();
 
         // 1. Reclaim excess pool indices
         while ns_state.pool_indices.len() > new_ents.len() {
@@ -73,7 +85,11 @@ impl Map {
             let ent_id = self.virt_state.global_pool[pool_idx] as i32;
             updates.personal.push(EditEnt {
                 ent_id,
-                pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                pos: Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
                 type_: EntityType::Box,
                 attrs: [0; 5],
             });
@@ -99,11 +115,17 @@ impl Map {
                 let pool_idx = if let Some(idx) = found_idx {
                     idx
                 } else {
-                    let empty_id = self.entities.iter().position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
+                    let empty_id = self
+                        .entities
+                        .iter()
+                        .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
                         .unwrap_or_else(|| {
                             let id = self.entities.len();
                             self.entities.push(ogz_rs::data::Entity {
-                                position: [0.0; 3], attrs: [0; 5], ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![]
+                                position: [0.0; 3],
+                                attrs: [0; 5],
+                                ent_type: ogz_rs::data::EntityType::Empty,
+                                extra_data: vec![],
                             });
                             id
                         });
@@ -117,7 +139,11 @@ impl Map {
 
                     updates.global_broadcast.push(EditEnt {
                         ent_id: empty_id as i32,
-                        pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                        pos: Vec3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
                         type_: EntityType::Box,
                         attrs: [0; 5],
                     });
@@ -136,7 +162,11 @@ impl Map {
                 let ent_id = self.virt_state.global_pool[pool_idx] as i32;
                 updates.personal.push(EditEnt {
                     ent_id,
-                    pos: Vec3 { x: new_ents[i].position[0], y: new_ents[i].position[1], z: new_ents[i].position[2] },
+                    pos: Vec3 {
+                        x: new_ents[i].position[0],
+                        y: new_ents[i].position[1],
+                        z: new_ents[i].position[2],
+                    },
                     type_: new_ents[i].ent_type,
                     attrs: new_ents[i].attrs,
                 });
@@ -144,9 +174,11 @@ impl Map {
         }
 
         ns_state.ents = new_ents;
-        
+
         if !ns_state.ents.is_empty() {
-            player_state.namespaces.insert(namespace.to_string(), ns_state);
+            player_state
+                .namespaces
+                .insert(namespace.to_string(), ns_state);
         }
         if !player_state.namespaces.is_empty() {
             self.virt_state.players.insert(player_id, player_state);
@@ -167,7 +199,11 @@ impl Map {
                     let ent_id = self.virt_state.global_pool[pool_idx] as i32;
                     updates.personal.push(EditEnt {
                         ent_id,
-                        pos: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+                        pos: Vec3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
                         type_: EntityType::Box,
                         attrs: [0; 5],
                     });

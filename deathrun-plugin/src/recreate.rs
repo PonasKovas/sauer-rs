@@ -1,6 +1,6 @@
-use sauer_proto::{
-    Client, channel1,
-};use sauer_proto::data::SelInfo;use sauer_core::Vec3;
+use sauer_core::Vec3;
+use sauer_proto::data::SelInfo;
+use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 
 pub async fn visual_rebuild_map<F>(
@@ -123,12 +123,8 @@ pub async fn visual_rebuild_map<F>(
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    let mut payloads = sauer_map::chunking::chunk_region(
-        map,
-        [0, 0, 0],
-        [map.size, map.size, map.size],
-        4000,
-    );
+    let mut payloads =
+        sauer_map::chunking::chunk_region(map, [0, 0, 0], [map.size, map.size, map.size], 4000);
 
     // Optional random shuffle to make it look cool, like in original recreate
     use rand::seq::SliceRandom;

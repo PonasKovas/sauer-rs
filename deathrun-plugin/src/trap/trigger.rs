@@ -1,16 +1,19 @@
 use crate::map_state::get_server_state;
 use sauer_proto::{
     Client, channel1,
-    data::{Vec3, EntityType},
+    data::{EntityType, Vec3},
 };
 use sauer_server::Server;
 
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY};
 
 pub fn in_aabb(pos: [f32; 3], min: [i32; 3], max: [i32; 3]) -> bool {
-    pos[0] >= min[0] as f32 && pos[0] < max[0] as f32 &&
-    pos[1] >= min[1] as f32 && pos[1] < max[1] as f32 &&
-    pos[2] >= min[2] as f32 && pos[2] < max[2] as f32
+    pos[0] >= min[0] as f32
+        && pos[0] < max[0] as f32
+        && pos[1] >= min[1] as f32
+        && pos[1] < max[1] as f32
+        && pos[2] >= min[2] as f32
+        && pos[2] < max[2] as f32
 }
 
 pub fn recompose_traps(server: &std::sync::Arc<Server>) {
@@ -45,7 +48,11 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
             }
             // 2. Add trap entities
             for new_ent in &trap.trigger_entities {
-                if let Some(id) = new_map.entities.iter().position(|e| e.ent_type == EntityType::Empty) {
+                if let Some(id) = new_map
+                    .entities
+                    .iter()
+                    .position(|e| e.ent_type == EntityType::Empty)
+                {
                     new_map.entities[id] = new_ent.clone();
                 } else {
                     new_map.entities.push(new_ent.clone());
@@ -54,7 +61,11 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
 
             // 3. Apply geometry
             let mut paste_sel = payload.sel.clone();
-            paste_sel.o = Vec3 { x: min[0], y: min[1], z: min[2] };
+            paste_sel.o = Vec3 {
+                x: min[0],
+                y: min[1],
+                z: min[2],
+            };
             new_map.apply_block(&paste_sel, payload.nodes.clone(), false);
         }
     }
@@ -65,13 +76,27 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     // Compute tight bounds of geometric changes
     let mut tight_min = [i32::MAX; 3];
     let mut tight_max = [i32::MIN; 3];
-    sauer_map::octree::diff_bounds(&old_map.root, &new_map.root, [0, 0, 0], world_size, &mut tight_min, &mut tight_max);
+    sauer_map::octree::diff_bounds(
+        &old_map.root,
+        &new_map.root,
+        [0, 0, 0],
+        world_size,
+        &mut tight_min,
+        &mut tight_max,
+    );
 
     // Compute entity changes
     let mut diff_ent_ids = std::collections::HashSet::new();
-    let empty_ent = ogz_rs::data::Entity { position: [0.0; 3], attrs: [0; 5], ent_type: ogz_rs::data::EntityType::Empty, extra_data: vec![] };
+    let empty_ent = ogz_rs::data::Entity {
+        position: [0.0; 3],
+        attrs: [0; 5],
+        ent_type: ogz_rs::data::EntityType::Empty,
+        extra_data: vec![],
+    };
     for i in 0..new_map.entities.len().max(old_map.entities.len()) {
-        if virt_state.global_pool.contains(&i) { continue; } // Ignore virtual entities
+        if virt_state.global_pool.contains(&i) {
+            continue;
+        } // Ignore virtual entities
         let c = new_map.entities.get(i).unwrap_or(&empty_ent);
         let o = old_map.entities.get(i).unwrap_or(&empty_ent);
         if c != o {
@@ -89,15 +114,25 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
 
     let mut batch = Vec::new();
     for &id in &diff_ent_ids {
-        let ent = state.map.as_ref().unwrap().entities.get(id).unwrap_or(&empty_ent);
+        let ent = state
+            .map
+            .as_ref()
+            .unwrap()
+            .entities
+            .get(id)
+            .unwrap_or(&empty_ent);
         batch.push(Client {
             client_num: actor_cn,
             packet: channel1::EditEnt {
                 ent_id: id as i32,
-                pos: Vec3 { x: ent.position[0], y: ent.position[1], z: ent.position[2] },
+                pos: Vec3 {
+                    x: ent.position[0],
+                    y: ent.position[1],
+                    z: ent.position[2],
+                },
                 type_: ent.ent_type,
                 attrs: ent.attrs.map(|x| x as i32),
-            }
+            },
         });
         if batch.len() >= 50 {
             server.broadcast_chan1(batch.clone());
@@ -111,8 +146,9 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     if tight_min[0] != i32::MAX {
         let t_min = std::array::from_fn(|i| tight_min[i].max(0));
         let t_max = std::array::from_fn(|i| tight_max[i].min(world_size));
-        let payloads = sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), t_min, t_max, 4000);
-        
+        let payloads =
+            sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), t_min, t_max, 4000);
+
         let s_clone = server.clone();
         tokio::spawn(async move {
             crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
@@ -209,16 +245,32 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 let mut glob = Vec::new();
                 let mut pers = std::collections::HashMap::new();
                 for &target_id in &target_ids {
-                    let mut up = map.update_virt_ents(target_id, &namespace, vec![initial_fake_ent.clone()]);
+                    let mut up =
+                        map.update_virt_ents(target_id, &namespace, vec![initial_fake_ent.clone()]);
                     glob.append(&mut up.global_broadcast);
                     pers.insert(target_id, up.personal);
                 }
                 if !glob.is_empty() {
-                    server_clone.broadcast_chan1(glob.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                    server_clone.broadcast_chan1(
+                        glob.into_iter()
+                            .map(|p| sauer_proto::Client {
+                                client_num: actor_cn,
+                                packet: p,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
                 }
                 for (tid, pkts) in pers {
                     if !pkts.is_empty() {
-                        server_clone.send_chan1(tid, pkts.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                        server_clone.send_chan1(
+                            tid,
+                            pkts.into_iter()
+                                .map(|p| sauer_proto::Client {
+                                    client_num: actor_cn,
+                                    packet: p,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
                     }
                 }
             }
@@ -287,9 +339,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     state.traps[trap_idx].is_active = false;
                     state.active_trap_stack.retain(|&id| id != trap_idx);
                 }
-                
+
                 recompose_traps(&server_clone);
-                
+
                 {
                     let mut state = get_server_state(&server_clone).write().unwrap();
                     if state.active_trap_stack.is_empty() {
@@ -308,7 +360,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                         BUTTON_COLOR_ACTIVE,
                     );
                 }
-                
+
                 reverted = true;
             }
 
@@ -333,18 +385,37 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     let mut state = get_server_state(&server_clone).write().unwrap();
                     if let Some(map) = state.map.as_mut() {
                         for &target_id in &target_ids {
-                            let mut up = map.update_virt_ents(target_id, &namespace, vec![prog_fake_ent.clone()]);
+                            let mut up = map.update_virt_ents(
+                                target_id,
+                                &namespace,
+                                vec![prog_fake_ent.clone()],
+                            );
                             glob.append(&mut up.global_broadcast);
                             pers.insert(target_id, up.personal);
                         }
                     }
                 }
                 if !glob.is_empty() {
-                    server_clone.broadcast_chan1(glob.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                    server_clone.broadcast_chan1(
+                        glob.into_iter()
+                            .map(|p| sauer_proto::Client {
+                                client_num: actor_cn,
+                                packet: p,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
                 }
                 for (tid, pkts) in pers {
                     if !pkts.is_empty() {
-                        server_clone.send_chan1(tid, pkts.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                        server_clone.send_chan1(
+                            tid,
+                            pkts.into_iter()
+                                .map(|p| sauer_proto::Client {
+                                    client_num: actor_cn,
+                                    packet: p,
+                                })
+                                .collect::<Vec<_>>(),
+                        );
                     }
                 }
             }
@@ -359,9 +430,9 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     state.active_trap_stack.retain(|&id| id != trap_idx);
                 }
             }
-            
+
             recompose_traps(&server_clone);
-            
+
             {
                 let mut state = get_server_state(&server_clone).write().unwrap();
                 if state.active_trap_stack.is_empty() {
@@ -383,11 +454,26 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
             drop(state);
             if !glob.is_empty() {
-                server_clone.broadcast_chan1(glob.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                server_clone.broadcast_chan1(
+                    glob.into_iter()
+                        .map(|p| sauer_proto::Client {
+                            client_num: actor_cn,
+                            packet: p,
+                        })
+                        .collect::<Vec<_>>(),
+                );
             }
             for (tid, pkts) in pers {
                 if !pkts.is_empty() {
-                    server_clone.send_chan1(tid, pkts.into_iter().map(|p| sauer_proto::Client { client_num: actor_cn, packet: p }).collect::<Vec<_>>());
+                    server_clone.send_chan1(
+                        tid,
+                        pkts.into_iter()
+                            .map(|p| sauer_proto::Client {
+                                client_num: actor_cn,
+                                packet: p,
+                            })
+                            .collect::<Vec<_>>(),
+                    );
                 }
             }
         }
@@ -400,7 +486,6 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             button_orient,
             BUTTON_COLOR_READY,
         );
-
     });
 }
 
@@ -417,10 +502,20 @@ pub fn set_button_color(
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
         if let Some(map) = state.map.as_mut() {
-            map.apply_vslots(&packet.sel, packet.all_faces, packet.delta != 0, &packet.extra_data);
+            map.apply_vslots(
+                &packet.sel,
+                packet.all_faces,
+                packet.delta != 0,
+                &packet.extra_data,
+            );
         }
         if let Some(base) = state.base_map.as_mut() {
-            base.apply_vslots(&packet.sel, packet.all_faces, packet.delta != 0, &packet.extra_data);
+            base.apply_vslots(
+                &packet.sel,
+                packet.all_faces,
+                packet.delta != 0,
+                &packet.extra_data,
+            );
         }
         server.broadcast_chan1(&Client {
             client_num: actor_cn,
@@ -428,5 +523,3 @@ pub fn set_button_color(
         });
     }
 }
-
-

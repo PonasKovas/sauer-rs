@@ -138,7 +138,9 @@ pub(crate) fn write_short_pref_data(val: &Vec<u8>, out: &mut Vec<u8>) {
     out.extend_from_slice(val);
 }
 
-pub(crate) fn read_short_pref_vslot_delta(reader: &mut &[u8]) -> Result<crate::data::VSlotDelta, ParseError> {
+pub(crate) fn read_short_pref_vslot_delta(
+    reader: &mut &[u8],
+) -> Result<crate::data::VSlotDelta, ParseError> {
     let data = read_short_pref_data(reader)?;
     let mut data_reader = data.as_slice();
     crate::data::VSlotDelta::sauer_read(&mut data_reader)

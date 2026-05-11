@@ -7,9 +7,7 @@ pub use commands::{
     cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_trapinfo, cmd_traptime,
     cmd_traptime_print, cmd_traptimeout, cmd_traptimeout_print,
 };
-pub use placement::{
-    rebuild_all_trap_buttons, reset_button_colors_by_pos,
-};
+pub use placement::{rebuild_all_trap_buttons, reset_button_colors_by_pos};
 pub use stored::{StoredTrap, sync_traps_to_map};
 pub use trigger::trigger_trap;
 

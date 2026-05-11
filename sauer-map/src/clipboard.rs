@@ -1,6 +1,7 @@
 use crate::{Map, Node};
 use ogz_rs::data::VSlot;
-use sauer_proto::data::{ClipboardPayload};use sauer_proto::data::clipboard::VSlotData;
+use sauer_proto::data::ClipboardPayload;
+use sauer_proto::data::clipboard::VSlotData;
 
 pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VSlotData> {
     let mut used = vec![false; vslots.len().max(65536)];
@@ -54,21 +55,34 @@ pub fn generate_clipboard_for_region(
                     padded_min[1] + yi * grid,
                     padded_min[2] + zi * grid,
                 ];
-                let node = crate::octree::extract_node_at(&map.root, [0, 0, 0], map.size, cell_pos, grid);
+                let node =
+                    crate::octree::extract_node_at(&map.root, [0, 0, 0], map.size, cell_pos, grid);
                 nodes.push(node);
             }
         }
     }
-    
+
     let vs = extract_vslots(&nodes, &map.vslots);
     ClipboardPayload {
         unpack_len: 0,
         sel: sauer_core::Selection {
-            o: sauer_core::Vec3 { x: padded_min[0], y: padded_min[1], z: padded_min[2] },
-            s: sauer_core::Vec3 { x: sx, y: sy, z: sz },
+            o: sauer_core::Vec3 {
+                x: padded_min[0],
+                y: padded_min[1],
+                z: padded_min[2],
+            },
+            s: sauer_core::Vec3 {
+                x: sx,
+                y: sy,
+                z: sz,
+            },
             grid,
             orient: sauer_core::Orient::Left,
-            cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
         },
         nodes,
         vslots: vs,

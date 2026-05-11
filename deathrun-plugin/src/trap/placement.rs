@@ -25,12 +25,72 @@ pub fn get_outer_face_selections(adj: [i32; 3], size: i32, orient: u8) -> [SelIn
         z: s[2],
     };
     [
-        SelInfo { o, s: sv, grid: 1, orient: Orient::Left, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s: sv, grid: 1, orient: Orient::Right, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s: sv, grid: 1, orient: Orient::Back, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s: sv, grid: 1, orient: Orient::Front, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s: sv, grid: 1, orient: Orient::Bottom, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
-        SelInfo { o, s: sv, grid: 1, orient: Orient::Top, cx: 0, cxs: 0, cy: 0, cys: 0, corner: 0 },
+        SelInfo {
+            o,
+            s: sv,
+            grid: 1,
+            orient: Orient::Left,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s: sv,
+            grid: 1,
+            orient: Orient::Right,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s: sv,
+            grid: 1,
+            orient: Orient::Back,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s: sv,
+            grid: 1,
+            orient: Orient::Front,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s: sv,
+            grid: 1,
+            orient: Orient::Bottom,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
+        SelInfo {
+            o,
+            s: sv,
+            grid: 1,
+            orient: Orient::Top,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        },
     ]
 }
 
@@ -99,12 +159,7 @@ pub fn get_outer_faces_vslot_packets(
     packets
 }
 
-pub fn build_button_geometry(
-    map: &mut sauer_map::Map,
-    adj: [i32; 3],
-    size: i32,
-    orient: u8,
-) {
+pub fn build_button_geometry(map: &mut sauer_map::Map, adj: [i32; 3], size: i32, orient: u8) {
     let d = (orient >> 1) as usize;
     let dc = orient & 1;
     let mut min = adj;
@@ -134,7 +189,7 @@ pub fn build_button_geometry(
         cys: 0,
         corner: 0,
     };
-    
+
     map.fill(&sel, true);
     map.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
     map.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
@@ -156,10 +211,7 @@ pub fn build_button_geometry(
 /// Reset every trap button to the ready color directly in `map`'s vslot table.
 /// Takes `(button_pos, button_size, button_orient)` tuples to avoid a split-borrow
 /// when the caller holds `traps` and `map` in the same struct.
-pub fn reset_button_colors_by_pos(
-    map: &mut sauer_map::Map,
-    buttons: &[([i32; 3], i32, u8)],
-) {
+pub fn reset_button_colors_by_pos(map: &mut sauer_map::Map, buttons: &[([i32; 3], i32, u8)]) {
     for &(pos, size, orient) in buttons {
         for pkt in get_outer_faces_vslot_packets(pos, size, orient, BUTTON_COLOR_READY) {
             map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
@@ -169,14 +221,9 @@ pub fn reset_button_colors_by_pos(
 
 // ─── Rebuild all trap buttons ─────────────────────────────────────────────────
 
-pub fn rebuild_all_trap_buttons(
-    map: &mut sauer_map::Map,
-    traps: &[crate::map_state::Trap],
-) {
+pub fn rebuild_all_trap_buttons(map: &mut sauer_map::Map, traps: &[crate::map_state::Trap]) {
     for trap in traps {
         build_button_geometry(map, trap.button_pos, trap.button_size, trap.button_orient);
     }
     map.invalidate_cache();
 }
-
-

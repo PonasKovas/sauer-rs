@@ -1,6 +1,6 @@
 use clap::Parser;
-use sauer_map::Map;
 use deathrun_plugin::trap::StoredTrap;
+use sauer_map::Map;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -29,7 +29,10 @@ fn main() {
     let raw_ogz = ogz_rs::OgzMap::parse(&data).expect("Failed to parse OGZ structure");
 
     println!("=== Map Analysis: {:?} ===", args.input);
-    println!("Total File Size: {:.2} MB", data.len() as f64 / 1024.0 / 1024.0);
+    println!(
+        "Total File Size: {:.2} MB",
+        data.len() as f64 / 1024.0 / 1024.0
+    );
     println!("World Size: {}", raw_ogz.world_size);
     println!("Entities: {}", raw_ogz.entities.len());
     println!("Total VSlot Array Size: {}", raw_ogz.vslots.len());
@@ -49,9 +52,12 @@ fn main() {
                 let st = &entry.data;
                 let bpos = st.button_pos;
                 let valid = entry.instances.iter().any(|inst| {
-                    inst.pos[0] >= bpos[0] && inst.pos[0] <= bpos[0] + 8 &&
-                    inst.pos[1] >= bpos[1] && inst.pos[1] <= bpos[1] + 8 &&
-                    inst.pos[2] >= bpos[2] && inst.pos[2] <= bpos[2] + 8
+                    inst.pos[0] >= bpos[0]
+                        && inst.pos[0] <= bpos[0] + 8
+                        && inst.pos[1] >= bpos[1]
+                        && inst.pos[1] <= bpos[1] + 8
+                        && inst.pos[2] >= bpos[2]
+                        && inst.pos[2] <= bpos[2] + 8
                 });
                 if valid {
                     valid_count += 1;
@@ -61,7 +67,7 @@ fn main() {
             println!("Empty VSlot indices: {}", empty_vslots);
             println!("Valid (Active/Loadable) Traps: {}", valid_count);
             println!("Total trap chunks (params): {}", stats.chunks);
-            
+
             let comp_kb = stats.payload_compressed as f64 / 1024.0;
             let uncomp_kb = stats.payload_uncompressed as f64 / 1024.0;
             let overhead_mb = stats.structural_bytes as f64 / 1024.0 / 1024.0;
@@ -70,19 +76,25 @@ fn main() {
             } else {
                 0.0
             };
-            
+
             println!("Uncompressed Bitcode Size: {:.2} KB", uncomp_kb);
-            println!("Compressed Zlib Size: {:.2} KB ({:.1}% of OGZ file)", comp_kb, percent);
+            println!(
+                "Compressed Zlib Size: {:.2} KB ({:.1}% of OGZ file)",
+                comp_kb, percent
+            );
             println!("VSlot Structural Memory Overhead: {:.2} MB", overhead_mb);
         }
 
         let compacted_data = state.to_ogz_bytes().expect("Failed to serialize map");
         println!("\n=== Compaction Simulation ===");
-        println!("If unreferenced ghosts are cleared by the server, the map shrinks to: {:.2} MB", compacted_data.len() as f64 / 1024.0 / 1024.0);
+        println!(
+            "If unreferenced ghosts are cleared by the server, the map shrinks to: {:.2} MB",
+            compacted_data.len() as f64 / 1024.0 / 1024.0
+        );
 
         if args.strip_traps || args.output.is_some() {
             println!("\n=== Processing Output ===");
-            
+
             if args.strip_traps {
                 for vs_opt in &mut state.vslots {
                     if let Some(vs) = vs_opt {
@@ -98,7 +110,11 @@ fn main() {
             if let Some(out_path) = args.output {
                 let out_data = state.to_ogz_bytes().expect("Failed to serialize");
                 std::fs::write(&out_path, &out_data).expect("Failed to write output file");
-                println!("Saved output map to {:?} (New Size: {:.2} MB)", out_path, out_data.len() as f64 / 1024.0 / 1024.0);
+                println!(
+                    "Saved output map to {:?} (New Size: {:.2} MB)",
+                    out_path,
+                    out_data.len() as f64 / 1024.0 / 1024.0
+                );
             }
         }
     } else {

@@ -9,10 +9,9 @@ use crate::internal::{
     SauerRead, SauerWrite, check_tag,
     constants::*,
     primitives::{
-        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data,
+        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data, read_short_pref_vslot_delta,
         read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq, write_short_pref_data,
-        write_varint_pref_seq,
-        read_short_pref_vslot_delta, write_short_pref_vslot_delta,
+        write_short_pref_vslot_delta, write_varint_pref_seq,
     },
 };
 use crate::route::{C2S, Chan1, S2C};

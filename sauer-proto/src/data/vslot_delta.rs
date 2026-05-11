@@ -1,7 +1,7 @@
-use crate::internal::{SauerRead, SauerWrite};
 use crate::ParseError;
+use crate::internal::{SauerRead, SauerWrite};
 use cube_string::CubeString;
-use sauer_core::io::{getfloat, getint, getuint, putfloat, putint, putuint, getstring, putstring};
+use sauer_core::io::{getfloat, getint, getstring, getuint, putfloat, putint, putstring, putuint};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -96,15 +96,23 @@ impl SauerRead for VSlotDelta {
             }
             match type_byte {
                 0 => {
-                    let name = getstring(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
+                    let name =
+                        getstring(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
                     let mut values = [0.0; 4];
                     for i in 0..4 {
-                        values[i] = getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
+                        values[i] =
+                            getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
                     }
                     delta.params.push(VSlotDeltaParam { name, values });
                 }
-                1 => delta.scale = Some(getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?),
-                2 => delta.rotation = Some(getint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?),
+                1 => {
+                    delta.scale =
+                        Some(getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?)
+                }
+                2 => {
+                    delta.rotation =
+                        Some(getint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?)
+                }
                 3 => {
                     let x = getint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
                     let y = getint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?;
@@ -115,7 +123,10 @@ impl SauerRead for VSlotDelta {
                     let t = getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
                     delta.scroll = Some((s, t));
                 }
-                5 => delta.layer = Some(getuint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?),
+                5 => {
+                    delta.layer =
+                        Some(getuint(reader).ok_or(ParseError::UnexpectedEof { expected: 1 })?)
+                }
                 6 => {
                     let f = getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
                     let b = getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
@@ -127,7 +138,12 @@ impl SauerRead for VSlotDelta {
                     let b = getfloat(reader).ok_or(ParseError::UnexpectedEof { expected: 4 })?;
                     delta.color = Some((r, g, b));
                 }
-                v => return Err(ParseError::ValueOutOfRange { value: v as i32, max: 7 }),
+                v => {
+                    return Err(ParseError::ValueOutOfRange {
+                        value: v as i32,
+                        max: 7,
+                    });
+                }
             }
         }
         Ok(delta)
@@ -165,29 +181,60 @@ const _: () = {
             fields.add_field_method_get("params", |_lua, this| Ok(this.params.clone()));
             fields.add_field_method_get("scale", |_lua, this| Ok(this.scale));
             fields.add_field_method_get("rotation", |_lua, this| Ok(this.rotation));
-            fields.add_field_method_get("offset", |_lua, this| Ok(this.offset.map(|o| vec![o.0, o.1])));
-            fields.add_field_method_get("scroll", |_lua, this| Ok(this.scroll.map(|s| vec![s.0, s.1])));
+            fields.add_field_method_get("offset", |_lua, this| {
+                Ok(this.offset.map(|o| vec![o.0, o.1]))
+            });
+            fields.add_field_method_get("scroll", |_lua, this| {
+                Ok(this.scroll.map(|s| vec![s.0, s.1]))
+            });
             fields.add_field_method_get("layer", |_lua, this| Ok(this.layer));
-            fields.add_field_method_get("alpha", |_lua, this| Ok(this.alpha.map(|a| vec![a.0, a.1])));
-            fields.add_field_method_get("color", |_lua, this| Ok(this.color.map(|c| vec![c.0, c.1, c.2])));
+            fields
+                .add_field_method_get("alpha", |_lua, this| Ok(this.alpha.map(|a| vec![a.0, a.1])));
+            fields.add_field_method_get("color", |_lua, this| {
+                Ok(this.color.map(|c| vec![c.0, c.1, c.2]))
+            });
         }
     }
 
     impl FromLua for VSlotDelta {
         fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
             let table = mlua::Table::from_lua(value, lua)?;
-            
+
             let offset_vals: Option<Vec<i32>> = table.get("offset").ok();
-            let offset = offset_vals.and_then(|v| if v.len() >= 2 { Some((v[0], v[1])) } else { None });
+            let offset = offset_vals.and_then(|v| {
+                if v.len() >= 2 {
+                    Some((v[0], v[1]))
+                } else {
+                    None
+                }
+            });
 
             let scroll_vals: Option<Vec<f32>> = table.get("scroll").ok();
-            let scroll = scroll_vals.and_then(|v| if v.len() >= 2 { Some((v[0], v[1])) } else { None });
+            let scroll = scroll_vals.and_then(|v| {
+                if v.len() >= 2 {
+                    Some((v[0], v[1]))
+                } else {
+                    None
+                }
+            });
 
             let alpha_vals: Option<Vec<f32>> = table.get("alpha").ok();
-            let alpha = alpha_vals.and_then(|v| if v.len() >= 2 { Some((v[0], v[1])) } else { None });
+            let alpha = alpha_vals.and_then(|v| {
+                if v.len() >= 2 {
+                    Some((v[0], v[1]))
+                } else {
+                    None
+                }
+            });
 
             let color_vals: Option<Vec<f32>> = table.get("color").ok();
-            let color = color_vals.and_then(|v| if v.len() >= 3 { Some((v[0], v[1], v[2])) } else { None });
+            let color = color_vals.and_then(|v| {
+                if v.len() >= 3 {
+                    Some((v[0], v[1], v[2]))
+                } else {
+                    None
+                }
+            });
 
             Ok(Self {
                 params: table.get("params").unwrap_or_default(),

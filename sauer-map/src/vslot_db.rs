@@ -1,9 +1,9 @@
-use crate::{Node, Map};
+use crate::{Map, Node};
 use cube_string::CubeString;
-use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 
 use sauer_proto::data::{VSlotDelta, VSlotDeltaParam};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 

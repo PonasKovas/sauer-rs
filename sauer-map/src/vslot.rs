@@ -6,7 +6,9 @@ pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
     let mut fuel = 10000;
     loop {
         fuel -= 1;
-        if fuel == 0 { return current; }
+        if fuel == 0 {
+            return current;
+        }
         match vslots.get(current as usize) {
             Some(Some(vs)) => {
                 let p = vs.prev;
