@@ -905,10 +905,36 @@ impl Plugin for DeathrunEdit {
                 min[1] + packet.sel.s.y * packet.sel.grid,
                 min[2] + packet.sel.s.z * packet.sel.grid,
             ];
+            
             let d = (packet.sel.orient as usize) >> 1;
-            let expansion = packet.dir.abs() * packet.sel.grid;
-            min[d] -= expansion;
-            max[d] += expansion;
+            let dc = (packet.sel.orient as usize) & 1;
+            let dir = packet.dir;
+            let grid = packet.sel.grid;
+            
+            let mut actual_mode = packet.mode as i32;
+            if actual_mode == 1 && (packet.sel.cx > 0 || packet.sel.cy > 0 || (packet.sel.cxs & 1) != 0 || (packet.sel.cys & 1) != 0) {
+                actual_mode = 0;
+            }
+
+            if actual_mode == 1 {
+                if dc == 1 {
+                    let old_face = max[d];
+                    let new_face = max[d] - dir * grid;
+                    min[d] = old_face.min(new_face);
+                    max[d] = old_face.max(new_face);
+                } else {
+                    let old_face = min[d];
+                    let new_face = min[d] + dir * grid;
+                    min[d] = old_face.min(new_face);
+                    max[d] = old_face.max(new_face);
+                }
+            } else {
+                if dc == 1 {
+                    min[d] = max[d] - grid;
+                } else {
+                    max[d] = min[d] + grid;
+                }
+            }
             handle_edit_reject(ctx, min, max);
         }
     }
