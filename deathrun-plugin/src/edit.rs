@@ -1079,7 +1079,15 @@ impl Plugin for DeathrunEdit {
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
         let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_del_cube(packet));
+        with_map_state_mut(ctx, |state| {
+            ok = state.apply_del_cube(packet);
+            if ok {
+                // The Sauerbraten client's `delcube` command locally calls `makeempty`,
+                // which resets materials to MAT_AIR. However, it does not send an explicit
+                // EditMat packet. We must manually mirror this material wipe on the server.
+                state.set_material(&packet.sel, Default::default());
+            }
+        });
         if !ok {
             let (min, max) = packet.sel.bounds();
             handle_edit_reject(ctx, min, max);
