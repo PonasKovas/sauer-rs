@@ -786,7 +786,7 @@ impl Plugin for DeathrunEdit {
 
                 let t_serialize_start = std::time::Instant::now();
                 // Compress the fully prepared map back to Bytes here in the background
-                let out_bytes = state.to_ogz_bytes().map_err(|e: ogz_rs::OgzError| e.to_string())?;
+                let out_bytes = state.to_ogz_bytes_with(flate2::Compression::fast()).map_err(|e: ogz_rs::OgzError| e.to_string())?;
                 let t_serialize = t_serialize_start.elapsed();
 
                 tracing::info!(

@@ -3,10 +3,10 @@ use crate::{data::*, OgzMap};
 use byteorder::{LittleEndian, WriteBytesExt};
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 
-pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, OgzError> {
+    let mut encoder = BufWriter::new(GzEncoder::new(Vec::new(), compression));
 
     // Header
     encoder.write_all(b"OCTA")?;
@@ -197,7 +197,8 @@ pub fn serialize_map(map: &OgzMap) -> Result<Vec<u8>, OgzError> {
         encoder.write_all(bdata)?;
     }
 
-    Ok(encoder.finish()?)
+    let gz_encoder = encoder.into_inner().map_err(|e| e.into_error())?;
+    Ok(gz_encoder.finish()?)
 }
 
 fn write_cube<W: Write>(node: &OctreeNode, w: &mut W) -> Result<(), OgzError> {

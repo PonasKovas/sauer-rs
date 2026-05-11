@@ -25,7 +25,7 @@ futures = "0.3"
 bytes = "1"
 rand = "0.8"
 tracing-subscriber = "0.3"
-flate2 = "1"
+flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 serde_json = "1"
 anyhow = "1.0.102"
 glam = "0.32.1"
@@ -38,3 +38,6 @@ toml = "1.1.2"
 clap = "4.6.1"
 bitcode = { version = "0.6", features = ["serde"] }
 teloxide = { version = "0.13", default-features = false, features = ["macros", "rustls"] }
+
+[profile.release]
+debug = true

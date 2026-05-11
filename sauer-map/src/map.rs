@@ -134,28 +134,31 @@ impl Map {
 
     /// Serializes the live map state back into an `.ogz` byte format.
     pub fn to_ogz_bytes(&self) -> Result<Vec<u8>, ogz_rs::OgzError> {
-        let mut map_clone = self.clone();
-        map_clone.compact_vslots();
+        self.to_ogz_bytes_with(flate2::Compression::default())
+    }
+
+    pub fn to_ogz_bytes_with(&self, compression: flate2::Compression) -> Result<Vec<u8>, ogz_rs::OgzError> {
+        let compacted_vslots = self.get_compacted_vslots();
         
-        let config = MapConfig::Modern { variables: map_clone.vars.clone() };
+        let config = MapConfig::Modern { variables: self.vars.clone() };
         
         let ogz = OgzMap {
-            version: map_clone.version,
-            world_size: map_clone.size,
+            version: self.version,
+            world_size: self.size,
             config,
-            game_type: map_clone.game_type,
-            eif: map_clone.eif,
-            extra_game_data: map_clone.extra_game_data,
-            mru_textures: map_clone.mru_textures,
-            entities: map_clone.entities,
-            vslots: map_clone.vslots,
-            octree: crate::octree::node_to_ogz(&map_clone.root),
-            lightmaps: map_clone.lightmaps,
-            pvs: map_clone.pvs,
-            blendmap_resolution: map_clone.blendmap_resolution,
-            blendmap_data: map_clone.blendmap_data,
+            game_type: self.game_type.clone(),
+            eif: self.eif,
+            extra_game_data: self.extra_game_data.clone(),
+            mru_textures: self.mru_textures.clone(),
+            entities: self.entities.clone(),
+            vslots: compacted_vslots,
+            octree: crate::octree::node_to_ogz(&self.root),
+            lightmaps: self.lightmaps.clone(),
+            pvs: self.pvs.clone(),
+            blendmap_resolution: self.blendmap_resolution,
+            blendmap_data: self.blendmap_data.clone(),
         };
-        ogz.serialize()
+        ogz.serialize_with(compression)
     }
 
     pub fn invalidate_cache(&mut self) {
@@ -163,33 +166,35 @@ impl Map {
         self.pvs.clear();
     }
 
-    pub fn compact_vslots(&mut self) {
-        let mut used = HashSet::new();
-        fn collect(node: &Node, used: &mut HashSet<u16>) {
+    pub fn get_compacted_vslots(&self) -> Vec<Option<VSlot>> {
+        let mut used = vec![false; self.vslots.len().max(65536)];
+        fn collect(node: &Node, used: &mut Vec<bool>) {
             match node {
-                Node::Leaf(c) => { for &t in &c.textures { used.insert(t); } }
+                Node::Leaf(c) => { for &t in &c.textures { used[t as usize] = true; } }
                 Node::Branch(ch) => { for c in ch.as_ref() { collect(c, used); } }
             }
         }
         collect(&self.root, &mut used);
 
-        let used_clone = used.clone();
-        for &idx in &used_clone {
-            let current = idx as i32;
+        let mut vslots = self.vslots.clone();
+        
+        for i in 0..used.len() {
+            if !used[i] { continue; }
+            let current = i as i32;
             let mut fuel = 10000;
             loop {
                 fuel -= 1;
                 if fuel == 0 { break; }
-                let prev = if let Some(Some(vs)) = self.vslots.get(current as usize) {
+                let prev = if let Some(Some(vs)) = vslots.get(current as usize) {
                     vs.prev
                 } else {
                     -1
                 };
-                if prev < 0 || used.contains(&(prev as u16)) || prev == current {
+                if prev < 0 || (prev as usize) >= used.len() || used[prev as usize] || prev == current {
                     break;
                 }
                 
-                let prev_prev = if let Some(Some(p)) = self.vslots.get(prev as usize) {
+                let prev_prev = if let Some(Some(p)) = vslots.get(prev as usize) {
                     p.prev
                 } else {
                     -1
@@ -199,32 +204,45 @@ impl Map {
                     break;
                 }
                 
-                if let Some(Some(vs)) = self.vslots.get_mut(current as usize) {
+                if let Some(Some(vs)) = vslots.get_mut(current as usize) {
                     vs.prev = prev_prev;
                 }
             }
         }
 
-        let mut to_check: Vec<u16> = used.iter().copied().collect();
+        let mut to_check: Vec<usize> = (0..used.len()).filter(|&i| used[i]).collect();
         while let Some(idx) = to_check.pop() {
-            if let Some(Some(vs)) = self.vslots.get(idx as usize) {
+            if let Some(Some(vs)) = vslots.get(idx) {
                 if let Some(layer) = vs.layer {
-                    if used.insert(layer as u16) { to_check.push(layer as u16); }
+                    let l = layer as usize;
+                    if l < used.len() && !used[l] { 
+                        used[l] = true; 
+                        to_check.push(l); 
+                    }
                 }
                 if vs.prev >= 0 {
-                    if used.insert(vs.prev as u16) { to_check.push(vs.prev as u16); }
+                    let p = vs.prev as usize;
+                    if p < used.len() && !used[p] {
+                        used[p] = true;
+                        to_check.push(p);
+                    }
                 }
             }
         }
 
-        for i in 0..self.vslots.len() {
-            if !used.contains(&(i as u16)) {
-                self.vslots[i] = None;
+        for i in 0..vslots.len() {
+            if i < used.len() && !used[i] {
+                vslots[i] = None;
             }
         }
-        while self.vslots.last() == Some(&None) {
-            self.vslots.pop();
+        while vslots.last() == Some(&None) {
+            vslots.pop();
         }
+        vslots
+    }
+
+    pub fn compact_vslots(&mut self) {
+        self.vslots = self.get_compacted_vslots();
     }
 
     pub fn enlarge_empty(&mut self) {

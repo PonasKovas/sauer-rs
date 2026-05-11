@@ -53,7 +53,8 @@ pub fn compress_payload<T: Serialize>(data: &T) -> Result<Vec<u8>, StoreError> {
     let raw = bitcode::serialize(data).map_err(|e| StoreError::Serialise(e.to_string()))?;
 
     let mut zlib = Vec::new();
-    let mut enc = ZlibEncoder::new(&mut zlib, Compression::default());
+    // Testing fast compression for VSlot DB payloads as well
+    let mut enc = ZlibEncoder::new(&mut zlib, Compression::fast());
     enc.write_all(&raw)
         .map_err(|e| StoreError::Serialise(e.to_string()))?;
     enc.finish()

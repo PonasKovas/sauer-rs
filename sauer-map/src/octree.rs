@@ -185,8 +185,8 @@ pub fn build_node(ogz_node: &OctreeNode) -> Node {
 pub fn node_to_ogz(node: &Node) -> OctreeNode {
     match node {
         Node::Branch(children) => {
-            let converted: Vec<OctreeNode> = children.iter().map(node_to_ogz).collect();
-            OctreeNode::Children(Box::new(converted.try_into().unwrap()))
+            let converted = std::array::from_fn(|i| node_to_ogz(&children[i]));
+            OctreeNode::Children(Box::new(converted))
         }
         Node::Leaf(cube) => {
             let surfaces = Surfaces::Modern(ModernSurfaceData {

@@ -8,6 +8,6 @@ description = "A parser and serializer for the Cube 2: Sauerbraten .ogz map form
 sauer-core = { path = "../sauer-core" }
 cube-string.workspace = true
 thiserror.workspace = true
-flate2.workspace = true
+flate2 = { workspace = true }
 num_enum.workspace = true
 byteorder.workspace = true

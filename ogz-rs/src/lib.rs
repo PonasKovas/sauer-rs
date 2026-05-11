@@ -42,8 +42,13 @@ impl OgzMap {
         crate::de::parse_map(data)
     }
 
-    /// Serializes the map to the modern Version 33 `.ogz` byte array.
+    /// Serializes the map to the modern Version 33 `.ogz` byte array using default compression.
     pub fn serialize(&self) -> Result<Vec<u8>, crate::error::OgzError> {
-        crate::ser::serialize_map(self)
+        crate::ser::serialize_map(self, flate2::Compression::default())
+    }
+
+    /// Serializes the map using a specific compression level.
+    pub fn serialize_with(&self, compression: flate2::Compression) -> Result<Vec<u8>, crate::error::OgzError> {
+        crate::ser::serialize_map(self, compression)
     }
 }

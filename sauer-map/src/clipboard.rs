@@ -3,12 +3,12 @@ use ogz_rs::data::VSlot;
 use sauer_proto::data::{ClipboardPayload};use sauer_proto::data::clipboard::VSlotData;
 
 pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VSlotData> {
-    let mut used = std::collections::HashSet::new();
-    fn collect(node: &Node, used: &mut std::collections::HashSet<u16>) {
+    let mut used = vec![false; vslots.len().max(65536)];
+    fn collect(node: &Node, used: &mut Vec<bool>) {
         match node {
             Node::Leaf(cube) => {
                 for &tex in &cube.textures {
-                    used.insert(tex);
+                    used[tex as usize] = true;
                 }
             }
             Node::Branch(children) => {
@@ -21,18 +21,18 @@ pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VS
     for node in nodes {
         collect(node, &mut used);
     }
-    let mut used_vec: Vec<u16> = used.into_iter().collect();
-    used_vec.sort_unstable();
 
     let mut out = Vec::new();
-    for idx in used_vec {
-        if let Some(Some(vs)) = vslots.get(idx as usize) {
-            let slot = crate::vslot::root_base_of(vslots, idx);
-            out.push(VSlotData {
-                index: idx,
-                slot: slot as u16,
-                vslot: vs.clone(),
-            });
+    for idx in 0..used.len() {
+        if used[idx] {
+            if let Some(Some(vs)) = vslots.get(idx) {
+                let slot = crate::vslot::root_base_of(vslots, idx as u16);
+                out.push(VSlotData {
+                    index: idx as u16,
+                    slot: slot as u16,
+                    vslot: vs.clone(),
+                });
+            }
         }
     }
     out
