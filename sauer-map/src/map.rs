@@ -516,6 +516,7 @@ impl Map {
                     }
                     self.entities[id] = ue.ent.clone();
                 }
+                self.reconcile_virtual_entities();
                 true
             }
         }

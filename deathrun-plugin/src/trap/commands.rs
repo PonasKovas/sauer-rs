@@ -625,6 +625,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     if let Some(map) = state.map.as_mut() {
         if merged_vslots.len() > map.vslots.len() { map.vslots = merged_vslots; }
         map.virt_state = virt_state;
+        map.reconcile_virtual_entities();
         crate::map_state::update_server_items(map, server);
     }
     drop(state);

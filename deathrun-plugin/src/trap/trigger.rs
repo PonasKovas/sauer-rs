@@ -80,6 +80,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     }
 
     new_map.virt_state = virt_state;
+    new_map.reconcile_virtual_entities();
     state.map = Some(new_map);
     crate::map_state::update_server_items(state.map.as_ref().unwrap(), server);
 

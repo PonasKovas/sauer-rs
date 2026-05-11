@@ -34,6 +34,31 @@ pub struct VirtEntState {
 }
 
 impl Map {
+    /// Reconciles the physical entity list with the virtual entity pool.
+    /// This ensures that every virtual entity ID managed by the global pool is backed by
+    /// a genuine, reserved ET_BOX entity at `[0.0, 0.0, 0.0]` in the shared map state.
+    /// This guarantees that when map states are cloned, restored, or networked, the virtual
+    /// anchors remain stable and perfectly synchronized for both the server and all clients.
+    pub fn reconcile_virtual_entities(&mut self) {
+        for &id in &self.virt_state.global_pool {
+            if id >= self.entities.len() {
+                self.entities.resize_with(id + 1, || ogz_rs::data::Entity {
+                    position: [0.0; 3],
+                    attrs: [0; 5],
+                    ent_type: ogz_rs::data::EntityType::Empty,
+                    extra_data: Vec::new(),
+                });
+            }
+            
+            let ent = &mut self.entities[id];
+            if ent.ent_type == ogz_rs::data::EntityType::Empty {
+                ent.ent_type = ogz_rs::data::EntityType::Box;
+                ent.position = [0.0; 3];
+                ent.attrs = [0; 5];
+            }
+        }
+    }
+
     /// Safely assigns virtual entities for a player under a specific namespace (e.g. "highlight", "progress").
     /// Uses stable ID allocations to prevent unrelated namespaces from shifting and flooding network updates.
     pub fn update_virt_ents(&mut self, player_id: u64, namespace: &str, new_ents: Vec<FakeEnt>) -> VirtEntUpdates {
