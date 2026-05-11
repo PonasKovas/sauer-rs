@@ -54,6 +54,8 @@ pub struct BaseConfig {
     pub mode: GameMode,
     #[serde(default = "default_master_mode")]
     pub master_mode: MasterMode,
+    #[serde(default = "default_updatemaster")]
+    pub updatemaster: bool,
 }
 
 fn default_server_desc() -> String {
@@ -72,6 +74,10 @@ fn default_master_mode() -> MasterMode {
     MasterMode::Open
 }
 
+fn default_updatemaster() -> bool {
+    true
+}
+
 impl Default for BaseConfig {
     fn default() -> Self {
         Self {
@@ -81,6 +87,7 @@ impl Default for BaseConfig {
             map: default_map(),
             mode: GameMode::Ffa,
             master_mode: MasterMode::Open,
+            updatemaster: true,
         }
     }
 }
@@ -93,6 +100,7 @@ impl Plugin for BaseConfig {
         *server.map_name.write().unwrap() = self.map.as_str().lossy_cubestring();
         *server.game_mode.write().unwrap() = self.mode;
         *server.master_mode.write().unwrap() = self.master_mode;
+        *server.update_master.write().unwrap() = self.updatemaster;
     }
 }
 

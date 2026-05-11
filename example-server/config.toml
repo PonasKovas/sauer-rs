@@ -8,6 +8,7 @@ server_auth = ""
 map = "complex"
 mode = "CoopEdit"
 master_mode = "Locked"
+updatemaster = false
 
 [telegram]
 enabled = false

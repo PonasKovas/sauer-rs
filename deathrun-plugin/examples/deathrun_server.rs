@@ -77,6 +77,8 @@ struct BaseConfig {
     pub has_password: bool,
     #[serde(default = "default_master_mode")]
     pub master_mode: MasterMode,
+    #[serde(default = "default_updatemaster")]
+    pub updatemaster: bool,
 }
 
 fn default_server_desc() -> String {
@@ -87,6 +89,10 @@ fn default_master_mode() -> MasterMode {
     MasterMode::Locked
 }
 
+fn default_updatemaster() -> bool {
+    true
+}
+
 impl Default for BaseConfig {
     fn default() -> Self {
         Self {
@@ -94,6 +100,7 @@ impl Default for BaseConfig {
             server_auth: String::new(),
             has_password: false,
             master_mode: MasterMode::Open,
+            updatemaster: true,
         }
     }
 }
@@ -104,6 +111,7 @@ impl Plugin for BaseConfig {
         *server.server_auth.write().unwrap() = self.server_auth.as_str().lossy_cubestring();
         *server.has_password.write().unwrap() = self.has_password;
         *server.master_mode.write().unwrap() = self.master_mode;
+        *server.update_master.write().unwrap() = self.updatemaster;
     }
 }
 
