@@ -630,12 +630,11 @@ impl Plugin for DeathrunEdit {
 
     async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) {
         let id = ctx.id();
-        let server = ctx.server();
-        if !is_waiting_for_map(server) {
-            let is_spectator = server.players.try_get(id).map_or(false, |p| p.client_state == ClientState::Spectator);
+        if !is_waiting_for_map(ctx.server()) {
+            let is_spectator = ctx.server().players.try_get(id).map_or(false, |p| p.client_state == ClientState::Spectator);
             if is_spectator {
-                server.set_spectator(id, false);
-                ui::send(server, id, ui::body("Map loaded. You can now spawn and edit freely."));
+                ctx.server().set_spectator(id, false);
+                ui::send(ctx.server(), id, ui::body("Map loaded. You can now spawn and edit freely."));
             }
         }
     }
@@ -664,6 +663,32 @@ impl Plugin for DeathrunEdit {
         if is_waiting_for_map(ctx.server()) {
             ctx.cancel();
         }
+    }
+
+    async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, _mode: GameMode) {
+        let id = ctx.id();
+        let server = ctx.server();
+        {
+            let mut state = get_server_state(server).write().unwrap();
+            state.map = None;
+            state.waiting_for_map = true;
+            state.traps.clear();
+            state.trap_edit = None;
+            state.base_map = None;
+            state.active_trap_stack.clear();
+            state.client_vslot_bloat.clear();
+        }
+        for client_id in server.client_ids() {
+            server.set_spectator(client_id, true);
+        }
+
+        let player_name = server
+            .players
+            .try_get(id)
+            .map(|p| p.name.strip_colors().to_utf8())
+            .unwrap_or_else(|| "Someone".to_string());
+        let map_str = map_name.strip_colors().to_utf8();
+        ui::broadcast_map_changed(server, &player_name, &map_str);
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
@@ -802,7 +827,7 @@ impl Plugin for DeathrunEdit {
 
                 let loaded_traps_len = loaded_traps.len();
 
-                let uploading_map_name = {
+                {
                     let mut s = get_server_state(&server_clone).write().unwrap();
                     s.map = Some(state);
                     s.traps = loaded_traps;
@@ -810,19 +835,8 @@ impl Plugin for DeathrunEdit {
                     s.trap_edit = None;
                     s.base_map = None;
                     s.active_trap_stack.clear();
-                    let name = s.uploading_map_name.take().unwrap_or_else(|| "untitled".lossy_cubestring());
-                    name
-                };
+                }
                 info!("id {id} uploaded a map (world_size={world_size}); state loaded");
-
-                *server_clone.map_name.write().unwrap() = uploading_map_name.clone();
-                *server_clone.game_mode.write().unwrap() = GameMode::CoopEdit;
-
-                server_clone.broadcast_chan1(&sauer_proto::channel1::MapChange {
-                    map_name: uploading_map_name,
-                    mode: GameMode::CoopEdit,
-                    has_items: false,
-                });
 
                 server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
                     text: format!(
@@ -842,7 +856,7 @@ impl Plugin for DeathrunEdit {
             ui::send(
                 &server_clone,
                 id,
-                ui::body("Map successfully uploaded!"),
+                ui::body("Map successfully uploaded! Waiting for clients to load..."),
             );
         }
         Err(e) => warn!("id {id} sent an invalid map: {e}"),
