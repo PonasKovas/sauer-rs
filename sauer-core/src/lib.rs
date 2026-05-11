@@ -263,6 +263,7 @@ impl Selection {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive, IntoPrimitive,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum Volume {
     #[default]
@@ -275,6 +276,7 @@ pub enum Volume {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, FromPrimitive, IntoPrimitive,
 )]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum Clip {
     #[default]
@@ -285,6 +287,7 @@ pub enum Clip {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Material {
     pub volume: Volume,
     pub clip: Clip,
@@ -320,7 +323,6 @@ pub enum Node {
 pub struct Cube {
     pub edges: [u8; 12],
     pub textures: [u16; 6],
-    #[cfg_attr(feature = "serde", serde(skip))]
     pub material: Material,
 }
 impl Cube {
