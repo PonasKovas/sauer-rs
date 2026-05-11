@@ -1027,6 +1027,10 @@ impl Plugin for DeathrunEdit {
             },
         );
 
+        if is_waiting_for_map(server) {
+            server.set_spectator(id, true);
+        }
+
         crate::map_state::send_map_to_async(ctx.server(), id);
         info!("sent map state to id {id} after welcome");
         ui::send_welcome_edit(server, id);
@@ -1374,6 +1378,10 @@ impl Plugin for DeathrunEdit {
         state.waiting_for_map = true;
         state.uploading_map_name = Some(packet.map_name.clone());
         drop(state);
+
+        for client_id in server.client_ids() {
+            server.set_spectator(client_id, true);
+        }
 
         server.send_chan1(
             id,
