@@ -414,6 +414,9 @@ pub fn set_button_color(
         if let Some(map) = state.map.as_mut() {
             map.apply_vslots(&packet.sel, packet.all_faces, packet.delta != 0, &packet.extra_data);
         }
+        if let Some(base) = state.base_map.as_mut() {
+            base.apply_vslots(&packet.sel, packet.all_faces, packet.delta != 0, &packet.extra_data);
+        }
         server.broadcast_chan1(&Client {
             client_num: actor_cn,
             packet,
