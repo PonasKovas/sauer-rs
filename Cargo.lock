@@ -275,15 +275,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "crc32fast"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -429,30 +420,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "enet-interop-test"
-version = "0.1.0"
-dependencies = [
- "cc",
- "enet-rs",
- "tokio",
-]
-
-[[package]]
-name = "enet-rs"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "crc32fast",
- "futures",
- "rand",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1033,6 +1000,29 @@ name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
+
+[[package]]
+name = "lenet"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "lenet-sys",
+]
+
+[[package]]
+name = "lenet-sys"
+version = "0.1.0"
+
+[[package]]
+name = "lenet-tokio"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "lenet",
+ "log",
+ "thiserror 2.0.18",
+ "tokio",
+]
 
 [[package]]
 name = "libc"
@@ -1681,8 +1671,9 @@ dependencies = [
  "bytes",
  "cube-string",
  "dashmap",
- "enet-rs",
  "glam",
+ "lenet",
+ "lenet-tokio",
  "ogz-rs",
  "rand",
  "sauer-map",

@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::{Result, bail};
 use bytes::Bytes;
-use enet_rs::PeerReceiver;
+use lenet_tokio::{ConnEvent, ConnectionReceiver};
 use sauer_proto::{
     Chan0Client, Chan1Client, Reader, Session,
     route::{C2S, Chan0, Chan1},
@@ -14,7 +14,7 @@ use std::{collections::VecDeque, sync::Arc};
 pub(crate) async fn handle_client<P: Plugin>(
     server: &Arc<Server>,
     plugin: &Arc<P>,
-    peer: PeerReceiver,
+    peer: ConnectionReceiver,
     id: u64,
 ) -> Result<()> {
     let mut rx = SauerReceiver::new(peer);
@@ -128,7 +128,7 @@ pub(crate) async fn handle_client<P: Plugin>(
 // ── Packet buffering / receive loop ──────────────────────────────────────────
 
 struct SauerReceiver {
-    rx: PeerReceiver,
+    rx: ConnectionReceiver,
     session: Session,
     buffer: VecDeque<Packet>,
 }
@@ -141,7 +141,7 @@ enum Packet {
 }
 
 impl SauerReceiver {
-    fn new(peer: PeerReceiver) -> Self {
+    fn new(peer: ConnectionReceiver) -> Self {
         Self {
             rx: peer,
             session: Session::new(),
@@ -155,26 +155,30 @@ impl SauerReceiver {
                 return Ok(msg);
             }
 
-            let pkt = match self.rx.recv().await {
-                Ok(x) => x,
-                Err(e) => bail!("enet connection error: {e}"),
+            let (channel, data) = match self.rx.recv().await {
+                Some(ConnEvent::Receive {
+                    channel_id,
+                    payload,
+                }) => (channel_id, payload),
+                Some(ConnEvent::Disconnect { data }) => bail!("peer disconnected ({data})"),
+                None => bail!("connection closed"),
             };
 
-            match pkt.channel {
+            match channel {
                 sauer_proto::CHANNEL_POSITIONS => {
-                    let mut reader = Reader::<C2S<Chan0>>::new(&pkt.data, &mut self.session);
+                    let mut reader = Reader::<C2S<Chan0>>::new(&data, &mut self.session);
                     while let Some(msg) = reader.next() {
                         self.buffer.push_back(Packet::Chan0(msg?));
                     }
                 }
                 sauer_proto::CHANNEL_MESSAGES => {
-                    let mut reader = Reader::<C2S<Chan1>>::new(&pkt.data, &mut self.session);
+                    let mut reader = Reader::<C2S<Chan1>>::new(&data, &mut self.session);
                     while let Some(msg) = reader.next() {
                         self.buffer.push_back(Packet::Chan1(msg?));
                     }
                 }
                 sauer_proto::CHANNEL_MAPS => {
-                    self.buffer.push_back(Packet::Chan2(pkt.data));
+                    self.buffer.push_back(Packet::Chan2(data));
                 }
                 _ => panic!("unexpected ENet channel"),
             }

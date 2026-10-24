@@ -4,14 +4,16 @@ use sauer_proto::{
     PacketSequence, Writer,
     route::{Chan0, Chan1, Chan2, S2C},
 };
+use lenet::SendFlags;
+use lenet_tokio::ConnectionSender;
 use std::net::SocketAddr;
 
 pub struct Peer {
-    raw: enet_rs::PeerSender,
+    raw: ConnectionSender,
 }
 
 impl Peer {
-    pub(crate) fn new(peer: enet_rs::PeerSender) -> Self {
+    pub(crate) fn new(peer: ConnectionSender) -> Self {
         Self { raw: peer }
     }
 
@@ -19,11 +21,10 @@ impl Peer {
         let mut writer = Writer::<S2C<Chan0>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        if let Err(e) = self.raw.try_send_packet(enet_rs::Packet {
-            data: bytes.into(),
-            channel: sauer_proto::CHANNEL_POSITIONS,
-            mode: convert_mode(mode),
-        }) {
+        if let Err(e) = self
+            .raw
+            .try_send(sauer_proto::CHANNEL_POSITIONS, convert_mode(mode), bytes)
+        {
             tracing::error!("ENet dropped Chan0 packet: {:?}", e);
         }
     }
@@ -32,11 +33,10 @@ impl Peer {
         let mut writer = Writer::<S2C<Chan1>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        if let Err(e) = self.raw.try_send_packet(enet_rs::Packet {
-            data: bytes.into(),
-            channel: sauer_proto::CHANNEL_MESSAGES,
-            mode: convert_mode(mode),
-        }) {
+        if let Err(e) = self
+            .raw
+            .try_send(sauer_proto::CHANNEL_MESSAGES, convert_mode(mode), bytes)
+        {
             tracing::error!("ENet dropped Chan1 packet: {:?}", e);
         }
     }
@@ -45,27 +45,26 @@ impl Peer {
         let mut writer = Writer::<S2C<Chan2>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        if let Err(e) = self.raw.try_send_packet(enet_rs::Packet {
-            data: bytes.into(),
-            channel: sauer_proto::CHANNEL_MAPS,
-            mode: convert_mode(mode),
-        }) {
+        if let Err(e) = self
+            .raw
+            .try_send(sauer_proto::CHANNEL_MAPS, convert_mode(mode), bytes)
+        {
             tracing::error!("ENet dropped Chan2 packet: {:?}", e);
         }
     }
 
     pub fn try_disconnect(&self) {
-        self.raw.try_disconnect(0);
+        let _ = self.raw.try_disconnect(0);
     }
 
     pub fn addr(&self) -> SocketAddr {
-        self.raw.addr()
+        self.raw.remote_addr().into()
     }
 }
 
-fn convert_mode(sauer_proto_mode: sauer_proto::SendMode) -> enet_rs::SendMode {
+fn convert_mode(sauer_proto_mode: sauer_proto::SendMode) -> SendFlags {
     match sauer_proto_mode {
-        sauer_proto::SendMode::Reliable => enet_rs::SendMode::Reliable,
-        sauer_proto::SendMode::Unreliable => enet_rs::SendMode::Unreliable,
+        sauer_proto::SendMode::Reliable => SendFlags::RELIABLE,
+        sauer_proto::SendMode::Unreliable => SendFlags::UNRELIABLE,
     }
 }

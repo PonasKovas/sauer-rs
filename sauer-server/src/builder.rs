@@ -36,7 +36,7 @@ impl<P: Plugin> ServerBuilder<P> {
         }
     }
 
-    pub async fn run(self) -> enet_rs::Result<()> {
+    pub async fn run(self) -> std::io::Result<()> {
         crate::run::run(self.bind_addr, self.max_peers, self.plugin).await
     }
 }

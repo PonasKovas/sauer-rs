@@ -5,7 +5,8 @@ use crate::{
     peer::Peer,
     plugin::{Context, Plugin},
 };
-use enet_rs::{Host, HostConfig};
+use lenet::HostBuilder;
+use lenet_tokio::{Endpoint, LenetConfig};
 use std::{
     net::SocketAddr,
     sync::{Arc, Weak},
@@ -16,18 +17,17 @@ pub(crate) async fn run<P: Plugin>(
     bind_addr: SocketAddr,
     max_peers: usize,
     plugin: P,
-) -> enet_rs::Result<()> {
-    let mut host = Host::bind(
-        bind_addr,
-        HostConfig {
-            max_peers,
-            channel_count: sauer_proto::CHANNEL_COUNT as u8,
-            use_checksum: false,
-            incoming_bandwidth: 0,
-            outgoing_bandwidth: 0,
-        },
+) -> std::io::Result<()> {
+    let endpoint = Endpoint::start(
+        LenetConfig::new().bind_addr(bind_addr).host(
+            HostBuilder::new()
+                .peer_count(max_peers)
+                .channel_limit(sauer_proto::CHANNEL_COUNT)
+                .checksum(false),
+        ),
     )
     .await?;
+    let mut accepts = endpoint.listen().await.map_err(std::io::Error::other)?;
 
     // Base is always the innermost plugin — user plugins run first and can cancel it.
     // Arc::new_cyclic lets Base hold a Weak back-reference to the full arc so it
@@ -177,8 +177,8 @@ pub(crate) async fn run<P: Plugin>(
 
     let mut next_id = 0u64;
 
-    while let Some(peer) = host.accept().await {
-        let (tx, rx) = peer.split();
+    while let Some(incoming) = accepts.accept().await {
+        let (tx, rx) = incoming.accept().split();
 
         let id = next_id;
         next_id += 1;
