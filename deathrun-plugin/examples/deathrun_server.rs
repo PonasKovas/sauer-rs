@@ -90,7 +90,7 @@ fn default_master_mode() -> MasterMode {
 }
 
 fn default_updatemaster() -> bool {
-    true
+    false
 }
 
 impl Default for BaseConfig {
@@ -100,7 +100,7 @@ impl Default for BaseConfig {
             server_auth: String::new(),
             has_password: false,
             master_mode: MasterMode::Open,
-            updatemaster: true,
+            updatemaster: default_updatemaster(),
         }
     }
 }
