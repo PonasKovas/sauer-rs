@@ -1,11 +1,11 @@
 //! Networking abstraction module
 
+use lenet::SendFlags;
+use lenet_tokio::ConnectionSender;
 use sauer_proto::{
     PacketSequence, Writer,
     route::{Chan0, Chan1, Chan2, S2C},
 };
-use lenet::SendFlags;
-use lenet_tokio::ConnectionSender;
 use std::net::SocketAddr;
 
 pub struct Peer {
@@ -25,7 +25,8 @@ impl Peer {
             .raw
             .try_send(sauer_proto::CHANNEL_POSITIONS, convert_mode(mode), bytes)
         {
-            tracing::error!("ENet dropped Chan0 packet: {:?}", e);
+            // Only fails once the connection is closed (peer leaving).
+            tracing::debug!("dropped Chan0 packet to closed peer: {e}");
         }
     }
 
@@ -37,7 +38,8 @@ impl Peer {
             .raw
             .try_send(sauer_proto::CHANNEL_MESSAGES, convert_mode(mode), bytes)
         {
-            tracing::error!("ENet dropped Chan1 packet: {:?}", e);
+            // Only fails once the connection is closed (peer leaving).
+            tracing::debug!("dropped Chan1 packet to closed peer: {e}");
         }
     }
 
@@ -49,7 +51,8 @@ impl Peer {
             .raw
             .try_send(sauer_proto::CHANNEL_MAPS, convert_mode(mode), bytes)
         {
-            tracing::error!("ENet dropped Chan2 packet: {:?}", e);
+            // Only fails once the connection is closed (peer leaving).
+            tracing::debug!("dropped Chan2 packet to closed peer: {e}");
         }
     }
 

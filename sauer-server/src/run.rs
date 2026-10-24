@@ -6,12 +6,21 @@ use crate::{
     plugin::{Context, Plugin},
 };
 use lenet::HostBuilder;
-use lenet_tokio::{Endpoint, LenetConfig};
+use lenet_tokio::{Endpoint, EventQueuePolicy, LenetConfig};
 use std::{
     net::SocketAddr,
     sync::{Arc, Weak},
 };
 use tracing::error;
+
+/// Sauerbraten's `DISC_OVERFLOW` disconnect reason (`shared/iengine.h`).
+const DISC_OVERFLOW: u32 = 9;
+/// Packets a client may have waiting for its handler before it is kicked.
+const MAX_QUEUED_EVENTS: usize = 4096;
+/// Outgoing payload (queued plus unacknowledged) a client may make the
+/// server hold before it is kicked. Twice the 16 MiB file transfer limit
+/// (`engine/server.cpp`), so a map or demo download fits.
+const MAX_OUTGOING_BYTES: usize = 32 << 20;
 
 pub(crate) async fn run<P: Plugin>(
     bind_addr: SocketAddr,
@@ -19,12 +28,19 @@ pub(crate) async fn run<P: Plugin>(
     plugin: P,
 ) -> std::io::Result<()> {
     let endpoint = Endpoint::start(
-        LenetConfig::new().bind_addr(bind_addr).host(
-            HostBuilder::new()
-                .peer_count(max_peers)
-                .channel_limit(sauer_proto::CHANNEL_COUNT)
-                .checksum(false),
-        ),
+        LenetConfig::new()
+            .bind_addr(bind_addr)
+            .host(
+                HostBuilder::new()
+                    .peer_count(max_peers)
+                    .channel_limit(sauer_proto::CHANNEL_COUNT)
+                    .checksum(false),
+            )
+            .event_queue(EventQueuePolicy::BoundedThenDisconnect {
+                cap: MAX_QUEUED_EVENTS,
+                disconnect_data: DISC_OVERFLOW,
+            })
+            .peer_outgoing_limit(MAX_OUTGOING_BYTES, DISC_OVERFLOW),
     )
     .await?;
     let mut accepts = endpoint.listen().await.map_err(std::io::Error::other)?;
