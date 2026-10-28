@@ -1,6 +1,34 @@
 use sauer_proto::{Client, channel1, data::ClipboardPayload};
 use sauer_server::Server;
 
+/// DelCube + clipboard + paste as one packet. Clients keep one clipboard per
+/// client number, so sending these separately would let two concurrent
+/// senders paste each other's clipboards.
+fn paste_packets(
+    owner_cn: i32,
+    payload: ClipboardPayload,
+) -> (
+    Client<channel1::DelCube>,
+    channel1::ClipboardServer,
+    Client<channel1::PasteServer>,
+) {
+    let sel = payload.sel.clone();
+    (
+        Client {
+            client_num: owner_cn,
+            packet: channel1::DelCube { sel: sel.clone() },
+        },
+        channel1::ClipboardServer {
+            client_num: owner_cn,
+            payload,
+        },
+        Client {
+            client_num: owner_cn,
+            packet: channel1::PasteServer { sel },
+        },
+    )
+}
+
 pub async fn broadcast_payloads(
     server: &Server,
     owner_cn: i32,
@@ -8,22 +36,7 @@ pub async fn broadcast_payloads(
     delay_ms: u64,
 ) {
     for payload in payloads {
-        let sel = payload.sel.clone();
-
-        server.broadcast_chan1(&Client {
-            client_num: owner_cn,
-            packet: channel1::DelCube { sel: sel.clone() },
-        });
-
-        server.broadcast_chan1(&channel1::ClipboardServer {
-            client_num: owner_cn,
-            payload: payload.clone(),
-        });
-
-        server.broadcast_chan1(&Client {
-            client_num: owner_cn,
-            packet: channel1::PasteServer { sel },
-        });
+        server.broadcast_chan1(paste_packets(owner_cn, payload));
 
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -39,25 +52,9 @@ pub async fn send_payloads_to_clients(
     delay_ms: u64,
 ) {
     for payload in payloads {
-        let sel = payload.sel.clone();
-
-        let del_cube = Client {
-            client_num: owner_cn,
-            packet: channel1::DelCube { sel: sel.clone() },
-        };
-        let clipboard = channel1::ClipboardServer {
-            client_num: owner_cn,
-            payload: payload.clone(),
-        };
-        let paste = Client {
-            client_num: owner_cn,
-            packet: channel1::PasteServer { sel },
-        };
-
+        let packets = paste_packets(owner_cn, payload);
         for &target_id in target_ids {
-            server.send_chan1(target_id, &del_cube);
-            server.send_chan1(target_id, &clipboard);
-            server.send_chan1(target_id, &paste);
+            server.send_chan1(target_id, &packets);
         }
 
         if delay_ms > 0 {
