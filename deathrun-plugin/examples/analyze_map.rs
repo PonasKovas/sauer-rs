@@ -1,13 +1,10 @@
 use clap::Parser;
-use deathrun_plugin::trap::StoredTrap;
+use deathrun_plugin::trap::{EntChange, commands::payload_size, persist};
 use sauer_map::Map;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(
-    version,
-    about = "Analyze an OGZ map for VSlot Store (Trap) data and bloat."
-)]
+#[command(version, about = "Analyze an OGZ map for deathrun trap data.")]
 struct Args {
     #[arg(help = "The input .ogz file")]
     input: PathBuf,
@@ -17,9 +14,14 @@ struct Args {
 
     #[arg(
         long,
-        help = "Strip all trap data from the map's VSlots (destructive rescue)"
+        help = "Strip all trap data (old vslot store and the vault record) from the map's VSlots"
     )]
     strip_traps: bool,
+}
+
+fn is_trap_param(name: &[u8]) -> bool {
+    // Old vslot store chunks start with 0x01; the vault record with "~drv".
+    name.first() == Some(&1) || name.starts_with(b"~drv")
 }
 
 fn main() {
@@ -37,87 +39,84 @@ fn main() {
     println!("Entities: {}", raw_ogz.entities.len());
     println!("Total VSlot Array Size: {}", raw_ogz.vslots.len());
 
-    let mut empty_vslots = 0;
-    for vs_opt in &raw_ogz.vslots {
-        if vs_opt.is_none() {
-            empty_vslots += 1;
-        }
+    let Ok(mut map) = Map::from_bytes(&data) else {
+        println!("\n[WARNING] Could not parse the full octree. The map may be corrupted.");
+        return;
+    };
+
+    let old_params: usize = map
+        .vslots
+        .iter()
+        .flatten()
+        .flat_map(|vs| &vs.params)
+        .filter(|p| p.name.as_bytes().first() == Some(&1))
+        .count();
+    if old_params > 0 {
+        println!("\nOld vslot-store trap chunks: {old_params} (not loaded anymore)");
     }
 
-    // Load state to evaluate *valid* traps vs ghost bloat
-    if let Ok(mut state) = Map::from_bytes(&data) {
-        if let Ok((entries, stats)) = state.db_scan::<StoredTrap>() {
-            let mut valid_count = 0;
-            for entry in &entries {
-                let st = &entry.data;
-                let bpos = st.button_pos;
-                let valid = entry.instances.iter().any(|inst| {
-                    inst.pos[0] >= bpos[0]
-                        && inst.pos[0] <= bpos[0] + 8
-                        && inst.pos[1] >= bpos[1]
-                        && inst.pos[1] <= bpos[1] + 8
-                        && inst.pos[2] >= bpos[2]
-                        && inst.pos[2] <= bpos[2] + 8
-                });
-                if valid {
-                    valid_count += 1;
-                }
-            }
-            println!("\n=== VSlot Store (Trap) Stats ===");
-            println!("Empty VSlot indices: {}", empty_vslots);
-            println!("Valid (Active/Loadable) Traps: {}", valid_count);
-            println!("Total trap chunks (params): {}", stats.chunks);
-
-            let comp_kb = stats.payload_compressed as f64 / 1024.0;
-            let uncomp_kb = stats.payload_uncompressed as f64 / 1024.0;
-            let overhead_mb = stats.structural_bytes as f64 / 1024.0 / 1024.0;
-            let percent = if data.len() > 0 {
-                (stats.payload_compressed as f64 / data.len() as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            println!("Uncompressed Bitcode Size: {:.2} KB", uncomp_kb);
+    let loaded = persist::load(&map);
+    println!("\n=== Trap Vault ===");
+    match loaded.vault {
+        None => println!("No trap record found."),
+        Some(v) => {
             println!(
-                "Compressed Zlib Size: {:.2} KB ({:.1}% of OGZ file)",
-                comp_kb, percent
-            );
-            println!("VSlot Structural Memory Overhead: {:.2} MB", overhead_mb);
-        }
-
-        let compacted_data = state.to_ogz_bytes().expect("Failed to serialize map");
-        println!("\n=== Compaction Simulation ===");
-        println!(
-            "If unreferenced ghosts are cleared by the server, the map shrinks to: {:.2} MB",
-            compacted_data.len() as f64 / 1024.0 / 1024.0
-        );
-
-        if args.strip_traps || args.output.is_some() {
-            println!("\n=== Processing Output ===");
-
-            if args.strip_traps {
-                for vs_opt in &mut state.vslots {
-                    if let Some(vs) = vs_opt {
-                        vs.params.retain(|p| {
-                            let nb = p.name.as_bytes();
-                            nb.is_empty() || nb[0] != 1
-                        });
-                    }
+                "Vault: {} cube at {:?}{}",
+                v.size,
+                v.origin,
+                if v.is_at_far_corner(map.size) {
+                    ""
+                } else {
+                    " (not at the far corner)"
                 }
-                println!("Stripped all trap data from all VSlots.");
-            }
-
-            if let Some(out_path) = args.output {
-                let out_data = state.to_ogz_bytes().expect("Failed to serialize");
-                std::fs::write(&out_path, &out_data).expect("Failed to write output file");
+            );
+            println!("Record generation: {}", loaded.generation);
+            println!("Traps: {}", loaded.traps.len());
+            for (i, t) in loaded.traps.iter().enumerate() {
+                let geom = t.geom.as_ref().map_or("no geometry".to_string(), |g| {
+                    let e = g.extent();
+                    format!(
+                        "{}x{}x{} at grid {}, {:.1} KB",
+                        e[0],
+                        e[1],
+                        e[2],
+                        g.clip_grid,
+                        payload_size(&g.payload) as f64 / 1024.0
+                    )
+                });
+                let added = t
+                    .ents
+                    .iter()
+                    .filter(|c| matches!(c, EntChange::Added(_)))
+                    .count();
                 println!(
-                    "Saved output map to {:?} (New Size: {:.2} MB)",
-                    out_path,
-                    out_data.len() as f64 / 1024.0 / 1024.0
+                    "  #{i} button {:?}: {geom}, {} entity changes ({added} created)",
+                    t.button_pos,
+                    t.ents.len()
                 );
             }
         }
-    } else {
-        println!("\n[WARNING] Could not parse the full octree. The map may be corrupted.");
+    }
+    for w in &loaded.warnings {
+        println!("[WARNING] {w}");
+    }
+
+    if args.strip_traps || args.output.is_some() {
+        println!("\n=== Processing Output ===");
+        if args.strip_traps {
+            for vs in map.vslots.iter_mut().flatten() {
+                vs.params.retain(|p| !is_trap_param(p.name.as_bytes()));
+            }
+            println!("Stripped all trap data from all VSlots.");
+        }
+        if let Some(out_path) = args.output {
+            let out_data = map.to_ogz_bytes().expect("Failed to serialize");
+            std::fs::write(&out_path, &out_data).expect("Failed to write output file");
+            println!(
+                "Saved output map to {:?} (New Size: {:.2} MB)",
+                out_path,
+                out_data.len() as f64 / 1024.0 / 1024.0
+            );
+        }
     }
 }

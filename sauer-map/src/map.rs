@@ -42,30 +42,6 @@ pub struct Map {
 }
 
 impl Map {
-    /// Scans the map's VSlot table to find and decode all stored structural data of type T.
-    pub fn db_scan<T: serde::de::DeserializeOwned + Clone>(
-        &self,
-    ) -> Result<(Vec<crate::db::DbEntry<T>>, crate::db::StoreStats), crate::db::StoreError> {
-        crate::vslot_db::read_all::<T>(self)
-    }
-
-    /// Encodes a struct into a sequence of VSlotDelta chunks for applying to the map.
-    pub fn db_encode<T: serde::Serialize>(
-        data: &T,
-    ) -> Result<Vec<sauer_proto::data::VSlotDelta>, crate::db::StoreError> {
-        crate::vslot_db::encode_payload(data)
-    }
-
-    /// Compresses a struct into a raw byte payload (used internally or for metrics).
-    pub fn db_compress<T: serde::Serialize>(data: &T) -> Result<Vec<u8>, crate::db::StoreError> {
-        crate::vslot_db::compress_payload(data)
-    }
-
-    /// Exposes the chunk name encoding for structural metric calculations.
-    pub fn db_encode_chunk_name(idx: usize) -> Vec<u8> {
-        crate::vslot_db::encode_chunk_name(idx)
-    }
-
     /// Creates a default empty map matching Sauerbraten's `emptymap(10)`
     pub fn default_empty() -> Self {
         Self::new_empty(1024)
@@ -303,6 +279,9 @@ impl Map {
             air,
         ]));
         self.size = new_size;
+        if let Some(data) = &self.blendmap_data {
+            self.blendmap_data = Some(ogz_rs::blendmap::enlarged(data));
+        }
     }
 
     pub fn enlarge(&mut self) {
@@ -329,6 +308,48 @@ impl Map {
             air,
         ]));
         self.size = new_size;
+        if let Some(data) = &self.blendmap_data {
+            self.blendmap_data = Some(ogz_rs::blendmap::enlarged(data));
+        }
+    }
+
+    /// True when every cube in the box is entirely solid with no material,
+    /// i.e. untouched rock like the octants `enlarge` adds.
+    pub fn is_solid_region(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+        fn check(node: &Node, pos: [i32; 3], size: i32, min: &[i32; 3], max: &[i32; 3]) -> bool {
+            if (0..3).any(|i| pos[i] >= max[i] || pos[i] + size <= min[i]) {
+                return true;
+            }
+            match node {
+                Node::Leaf(c) => c.is_entirely_solid() && c.material == Default::default(),
+                Node::Branch(ch) => {
+                    let half = size / 2;
+                    (0..8).all(|i| {
+                        let p = [
+                            pos[0] + (i & 1) as i32 * half,
+                            pos[1] + ((i >> 1) & 1) as i32 * half,
+                            pos[2] + ((i >> 2) & 1) as i32 * half,
+                        ];
+                        check(&ch[i], p, half, min, max)
+                    })
+                }
+            }
+        }
+        check(&self.root, [0, 0, 0], self.size, &min, &max)
+    }
+
+    /// Gives the selected faces a variant of texture `slot` carrying exactly the
+    /// props in `ds` (like `N_EDITT` with `tex = 0x10000 | slot`). Returns the vslot index.
+    pub fn assign_vslot(
+        &mut self,
+        sel: &Selection,
+        all_faces: bool,
+        slot: u16,
+        ds: &VSlotDelta,
+    ) -> u16 {
+        let idx = crate::vslot::resolve_vslot(&mut self.vslots, slot, ds, false);
+        self.set_texture(sel, idx, all_faces);
+        idx
     }
 
     // --- Packet Consumers ---

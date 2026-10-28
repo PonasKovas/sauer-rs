@@ -1,19 +1,27 @@
 use crate::map_state::get_server_state;
-use sauer_proto::{
-    Client, channel1,
-    data::{EntityType, Vec3},
-};
+use sauer_proto::{Client, channel1, data::Vec3};
 use sauer_server::Server;
 
-use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY};
+use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY, Trap};
 
-pub fn in_aabb(pos: [f32; 3], min: [i32; 3], max: [i32; 3]) -> bool {
-    pos[0] >= min[0] as f32
-        && pos[0] < max[0] as f32
-        && pos[1] >= min[1] as f32
-        && pos[1] < max[1] as f32
-        && pos[2] >= min[2] as f32
-        && pos[2] < max[2] as f32
+/// Turns the base state of the trap's area into its active state. Returns the
+/// entity slots it touched.
+pub fn apply_active_state(
+    map: &mut sauer_map::Map,
+    trap: &Trap,
+    virt_pool: &[usize],
+) -> Vec<usize> {
+    let touched = super::ents::apply(&mut map.entities, &trap.ents, virt_pool);
+    if let Some(geom) = &trap.geom {
+        let mut sel = geom.payload.sel.clone();
+        sel.o = Vec3 {
+            x: geom.clip_pos[0],
+            y: geom.clip_pos[1],
+            z: geom.clip_pos[2],
+        };
+        map.apply_block(&sel, geom.payload.nodes.clone(), false);
+    }
+    touched
 }
 
 pub fn recompose_traps(server: &std::sync::Arc<Server>) {
@@ -30,44 +38,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
 
     // Apply all active traps in chronological order
     for &t_idx in &state.active_trap_stack {
-        let trap = &state.traps[t_idx];
-        if let Some(payload) = &trap.trigger_payload {
-            let min = trap.clip_pos;
-            let max = [
-                min[0] + trap.clip_s[0] * trap.clip_grid,
-                min[1] + trap.clip_s[1] * trap.clip_grid,
-                min[2] + trap.clip_s[2] * trap.clip_grid,
-            ];
-
-            // 1. Clear entities in AABB
-            for ent in &mut new_map.entities {
-                if ent.ent_type != EntityType::Empty && in_aabb(ent.position, min, max) {
-                    ent.ent_type = EntityType::Empty;
-                    ent.attrs = [0; 5];
-                }
-            }
-            // 2. Add trap entities
-            for new_ent in &trap.trigger_entities {
-                if let Some(id) = new_map
-                    .entities
-                    .iter()
-                    .position(|e| e.ent_type == EntityType::Empty)
-                {
-                    new_map.entities[id] = new_ent.clone();
-                } else {
-                    new_map.entities.push(new_ent.clone());
-                }
-            }
-
-            // 3. Apply geometry
-            let mut paste_sel = payload.sel.clone();
-            paste_sel.o = Vec3 {
-                x: min[0],
-                y: min[1],
-                z: min[2],
-            };
-            new_map.apply_block(&paste_sel, payload.nodes.clone(), false);
-        }
+        apply_active_state(&mut new_map, &state.traps[t_idx], &virt_state.global_pool);
     }
 
     new_map.invalidate_cache();
@@ -166,7 +137,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         return;
     }
 
-    if state.traps[trap_idx].is_active || state.traps[trap_idx].trigger_payload.is_none() {
+    if state.traps[trap_idx].is_active || !state.traps[trap_idx].does_anything() {
         return;
     }
 

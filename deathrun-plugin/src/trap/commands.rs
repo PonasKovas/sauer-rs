@@ -1,40 +1,165 @@
-use super::stored::sync_traps_to_map;
-use super::{BUTTON_SIZE, TrapEditState};
-use crate::map_state::{Trap, get_server_state};
+use super::{BUTTON_SIZE, Trap, TrapEditState, TrapGeom, persist};
+use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
-use sauer_map::Selection;
+use sauer_map::{Map, Selection};
 use sauer_proto::{
-    Client,
+    Client, Encode,
     channel1::{self, ServMsg},
-    data::Vec3,
+    data::{ClipboardPayload, Vec3},
+    route::{Chan1, S2C},
 };
+use sauer_server::Server;
 use sauer_server::plugin::Context;
+use std::sync::Arc;
+
+type Box3 = ([i32; 3], [i32; 3]);
+
+fn find_trap(state: &DeathrunState, hit_pt: [f32; 3]) -> Option<usize> {
+    state
+        .traps
+        .iter()
+        .position(|t| t.contains_button_point(hit_pt, 0.0))
+}
+
+fn not_looking(server: &Server, id: u64) {
+    server.send_chan1(
+        id,
+        &ServMsg {
+            text: "Not looking at a trap.".lossy_cubestring(),
+        },
+    );
+}
+
+fn say(server: &Server, id: u64, text: String) {
+    server.send_chan1(
+        id,
+        &ServMsg {
+            text: text.lossy_cubestring(),
+        },
+    );
+}
+
+/// Compressed size of a payload as it goes over the wire, i.e. what firing the trap costs.
+pub fn payload_size(payload: &ClipboardPayload) -> usize {
+    let packet = channel1::ClipboardServer {
+        client_num: 0,
+        payload: payload.clone(),
+    };
+    let mut buf = Vec::new();
+    <channel1::ClipboardServer as Encode<S2C<Chan1>>>::encode(&packet, &mut buf);
+    buf.len()
+}
+
+/// Bounds of the geometry that differs between `original` and `current`,
+/// grown to cover the trap's previous clip box when re-editing it.
+pub fn geometry_bounds(original: &Map, current: &Map, old: Option<&TrapGeom>) -> Option<Box3> {
+    let mut min = [i32::MAX; 3];
+    let mut max = [i32::MIN; 3];
+    sauer_map::octree::diff_bounds(
+        &original.root,
+        &current.root,
+        [0, 0, 0],
+        current.size,
+        &mut min,
+        &mut max,
+    );
+    if let Some(g) = old {
+        let (o_min, o_max) = g.clip_box();
+        for i in 0..3 {
+            min[i] = min[i].min(o_min[i]);
+            max[i] = max[i].max(o_max[i]);
+        }
+    }
+    if min[0] == i32::MAX {
+        return None;
+    }
+    Some((min.map(|v| v.max(0)), max.map(|v| v.min(current.size))))
+}
+
+/// Copies the active-state geometry inside `bounds` out of `current`.
+pub fn capture_geometry(current: &Map, (min, max): Box3) -> TrapGeom {
+    let (clip_pos, clip_s, clip_grid, payload) =
+        sauer_map::clipboard::generate_region_clipboard(current, min, max);
+    TrapGeom {
+        clip_pos,
+        clip_s,
+        clip_grid,
+        payload,
+        shelf: None,
+    }
+}
+
+/// Size of the trap being edited if it were recorded right now.
+pub fn edit_size(state: &DeathrunState) -> usize {
+    let (Some(edit), Some(current)) = (state.trap_edit.as_ref(), state.map.as_ref()) else {
+        return 0;
+    };
+    let old = edit
+        .is_edit
+        .then(|| state.traps.get(edit.trap_idx).and_then(|t| t.geom.as_ref()))
+        .flatten();
+    geometry_bounds(&edit.original_map, current, old)
+        .map_or(0, |b| payload_size(&capture_geometry(current, b).payload))
+}
+
+fn broadcast_ents(server: &Server, map: &Map, ids: impl IntoIterator<Item = usize>) {
+    let cn = crate::SERVER_BOT_CN as i32;
+    let empty = ogz_rs::data::Entity {
+        position: [0.0; 3],
+        attrs: [0; 5],
+        ent_type: ogz_rs::data::EntityType::Empty,
+        extra_data: vec![],
+    };
+    let mut batch = Vec::new();
+    for id in ids {
+        let ent = map.entities.get(id).unwrap_or(&empty);
+        batch.push(Client {
+            client_num: cn,
+            packet: channel1::EditEnt {
+                ent_id: id as i32,
+                pos: Vec3 {
+                    x: ent.position[0],
+                    y: ent.position[1],
+                    z: ent.position[2],
+                },
+                type_: ent.ent_type,
+                attrs: ent.attrs.map(|x| x as i32),
+            },
+        });
+        if batch.len() >= 50 {
+            server.broadcast_chan1(std::mem::take(&mut batch));
+        }
+    }
+    if !batch.is_empty() {
+        server.broadcast_chan1(batch);
+    }
+}
+
+fn spawn_payloads(server: &Arc<Server>, payloads: Vec<ClipboardPayload>) {
+    if payloads.is_empty() {
+        return;
+    }
+    let s = server.clone();
+    tokio::spawn(async move {
+        crate::geo_sync::broadcast_payloads(&s, crate::SERVER_BOT_CN as i32, payloads, 0).await;
+    });
+}
 
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
-        Some(i) => i,
+    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+        not_looking(server, id);
+        return;
     };
     let trap = state.traps.remove(trap_idx);
+
+    let mut sync = persist::Sync::default();
+    if let Some(geom) = &trap.geom {
+        persist::free_shelf(&mut state, geom, &mut sync);
+    }
 
     let map = state.map.as_mut().unwrap();
     let sel = Selection {
@@ -53,28 +178,21 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
         cys: 2,
         corner: 0,
     };
-
-    let b_max = [
-        trap.button_pos[0] + trap.button_size,
-        trap.button_pos[1] + trap.button_size,
-        trap.button_pos[2] + trap.button_size,
-    ];
-    map.unprotect_region(trap.button_pos, b_max);
-
+    let (b_min, b_max) = trap.button_box();
+    map.unprotect_region(b_min, b_max);
     map.fill(&sel, false);
     map.set_material(&sel, Default::default());
+    let payloads = map.generate_restore_packets(b_min, b_max);
 
-    let payloads = map.generate_restore_packets(trap.button_pos, b_max);
-
+    let result = persist::save(&mut state, &mut sync);
+    let out = persist::packets(&state, sync);
     drop(state);
 
-    sync_traps_to_map(server, id);
-
-    let s_clone = server.clone();
-    let target_cn = crate::SERVER_BOT_CN as i32;
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
-    });
+    spawn_payloads(server, payloads);
+    persist::send(server, out);
+    if let Err(e) = result {
+        crate::ui::send_warn(server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
+    }
 }
 
 pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
@@ -115,415 +233,178 @@ pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
     {
         return;
     }
+    let b_max = adj.map(|v| v + BUTTON_SIZE);
+    if map.is_protected(adj, b_max) {
+        crate::ui::send_warn(&server, id, "A trap can't be placed here.");
+        return;
+    }
 
-    let target_cn = crate::SERVER_BOT_CN as i32;
     crate::trap::placement::build_button_geometry(map, adj, BUTTON_SIZE, hit_orient);
-
-    let b_max = [
-        adj[0] + BUTTON_SIZE,
-        adj[1] + BUTTON_SIZE,
-        adj[2] + BUTTON_SIZE,
-    ];
     map.protect_region(adj, b_max);
-
     let payloads = map.generate_restore_packets(adj, b_max);
 
-    state.traps.push(Trap {
-        button_pos: adj,
-        button_size: BUTTON_SIZE,
-        button_orient: hit_orient,
-        trigger_payload: None,
-        trigger_entities: Vec::new(),
-        clip_pos: [0; 3],
-        clip_s: [0; 3],
-        clip_grid: 1,
-        time: 2000,
-        timeout: 20000,
-        is_active: false,
-    });
+    state.traps.push(Trap::new(adj, BUTTON_SIZE, hit_orient));
+
+    let mut sync = persist::Sync::default();
+    let result = persist::save(&mut state, &mut sync);
+    let out = persist::packets(&state, sync);
     drop(state);
 
-    let s_clone = server.clone();
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
-        crate::trap::stored::sync_traps_to_map(&s_clone, id);
-    });
+    persist::send(&server, out);
+    spawn_payloads(&server, payloads);
+    if let Err(e) = result {
+        crate::ui::send_warn(&server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
+    }
+}
+
+fn set_trap_value(ctx: &Context, hit_pt: [f32; 3], f: impl FnOnce(&mut Trap) -> String) {
+    let id = ctx.id();
+    let server = ctx.server();
+    let mut state = get_server_state(server).write().unwrap();
+    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+        not_looking(server, id);
+        return;
+    };
+    let msg = f(&mut state.traps[trap_idx]);
+    drop(state);
+    say(server, id, msg);
+    persist::save_and_send(server, Some(id));
 }
 
 pub fn cmd_traptime(ctx: &Context, hit_pt: [f32; 3], time: u32) {
-    let id = ctx.id();
-    let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
-
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
+    set_trap_value(ctx, hit_pt, |trap| {
+        trap.time = time;
+        let mut msg = format!("Trap time set to {}ms.", time);
+        if trap.timeout > 0 && time > trap.timeout {
+            msg.push_str(&format!(
+                " Warning: this is greater than the timeout ({}ms).",
+                trap.timeout
+            ));
         }
-        Some(i) => i,
-    };
-
-    state.traps[trap_idx].time = time;
-    let timeout = state.traps[trap_idx].timeout;
-    let mut msg = format!("Trap time set to {}ms.", time);
-    if timeout > 0 && time > timeout {
-        msg.push_str(&format!(
-            " Warning: this is greater than the timeout ({}ms).",
-            timeout
-        ));
-    }
-    server.send_chan1(
-        id,
-        &ServMsg {
-            text: msg.lossy_cubestring(),
-        },
-    );
-    drop(state);
-    sync_traps_to_map(server, id);
+        msg
+    });
 }
 
 pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
-    let id = ctx.id();
-    let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
-
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
+    set_trap_value(ctx, hit_pt, |trap| {
+        trap.timeout = timeout;
+        let mut msg = format!("Trap timeout set to {}ms.", timeout);
+        if timeout > 0 && timeout < trap.time {
+            msg.push_str(&format!(
+                " Warning: this is less than the trap time ({}ms).",
+                trap.time
+            ));
         }
-        Some(i) => i,
-    };
-
-    state.traps[trap_idx].timeout = timeout;
-    let time = state.traps[trap_idx].time;
-    let mut msg = format!("Trap timeout set to {}ms.", timeout);
-    if timeout > 0 && timeout < time {
-        msg.push_str(&format!(
-            " Warning: this is less than the trap time ({}ms).",
-            time
-        ));
-    }
-    server.send_chan1(
-        id,
-        &ServMsg {
-            text: msg.lossy_cubestring(),
-        },
-    );
-    drop(state);
-    sync_traps_to_map(server, id);
+        msg
+    });
 }
 
 pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
-    let id = ctx.id();
-    let server = ctx.server();
-    let state = get_server_state(server).read().unwrap();
-
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
-        Some(i) => i,
-    };
-
-    let time = state.traps[trap_idx].time;
-    server.send_chan1(
-        id,
-        &ServMsg {
-            text: format!("Trap time is {}ms.", time).lossy_cubestring(),
-        },
-    );
+    let state = get_server_state(ctx.server()).read().unwrap();
+    match find_trap(&state, hit_pt) {
+        Some(i) => say(
+            ctx.server(),
+            ctx.id(),
+            format!("Trap time is {}ms.", state.traps[i].time),
+        ),
+        None => not_looking(ctx.server(), ctx.id()),
+    }
 }
 
 pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
-    let id = ctx.id();
-    let server = ctx.server();
-    let state = get_server_state(server).read().unwrap();
-
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
-        Some(i) => i,
-    };
-
-    let timeout = state.traps[trap_idx].timeout;
-    server.send_chan1(
-        id,
-        &ServMsg {
-            text: format!("Trap timeout is {}ms.", timeout).lossy_cubestring(),
-        },
-    );
+    let state = get_server_state(ctx.server()).read().unwrap();
+    match find_trap(&state, hit_pt) {
+        Some(i) => say(
+            ctx.server(),
+            ctx.id(),
+            format!("Trap timeout is {}ms.", state.traps[i].timeout),
+        ),
+        None => not_looking(ctx.server(), ctx.id()),
+    }
 }
 
 pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
     let state = get_server_state(server).read().unwrap();
-
-    let trap_idx = state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    });
-
-    let trap_idx = match trap_idx {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
-        Some(i) => i,
+    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+        not_looking(server, id);
+        return;
     };
-
     let trap = &state.traps[trap_idx];
-    let stored = crate::trap::StoredTrap::from_trap(trap);
-    let raw_bytes = bitcode::serialize(&stored).unwrap_or_default();
-    let uncompressed_size = raw_bytes.len();
-
-    let payload = sauer_map::Map::db_compress(&stored).unwrap_or_default();
-    let payload_len = payload.len();
-
-    let total_chunks = (payload_len + 15) / 16;
-
-    let mut size_on_disk = 0;
-    let mut size_in_mem = 0;
-    for idx in 0..total_chunks {
-        let name_len = sauer_map::Map::db_encode_chunk_name(idx).len();
-        size_on_disk += 1 + 1 + name_len + 16;
-        size_in_mem += 32 + name_len;
-    }
 
     let mut msg = format!("\x0C1[Trap {} Info]\n", trap_idx);
+    match &trap.geom {
+        Some(g) => {
+            let e = g.extent();
+            msg.push_str(&format!(
+                "\x0C7Geometry: \x0C2{}x{}x{}\x0C7 at grid \x0C2{}\x0C7, \x0C2{:.1} KB\x0C7 of \x0C2{} KB\x0C7 budget\n",
+                e[0],
+                e[1],
+                e[2],
+                g.clip_grid,
+                payload_size(&g.payload) as f64 / 1024.0,
+                super::TRAP_BUDGET / 1024
+            ));
+        }
+        None => msg.push_str("\x0C7Geometry: \x0C2none\n"),
+    }
+    let count = |f: fn(&super::EntChange) -> bool| trap.ents.iter().filter(|c| f(c)).count();
     msg.push_str(&format!(
-        "\x0C7Uncompressed bitcode: \x0C2{} bytes\n",
-        uncompressed_size
+        "\x0C7Entities: \x0C2{}\x0C7 created, \x0C2{}\x0C7 deleted, \x0C2{}\x0C7 changed\n",
+        count(|c| matches!(c, super::EntChange::Added(_))),
+        count(|c| matches!(c, super::EntChange::Removed(_))),
+        count(|c| matches!(c, super::EntChange::Changed { .. })),
     ));
     msg.push_str(&format!(
-        "\x0C7Compressed payload: \x0C2{} bytes\n",
-        payload_len
+        "\x0C7Time: \x0C2{}ms\x0C7, timeout: \x0C2{}ms",
+        trap.time, trap.timeout
     ));
-    msg.push_str(&format!(
-        "\x0C7VSlot params (chunks): \x0C2{}\n",
-        total_chunks
-    ));
-    msg.push_str(&format!(
-        "\x0C7Est. Disk Size: \x0C2{} bytes\n",
-        size_on_disk
-    ));
-    msg.push_str(&format!(
-        "\x0C7Est. Memory Size: \x0C2{} bytes",
-        size_in_mem
-    ));
-
-    server.send_chan1(
-        id,
-        &ServMsg {
-            text: msg.lossy_cubestring(),
-        },
-    );
+    say(server, id, msg);
 }
 
 pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
+    let mut state = get_server_state(server).write().unwrap();
 
-    let (trap_idx, original_map, trigger_payload, trigger_entities, clip_pos, clip_s, clip_grid) = {
-        let state = get_server_state(server).read().unwrap();
-
-        if state.trap_edit.is_some() {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
-
-        let trap_idx = match state.traps.iter().position(|t| {
-            (0..3).all(|ax| {
-                hit_pt[ax] >= t.button_pos[ax] as f32
-                    && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-            })
-        }) {
-            None => {
-                server.send_chan1(
-                    id,
-                    &ServMsg {
-                        text: "Not looking at a trap.".lossy_cubestring(),
-                    },
-                );
-                return;
-            }
-            Some(i) => i,
-        };
-
-        let trap = &state.traps[trap_idx];
-        (
-            trap_idx,
-            Box::new(state.map.clone().unwrap()),
-            trap.trigger_payload.clone(),
-            trap.trigger_entities.clone(),
-            trap.clip_pos,
-            trap.clip_s,
-            trap.clip_grid,
-        )
+    if state.trap_edit.is_some() {
+        say(
+            server,
+            id,
+            "A trap is already being edited. Use #endtrap first.".into(),
+        );
+        return;
+    }
+    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+        not_looking(server, id);
+        return;
     };
 
-    if clip_s != [0, 0, 0] {
-        if let Some(payload) = &trigger_payload {
-            let min = clip_pos;
-            let max = [
-                min[0] + clip_s[0] * clip_grid,
-                min[1] + clip_s[1] * clip_grid,
-                min[2] + clip_s[2] * clip_grid,
-            ];
+    let original_map = Box::new(state.map.clone().unwrap());
+    let trap = state.traps[trap_idx].clone();
+    let map = state.map.as_mut().unwrap();
+    let pool = map.virt_state.global_pool.clone();
+    let touched = super::trigger::apply_active_state(map, &trap, &pool);
+    map.invalidate_cache();
+    crate::map_state::update_server_items(map, server);
 
-            let mut diff_ent_ids = std::collections::HashSet::new();
-            {
-                let mut state = get_server_state(server).write().unwrap();
-                let map = state.map.as_mut().unwrap();
-
-                for (id, ent) in map.entities.iter_mut().enumerate() {
-                    if ent.ent_type != sauer_proto::data::EntityType::Empty
-                        && super::trigger::in_aabb(ent.position, min, max)
-                    {
-                        ent.ent_type = sauer_proto::data::EntityType::Empty;
-                        ent.attrs = [0; 5];
-                        diff_ent_ids.insert(id);
-                    }
-                }
-
-                for new_ent in &trigger_entities {
-                    if let Some(id) = map
-                        .entities
-                        .iter()
-                        .position(|e| e.ent_type == sauer_proto::data::EntityType::Empty)
-                    {
-                        map.entities[id] = new_ent.clone();
-                        diff_ent_ids.insert(id);
-                    } else {
-                        let id = map.entities.len();
-                        map.entities.push(new_ent.clone());
-                        diff_ent_ids.insert(id);
-                    }
-                }
-
-                let mut paste_sel = payload.sel.clone();
-                paste_sel.o = sauer_proto::data::Vec3 {
-                    x: min[0],
-                    y: min[1],
-                    z: min[2],
-                };
-                map.apply_block(&paste_sel, payload.nodes.clone(), false);
-                map.invalidate_cache();
-                crate::map_state::update_server_items(map, server);
-            }
-
-            let actor_cn = crate::SERVER_BOT_CN as i32;
-            let mut batch = Vec::new();
-            for id in diff_ent_ids {
-                let state = get_server_state(server).read().unwrap();
-                let ent = &state.map.as_ref().unwrap().entities[id];
-                batch.push(Client {
-                    client_num: actor_cn,
-                    packet: channel1::EditEnt {
-                        ent_id: id as i32,
-                        pos: sauer_proto::data::Vec3 {
-                            x: ent.position[0],
-                            y: ent.position[1],
-                            z: ent.position[2],
-                        },
-                        type_: ent.ent_type,
-                        attrs: ent.attrs.map(|x| x as i32),
-                    },
-                });
-                if batch.len() >= 50 {
-                    server.broadcast_chan1(batch.clone());
-                    batch.clear();
-                }
-            }
-            if !batch.is_empty() {
-                server.broadcast_chan1(batch);
-            }
-
-            let payloads = {
-                let state = get_server_state(server).read().unwrap();
-                sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), min, max, 4000)
-            };
-            let s_clone = server.clone();
-            let target_cn = crate::SERVER_BOT_CN as i32;
-            tokio::spawn(async move {
-                crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
-            });
+    broadcast_ents(server, map, touched);
+    let payloads = match &trap.geom {
+        Some(g) => {
+            let (min, max) = g.clip_box();
+            map.generate_restore_packets(min, max)
         }
-    }
+        None => Vec::new(),
+    };
+    state.trap_edit = Some(TrapEditState {
+        trap_idx,
+        original_map,
+        is_edit: true,
+    });
+    drop(state);
 
-    {
-        let mut state = get_server_state(server).write().unwrap();
-        state.trap_edit = Some(TrapEditState {
-            trap_idx,
-            original_map,
-            is_edit: true,
-        });
-    }
-
+    spawn_payloads(server, payloads);
     crate::ui::broadcast_trap_edit_started(server, trap_idx);
 }
 
@@ -533,31 +414,16 @@ pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
     let mut state = get_server_state(server).write().unwrap();
 
     if state.trap_edit.is_some() {
-        server.send_chan1(
+        say(
+            server,
             id,
-            &ServMsg {
-                text: "A trap is already being edited. Use #endtrap first.".lossy_cubestring(),
-            },
+            "A trap is already being edited. Use #endtrap first.".into(),
         );
         return;
     }
-
-    let trap_idx = match state.traps.iter().position(|t| {
-        (0..3).all(|ax| {
-            hit_pt[ax] >= t.button_pos[ax] as f32
-                && hit_pt[ax] < (t.button_pos[ax] + t.button_size) as f32
-        })
-    }) {
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "Not looking at a trap.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
-        Some(i) => i,
+    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+        not_looking(server, id);
+        return;
     };
 
     let original_map = Box::new(state.map.clone().unwrap());
@@ -576,192 +442,52 @@ pub fn cmd_endtrap(ctx: &Context) {
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
-    let edit_state = match state.trap_edit.take() {
-        Some(e) => e,
-        None => {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: "No trap is currently being edited.".lossy_cubestring(),
-                },
-            );
-            return;
-        }
+    let Some(edit_state) = state.trap_edit.take() else {
+        say(server, id, "No trap is currently being edited.".into());
+        return;
     };
 
-    let mut glob = Vec::new();
-    let mut pers = Vec::new();
     if let Some(map) = state.map.as_mut() {
         let up = map.clear_virt_ents(id, "edit_particle");
-        glob = up.global_broadcast;
-        pers = up.personal;
-    }
-    let cn = crate::SERVER_BOT_CN as i32;
-    if !glob.is_empty() {
-        server.broadcast_chan1(
-            glob.into_iter()
+        let cn = crate::SERVER_BOT_CN as i32;
+        let wrap = |pkts: Vec<channel1::EditEnt>| {
+            pkts.into_iter()
                 .map(|p| Client {
                     client_num: cn,
                     packet: p,
                 })
-                .collect::<Vec<_>>(),
-        );
-    }
-    if !pers.is_empty() {
-        server.send_chan1(
-            id,
-            pers.into_iter()
-                .map(|p| Client {
-                    client_num: cn,
-                    packet: p,
-                })
-                .collect::<Vec<_>>(),
-        );
+                .collect::<Vec<_>>()
+        };
+        if !up.global_broadcast.is_empty() {
+            server.broadcast_chan1(wrap(up.global_broadcast));
+        }
+        if !up.personal.is_empty() {
+            server.send_chan1(id, wrap(up.personal));
+        }
     }
 
     let current_map = state.map.as_ref().unwrap();
-    let world_size = current_map.size;
-    let empty_ent = ogz_rs::data::Entity {
-        position: [0.0; 3],
-        attrs: [0; 5],
-        ent_type: ogz_rs::data::EntityType::Empty,
-        extra_data: vec![],
-    };
+    let original = &edit_state.original_map;
+    let pool = current_map.virt_state.global_pool.clone();
+    let old_geom = state.traps[edit_state.trap_idx].geom.clone();
 
-    let mut tight_min = [i32::MAX; 3];
-    let mut tight_max = [i32::MIN; 3];
-
-    let mut diff_cells: Vec<([i32; 3], i32, sauer_map::Node)> = Vec::new();
-    sauer_map::octree::collect_diff_cells(
-        &edit_state.original_map.root,
-        &current_map.root,
-        [0, 0, 0],
-        world_size,
-        &mut diff_cells,
+    let geom_bounds = geometry_bounds(
+        original,
+        current_map,
+        old_geom.as_ref().filter(|_| edit_state.is_edit),
     );
+    let ent_changes = super::ents::diff(&original.entities, &current_map.entities, &pool);
+    let changed_ent_ids: Vec<usize> = (0..original.entities.len().max(current_map.entities.len()))
+        .filter(|i| !pool.contains(i) && original.entities.get(*i) != current_map.entities.get(*i))
+        .collect();
 
-    for &(pos, size, _) in &diff_cells {
-        for i in 0..3 {
-            tight_min[i] = tight_min[i].min(pos[i]);
-            tight_max[i] = tight_max[i].max(pos[i] + size);
-        }
-    }
+    let nothing = geom_bounds.is_none() && ent_changes.is_empty();
+    let new_geom = geom_bounds.map(|b| capture_geometry(current_map, b));
+    let size = new_geom.as_ref().map_or(0, |g| payload_size(&g.payload));
+    let too_large = size > super::TRAP_BUDGET;
 
-    let mut diff_ent_ids = std::collections::HashSet::new();
-    for i in 0..current_map
-        .entities
-        .len()
-        .max(edit_state.original_map.entities.len())
-    {
-        if current_map.virt_state.global_pool.contains(&i) {
-            continue;
-        } // Ignore virtual entities
-        let c = current_map.entities.get(i).unwrap_or(&empty_ent);
-        let o = edit_state
-            .original_map
-            .entities
-            .get(i)
-            .unwrap_or(&empty_ent);
-        if c != o {
-            diff_ent_ids.insert(i);
-            if c.ent_type != ogz_rs::data::EntityType::Empty {
-                for j in 0..3 {
-                    tight_min[j] = tight_min[j].min(c.position[j].floor() as i32);
-                    tight_max[j] = tight_max[j].max(c.position[j].ceil() as i32 + 1);
-                }
-            }
-            if o.ent_type != ogz_rs::data::EntityType::Empty {
-                for j in 0..3 {
-                    tight_min[j] = tight_min[j].min(o.position[j].floor() as i32);
-                    tight_max[j] = tight_max[j].max(o.position[j].ceil() as i32 + 1);
-                }
-            }
-        }
-    }
-
-    if edit_state.is_edit {
-        let trap = &state.traps[edit_state.trap_idx];
-        if trap.clip_s != [0, 0, 0] {
-            let o_min = trap.clip_pos;
-            let o_max = [
-                o_min[0] + trap.clip_s[0] * trap.clip_grid,
-                o_min[1] + trap.clip_s[1] * trap.clip_grid,
-                o_min[2] + trap.clip_s[2] * trap.clip_grid,
-            ];
-            for i in 0..3 {
-                tight_min[i] = tight_min[i].min(o_min[i]);
-                tight_max[i] = tight_max[i].max(o_max[i]);
-            }
-        }
-    }
-
-    if tight_min[0] == i32::MAX {
-        server.broadcast_chan1(&ServMsg {
-            text: "Trap edit ended with no changes detected.".lossy_cubestring(),
-        });
-        return;
-    }
-
-    let tight_min = std::array::from_fn(|i| tight_min[i].max(0));
-    let tight_max = std::array::from_fn(|i| tight_max[i].min(world_size));
-
-    let (clip_pos, clip_s, clip_grid, trigger_payload) =
-        sauer_map::clipboard::generate_region_clipboard(current_map, tight_min, tight_max);
-
-    let mut trigger_entities = Vec::new();
-    for ent in &current_map.entities {
-        if ent.ent_type != ogz_rs::data::EntityType::Empty
-            && super::trigger::in_aabb(ent.position, tight_min, tight_max)
-        {
-            trigger_entities.push(ent.clone());
-        }
-    }
-
-    let stored_candidate = crate::trap::StoredTrap {
-        button_pos: state.traps[edit_state.trap_idx].button_pos,
-        button_size: state.traps[edit_state.trap_idx].button_size,
-        button_orient: state.traps[edit_state.trap_idx].button_orient,
-        trigger_payload: Some(trigger_payload.clone()),
-        trigger_entities: trigger_entities
-            .iter()
-            .map(crate::trap::stored::StoredEntity::from)
-            .collect(),
-        clip_pos,
-        clip_s,
-        clip_grid,
-        time: state.traps[edit_state.trap_idx].time,
-        timeout: state.traps[edit_state.trap_idx].timeout,
-    };
-
-    let payload = sauer_map::Map::db_compress(&stored_candidate).unwrap_or_default();
-    let payload_len = payload.len();
-    let mut is_too_large = false;
-
-    if payload_len > 1_000_000 {
-        is_too_large = true;
-        server.send_chan1(id, &ServMsg { text: format!("\x0C3[ERROR]\x0C7 Trap edit discarded! Payload size ({} KB) exceeds 1MB limit.", payload_len / 1024).lossy_cubestring() });
-    } else {
-        if payload_len > 600_000 {
-            server.send_chan1(
-                id,
-                &ServMsg {
-                    text: format!(
-                        "\x0C6[WARNING]\x0C7 Trap payload size is {} KB. Keep edits smaller.",
-                        payload_len / 1024
-                    )
-                    .lossy_cubestring(),
-                },
-            );
-        }
-        let trap = &mut state.traps[edit_state.trap_idx];
-        trap.trigger_payload = Some(trigger_payload);
-        trap.trigger_entities = trigger_entities;
-        trap.clip_pos = clip_pos;
-        trap.clip_s = clip_s;
-        trap.clip_grid = clip_grid;
-    }
-
-    let target_cn = crate::SERVER_BOT_CN as i32;
+    // Back to the base state. Keep vslots created during the edit: the new
+    // geometry may reference them.
     let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
     let virt_state = std::mem::take(&mut state.map.as_mut().unwrap().virt_state);
     state.map = Some(*edit_state.original_map.clone());
@@ -773,51 +499,49 @@ pub fn cmd_endtrap(ctx: &Context) {
         map.reconcile_virtual_entities();
         crate::map_state::update_server_items(map, server);
     }
+
+    let mut sync = persist::Sync::default();
+    let mut result = Ok(());
+    if !nothing && !too_large {
+        if let Some(g) = &old_geom {
+            persist::free_shelf(&mut state, g, &mut sync);
+        }
+        let trap = &mut state.traps[edit_state.trap_idx];
+        trap.geom = new_geom;
+        trap.ents = ent_changes;
+        result = persist::save(&mut state, &mut sync);
+    }
+    let out = persist::packets(&state, sync);
+    let restore = geom_bounds
+        .map(|(min, max)| {
+            state
+                .map
+                .as_ref()
+                .unwrap()
+                .generate_restore_packets(min, max)
+        })
+        .unwrap_or_default();
+    let map_snapshot = state.map.as_ref().unwrap();
+    broadcast_ents(server, map_snapshot, changed_ent_ids);
     drop(state);
 
-    let mut batch = Vec::new();
-    for &ent_id in &diff_ent_ids {
-        let ent = edit_state
-            .original_map
-            .entities
-            .get(ent_id)
-            .unwrap_or(&empty_ent);
-        batch.push(Client {
-            client_num: target_cn,
-            packet: channel1::EditEnt {
-                ent_id: ent_id as i32,
-                pos: sauer_proto::data::Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent.ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            },
-        });
-        if batch.len() >= 50 {
-            server.broadcast_chan1(batch.clone());
-            batch.clear();
-        }
-    }
-    if !batch.is_empty() {
-        server.broadcast_chan1(batch);
-    }
+    spawn_payloads(server, restore);
+    persist::send(server, out);
 
-    if diff_cells.len() > 0 {
-        let payloads =
-            sauer_map::chunking::chunk_region(&edit_state.original_map, tight_min, tight_max, 4000);
-        let s_clone = server.clone();
-        tokio::spawn(async move {
-            crate::geo_sync::broadcast_payloads(&s_clone, target_cn, payloads, 0).await;
-        });
-    }
-
-    sync_traps_to_map(server, id);
-
-    if !is_too_large {
-        server.broadcast_chan1(&ServMsg {
-            text: "Trap recorded and area reverted successfully.".lossy_cubestring(),
-        });
-    }
+    let text = if nothing {
+        "Trap edit ended with no changes detected.".to_string()
+    } else if too_large {
+        format!(
+            "\x0C3[ERROR]\x0C7 Trap edit discarded: its geometry is {} KB, over the {} KB limit.",
+            size / 1024,
+            super::TRAP_BUDGET / 1024
+        )
+    } else if let Err(e) = result {
+        format!("\x0C3[ERROR]\x0C7 Trap recorded but could not be saved to the map: {e}")
+    } else {
+        "Trap recorded and area reverted successfully.".to_string()
+    };
+    server.broadcast_chan1(&ServMsg {
+        text: text.lossy_cubestring(),
+    });
 }

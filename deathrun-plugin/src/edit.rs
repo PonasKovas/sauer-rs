@@ -1,7 +1,7 @@
 use crate::map_state::{
     DeathrunState, get_server_state, is_waiting_for_map, update_server_items, with_map_state_mut,
 };
-use crate::trap::{cmd_deltrap, cmd_newtrap};
+use crate::trap::{cmd_deltrap, cmd_newtrap, guard};
 use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
@@ -24,27 +24,12 @@ pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
 pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
 pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
 
-// ─── Packet Memory Tracker ────────────────────────────────────────────────────
-
 fn handle_edit_reject(ctx: &Context, min: [i32; 3], max: [i32; 3]) {
-    crate::ui::send_warn(
-        ctx.server(),
-        ctx.id(),
-        "That region is protected by a trap.",
+    guard::reject(
+        ctx,
+        (min, max),
+        "That area is protected (a trap button or the trap vault).",
     );
-    let server = ctx.server().clone();
-    let cn = crate::SERVER_BOT_CN as i32;
-    tokio::spawn(async move {
-        let payloads = {
-            let state = crate::map_state::get_server_state(&server).read().unwrap();
-            if let Some(map) = state.map.as_ref() {
-                map.generate_restore_packets(min, max)
-            } else {
-                vec![]
-            }
-        };
-        crate::geo_sync::broadcast_payloads(&server, cn, payloads, 0).await;
-    });
 }
 
 pub struct TrapHighlightState {
@@ -99,8 +84,10 @@ impl Plugin for DeathrunEdit {
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::CoopEdit;
         server.reserve_cn(crate::SERVER_BOT_CN);
-        let mut state = DeathrunState::default();
-        state.map = Some(Map::default_empty());
+        let state = DeathrunState {
+            map: Some(Map::default_empty()),
+            ..Default::default()
+        };
         server.extra.insert(RwLock::new(state));
 
         server.register_command("#newtrap", "create a trap at the aimed surface", "");
@@ -138,6 +125,7 @@ impl Plugin for DeathrunEdit {
         // --- READ PHASE 1: Target Trap & AABB ---
         let target_trap;
         let mut edges_to_draw = None;
+        let mut entity_frames = Vec::new();
         let is_trap_edit_active;
 
         let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
@@ -172,17 +160,10 @@ impl Plugin for DeathrunEdit {
             let hit_trap = if is_spectator {
                 None
             } else {
-                state.traps.iter().position(|trap| {
-                    let b_min = trap.button_pos;
-                    let b_max = [
-                        b_min[0] + trap.button_size,
-                        b_min[1] + trap.button_size,
-                        b_min[2] + trap.button_size,
-                    ];
-                    (0..3).all(|ax| {
-                        hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
-                    })
-                })
+                state
+                    .traps
+                    .iter()
+                    .position(|trap| trap.contains_button_point(hit_pt, 0.5))
             };
 
             let edited_trap = state.trap_edit.as_ref().map(|e| e.trap_idx);
@@ -190,100 +171,24 @@ impl Plugin for DeathrunEdit {
             is_trap_edit_active = state.trap_edit.is_some();
 
             if let Some(idx) = target_trap {
-                let mut show_box = false;
-                let mut t_min = [0; 3];
-                let mut t_max = [0; 3];
+                entity_frames = guard::entity_frames(&guard::trap_ent_changes(&state, idx));
 
-                if let Some(edit_state) = state.trap_edit.as_ref().filter(|e| e.trap_idx == idx) {
-                    let current_map = state.map.as_ref().unwrap();
-                    let world_size = current_map.size;
-                    let mut tight_min = [i32::MAX; 3];
-                    let mut tight_max = [i32::MIN; 3];
+                let trap = &state.traps[idx];
+                let live = state
+                    .trap_edit
+                    .as_ref()
+                    .filter(|e| e.trap_idx == idx)
+                    .and_then(|edit| {
+                        let old = trap.geom.as_ref().filter(|_| edit.is_edit);
+                        crate::trap::commands::geometry_bounds(
+                            &edit.original_map,
+                            state.map.as_ref()?,
+                            old,
+                        )
+                    });
+                let shown = live.or_else(|| trap.geom.as_ref().map(|g| g.clip_box()));
 
-                    sauer_map::octree::diff_bounds(
-                        &edit_state.original_map.root,
-                        &current_map.root,
-                        [0, 0, 0],
-                        world_size,
-                        &mut tight_min,
-                        &mut tight_max,
-                    );
-
-                    let empty_ent = ogz_rs::data::Entity {
-                        position: [0.0; 3],
-                        attrs: [0; 5],
-                        ent_type: ogz_rs::data::EntityType::Empty,
-                        extra_data: vec![],
-                    };
-                    for i in 0..current_map
-                        .entities
-                        .len()
-                        .max(edit_state.original_map.entities.len())
-                    {
-                        if current_map.virt_state.global_pool.contains(&i) {
-                            continue;
-                        }
-                        let c = current_map.entities.get(i).unwrap_or(&empty_ent);
-                        let o = edit_state
-                            .original_map
-                            .entities
-                            .get(i)
-                            .unwrap_or(&empty_ent);
-                        if c != o {
-                            if c.ent_type != ogz_rs::data::EntityType::Empty {
-                                for j in 0..3 {
-                                    tight_min[j] = tight_min[j].min(c.position[j].floor() as i32);
-                                    tight_max[j] =
-                                        tight_max[j].max(c.position[j].ceil() as i32 + 1);
-                                }
-                            }
-                            if o.ent_type != ogz_rs::data::EntityType::Empty {
-                                for j in 0..3 {
-                                    tight_min[j] = tight_min[j].min(o.position[j].floor() as i32);
-                                    tight_max[j] =
-                                        tight_max[j].max(o.position[j].ceil() as i32 + 1);
-                                }
-                            }
-                        }
-                    }
-
-                    if edit_state.is_edit {
-                        let trap = &state.traps[idx];
-                        if trap.clip_s != [0, 0, 0] {
-                            let o_min = trap.clip_pos;
-                            let o_max = [
-                                o_min[0] + trap.clip_s[0] * trap.clip_grid,
-                                o_min[1] + trap.clip_s[1] * trap.clip_grid,
-                                o_min[2] + trap.clip_s[2] * trap.clip_grid,
-                            ];
-                            for i in 0..3 {
-                                tight_min[i] = tight_min[i].min(o_min[i]);
-                                tight_max[i] = tight_max[i].max(o_max[i]);
-                            }
-                        }
-                    }
-
-                    if tight_min[0] != i32::MAX {
-                        t_min = std::array::from_fn(|i| tight_min[i].max(0));
-                        t_max = std::array::from_fn(|i| tight_max[i].min(world_size));
-                        show_box = true;
-                    }
-                }
-
-                if !show_box {
-                    let trap = &state.traps[idx];
-                    if trap.clip_s != [0, 0, 0] {
-                        t_min = trap.clip_pos;
-                        t_max = [
-                            t_min[0] + trap.clip_s[0] * trap.clip_grid,
-                            t_min[1] + trap.clip_s[1] * trap.clip_grid,
-                            t_min[2] + trap.clip_s[2] * trap.clip_grid,
-                        ];
-                        show_box = true;
-                    }
-                }
-
-                if show_box {
+                if let Some((t_min, t_max)) = shown {
                     let len_x = t_max[0] - t_min[0];
                     let len_y = t_max[1] - t_min[1];
                     let len_z = t_max[2] - t_min[2];
@@ -326,16 +231,31 @@ impl Plugin for DeathrunEdit {
 
                     let mut edges = Vec::new();
                     let edge_defs = [
-                        (0, 1, 1, len_x), (2, 3, 1, len_x), (4, 5, 1, len_x), (6, 7, 1, len_x), // X edges
-                        (0, 2, 2, len_y), (1, 3, 2, len_y), (4, 6, 2, len_y), (5, 7, 2, len_y), // Y edges
-                        (0, 4, 0, len_z), (1, 5, 0, len_z), (2, 6, 0, len_z), (3, 7, 0, len_z), // Z edges
+                        (0, 1, 1, len_x),
+                        (2, 3, 1, len_x),
+                        (4, 5, 1, len_x),
+                        (6, 7, 1, len_x), // X edges
+                        (0, 2, 2, len_y),
+                        (1, 3, 2, len_y),
+                        (4, 6, 2, len_y),
+                        (5, 7, 2, len_y), // Y edges
+                        (0, 4, 0, len_z),
+                        (1, 5, 0, len_z),
+                        (2, 6, 0, len_z),
+                        (3, 7, 0, len_z), // Z edges
                     ];
 
                     for &(c1, c2, axis, len) in &edge_defs {
                         if is_looked_at[c1] && is_looked_at[c2] {
                             continue;
                         } else if is_looked_at[c1] {
-                            edges.push((corners[c2][0], corners[c2][1], corners[c2][2], axis + 3, len));
+                            edges.push((
+                                corners[c2][0],
+                                corners[c2][1],
+                                corners[c2][2],
+                                axis + 3,
+                                len,
+                            ));
                         } else {
                             edges.push((corners[c1][0], corners[c1][1], corners[c1][2], axis, len));
                         }
@@ -348,6 +268,7 @@ impl Plugin for DeathrunEdit {
         // --- WRITE PHASE 1: Update DashMap and Highlight Virt Ents ---
         let mut clear_highlight = false;
         let mut update_highlight = false;
+        let mut target_changed = false;
 
         let mut hl_state_clone = {
             let mut hl_state =
@@ -361,6 +282,7 @@ impl Plugin for DeathrunEdit {
                     });
 
             if hl_state.trap_idx != target_trap {
+                target_changed = true;
                 if hl_state.active {
                     clear_highlight = true;
                 }
@@ -508,6 +430,29 @@ impl Plugin for DeathrunEdit {
 
         if let Some(mut entry) = self.trap_highlights.get_mut(&id) {
             entry.active = hl_state_clone.active;
+        }
+
+        // Frames around entities the trap deletes (red) or creates (green).
+        if update_highlight || target_changed {
+            let mut state_w = get_server_state(server).write().unwrap();
+            if let Some(map) = state_w.map.as_mut() {
+                let up = map.update_virt_ents(id, "trap_ents", entity_frames);
+                let cn = crate::SERVER_BOT_CN as i32;
+                let wrap = |pkts: Vec<channel1::EditEnt>| {
+                    pkts.into_iter()
+                        .map(|p| Client {
+                            client_num: cn,
+                            packet: p,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                if !up.global_broadcast.is_empty() {
+                    server.broadcast_chan1(wrap(up.global_broadcast));
+                }
+                if !up.personal.is_empty() {
+                    server.send_chan1(id, wrap(up.personal));
+                }
+            }
         }
 
         // --- READ PHASE 2: Check particle timer ---
@@ -899,114 +844,86 @@ impl Plugin for DeathrunEdit {
 
         tokio::spawn(async move {
             let _start_time = std::time::Instant::now();
-            let parse_result = tokio::task::spawn_blocking(move || -> Result<(Map, Vec<crate::map_state::Trap>, Vec<u8>, i32, sauer_map::db::StoreStats), String> {
-                let t_start = std::time::Instant::now();
+            let parse_result = tokio::task::spawn_blocking(
+                move || -> Result<(DeathrunState, Vec<String>, Vec<u8>, i32), String> {
+                    let t_start = std::time::Instant::now();
 
-                let mut state = Map::from_bytes(&data_clone).map_err(|e: ogz_rs::OgzError| e.to_string())?;
-                let t_parsed = t_start.elapsed();
+                    let mut map = Map::from_bytes(&data_clone)
+                        .map_err(|e: ogz_rs::OgzError| e.to_string())?;
+                    let t_parsed = t_start.elapsed();
 
-                let world_size = state.size;
-
-                for ent in &mut state.entities {
-                    if ent.ent_type == ogz_rs::data::EntityType::Particles
-                        && ent.attrs[3] == 1337
-                        && ent.attrs[4] == 7331
-                    {
-                        ent.ent_type = ogz_rs::data::EntityType::Empty;
-                        ent.attrs = [0; 5];
+                    for ent in &mut map.entities {
+                        if ent.ent_type == ogz_rs::data::EntityType::Particles
+                            && ent.attrs[3] == 1337
+                            && ent.attrs[4] == 7331
+                        {
+                            ent.ent_type = ogz_rs::data::EntityType::Empty;
+                            ent.attrs = [0; 5];
+                        }
                     }
-                }
 
-                let mut loaded_traps: Vec<crate::map_state::Trap> = Vec::new();
-                let mut store_stats = sauer_map::db::StoreStats::default();
+                    let loaded = crate::trap::persist::load(&map);
+                    crate::trap::placement::rebuild_all_trap_buttons(&mut map, &loaded.traps);
+                    for trap in &loaded.traps {
+                        let (min, max) = trap.button_box();
+                        map.protect_region(min, max);
+                    }
+                    if let Some(v) = loaded.vault {
+                        map.protect_region(v.bounds().0, v.bounds().1);
+                    }
 
-                let t_traps_start = std::time::Instant::now();
-                if let Ok((entries, stats)) = state.db_scan::<crate::trap::StoredTrap>() {
-                    store_stats = stats;
-                    let mut stored_traps = Vec::new();
-                    for entry in entries {
-                        let st = entry.data;
-                        let bpos = st.button_pos;
-                        let valid = entry.instances.iter().any(|inst| {
-                            inst.pos[0] >= bpos[0] && inst.pos[0] <= bpos[0] + 8 &&
-                            inst.pos[1] >= bpos[1] && inst.pos[1] <= bpos[1] + 8 &&
-                            inst.pos[2] >= bpos[2] && inst.pos[2] <= bpos[2] + 8
+                    let mut state = DeathrunState {
+                        map: Some(map),
+                        traps: loaded.traps,
+                        vault: loaded.vault,
+                        record_generation: loaded.generation,
+                        ..Default::default()
+                    };
+                    let mut warnings = loaded.warnings;
+                    // Entity links dropped while loading, or a vault left behind by an
+                    // offline /mapenlarge: write the fixed-up state back into the map.
+                    let mut sync = crate::trap::persist::Sync::default();
+                    let fixed = crate::trap::persist::relocate_if_needed(&mut state, &mut sync)
+                        .and_then(|()| {
+                            if warnings.is_empty() && sync.is_empty() {
+                                Ok(())
+                            } else {
+                                crate::trap::persist::save(&mut state, &mut sync)
+                            }
                         });
-                        if valid {
-                            stored_traps.push(st);
-                        } else {
-                            tracing::warn!("Rejected copied trap payload outside expected bounds at {:?}", entry.instances.first().map(|i| i.pos));
-                        }
+                    if let Err(e) = fixed {
+                        warnings.push(format!("Could not update the trap vault: {e}"));
                     }
-                    for mut st in stored_traps {
-                        st.remap_vslots(&mut state);
-                        if let Some(trap) = st.into_trap() {
-                            loaded_traps.push(trap);
-                        }
-                    }
-                }
-                let t_traps = t_traps_start.elapsed();
 
-                let t_rebuild_start = std::time::Instant::now();
-                crate::trap::placement::rebuild_all_trap_buttons(&mut state, &loaded_traps);
-                for trap in &loaded_traps {
-                    let packets = crate::trap::stored::generate_trap_vslot_packets(
-                        &crate::trap::StoredTrap::from_trap(trap),
+                    let map = state.map.as_ref().unwrap();
+                    let world_size = map.size;
+                    let out_bytes = map
+                        .to_ogz_bytes_with(flate2::Compression::fast())
+                        .map_err(|e: ogz_rs::OgzError| e.to_string())?;
+
+                    tracing::info!(
+                        "Map loaded: [Parse: {:?}] [Total: {:?}]",
+                        t_parsed,
+                        t_start.elapsed()
                     );
-                    for p in &packets {
-                        state.apply_vslots(&p.sel, p.all_faces, p.delta != 0, &p.extra_data);
-                    }
-                }
-                let t_rebuild = t_rebuild_start.elapsed();
-
-                let t_serialize_start = std::time::Instant::now();
-                // Compress the fully prepared map back to Bytes here in the background
-                let out_bytes = state.to_ogz_bytes_with(flate2::Compression::fast()).map_err(|e: ogz_rs::OgzError| e.to_string())?;
-                let t_serialize = t_serialize_start.elapsed();
-
-                tracing::info!(
-                    "Map compilation metrics: [Parse: {:?}] [Read Traps: {:?}] [Rebuild Geometries: {:?}] [Serialize: {:?}] [Total: {:?}]",
-                    t_parsed, t_traps, t_rebuild, t_serialize, t_start.elapsed()
-                );
-
-                Ok((state, loaded_traps, out_bytes, world_size, store_stats))
-            }).await.expect("Map parsing panicked");
+                    Ok((state, warnings, out_bytes, world_size))
+                },
+            )
+            .await
+            .expect("Map parsing panicked");
 
             match parse_result {
-                Ok((mut state, loaded_traps, out_bytes, world_size, stats)) => {
-                    for trap in &loaded_traps {
-                        let b_max = [
-                            trap.button_pos[0] + trap.button_size,
-                            trap.button_pos[1] + trap.button_size,
-                            trap.button_pos[2] + trap.button_size,
-                        ];
-                        state.protect_region(trap.button_pos, b_max);
-                    }
-
-                    update_server_items(&state, &server_clone);
-
-                    let comp_kb = stats.payload_compressed as f64 / 1024.0;
-                    let uncomp_kb = stats.payload_uncompressed as f64 / 1024.0;
-                    let percent = if total_bytes > 0 {
-                        (stats.payload_compressed as f64 / total_bytes as f64) * 100.0
-                    } else {
-                        0.0
-                    };
-
-                    let loaded_traps_len = loaded_traps.len();
+                Ok((loaded, warnings, out_bytes, world_size)) => {
+                    update_server_items(loaded.map.as_ref().unwrap(), &server_clone);
+                    let loaded_traps_len = loaded.traps.len();
 
                     let uploading_map_name = {
                         let mut s = get_server_state(&server_clone).write().unwrap();
-                        s.map = Some(state);
-                        s.traps = loaded_traps;
-                        s.waiting_for_map = false;
-                        s.trap_edit = None;
-                        s.base_map = None;
-                        s.active_trap_stack.clear();
                         let name = s
                             .uploading_map_name
                             .take()
                             .unwrap_or_else(|| "untitled".lossy_cubestring());
+                        *s = loaded;
                         name
                     };
                     info!("id {id} uploaded a map (world_size={world_size}); state loaded");
@@ -1015,14 +932,18 @@ impl Plugin for DeathrunEdit {
                     *server_clone.game_mode.write().unwrap() = GameMode::CoopEdit;
 
                     server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
-                    text: format!(
-                        "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps. Size: \x0C2{:.1} KB\x0C7 comp / \x0C2{:.1} KB\x0C7 uncomp (\x0C2{:.1}%\x0C7 of OGZ).",
-                        loaded_traps_len,
-                        comp_kb,
-                        uncomp_kb,
-                        percent
-                    ).lossy_cubestring()
-                });
+                        text: format!(
+                            "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps ({} KB map).",
+                            loaded_traps_len,
+                            total_bytes / 1024
+                        )
+                        .lossy_cubestring(),
+                    });
+                    for w in warnings {
+                        server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+                            text: format!("\x0C6[TRAP]\x0C7 {w}").lossy_cubestring(),
+                        });
+                    }
 
                     let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
                     for client_id in server_clone.client_ids() {
@@ -1039,11 +960,6 @@ impl Plugin for DeathrunEdit {
     async fn on_client_welcomed(&self, ctx: &mut Context) {
         let id = ctx.id();
         let server = ctx.server();
-        crate::map_state::get_server_state(server)
-            .read()
-            .unwrap()
-            .client_vslot_bloat
-            .insert(id, 0);
 
         if server.client_count() == 1 {
             server.set_privilege(id, Privilege::Master);
@@ -1097,121 +1013,52 @@ impl Plugin for DeathrunEdit {
     // ── Coop-edit map tracking + Interceptors + Trap immunities ──────────────────────
 
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_edit_tex(packet));
-        if !ok {
-            let (min, max) = packet.sel.bounds();
-            handle_edit_reject(ctx, min, max);
-        }
+        guard::geometry_edit(ctx, packet.sel.bounds(), |map| map.apply_edit_tex(packet));
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_edit_mat(packet));
-        if !ok {
-            let (min, max) = packet.sel.bounds();
-            handle_edit_reject(ctx, min, max);
-        }
+        guard::geometry_edit(ctx, packet.sel.bounds(), |map| map.apply_edit_mat(packet));
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| {
-            ok = state.apply_del_cube(packet);
+        guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
+            let ok = map.apply_del_cube(packet);
             if ok {
                 // The Sauerbraten client's `delcube` command locally calls `makeempty`,
                 // which resets materials to MAT_AIR. However, it does not send an explicit
                 // EditMat packet. We must manually mirror this material wipe on the server.
-                state.set_material(&packet.sel, Default::default());
+                map.set_material(&packet.sel, Default::default());
             }
+            ok
         });
-        if !ok {
-            let (min, max) = packet.sel.bounds();
-            handle_edit_reject(ctx, min, max);
-        }
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_replace(packet));
-        if !ok {
-            let (min, max) = if packet.in_sel != 0 {
-                packet.sel.bounds()
-            } else {
-                let s = crate::map_state::get_server_state(ctx.server())
-                    .read()
-                    .unwrap()
-                    .map
-                    .as_ref()
-                    .map(|m| m.size)
-                    .unwrap_or(0);
-                ([0, 0, 0], [s, s, s])
-            };
-            handle_edit_reject(ctx, min, max);
-        }
+        let bounds = if packet.in_sel != 0 {
+            packet.sel.bounds()
+        } else {
+            let s = get_server_state(ctx.server())
+                .read()
+                .unwrap()
+                .map
+                .as_ref()
+                .map(|m| m.size)
+                .unwrap_or(0);
+            ([0, 0, 0], [s, s, s])
+        };
+        guard::geometry_edit(ctx, bounds, |map| map.apply_replace(packet));
     }
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_edit_face(packet));
-        if !ok {
-            let mut min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-            let mut max = [
-                min[0] + packet.sel.s.x * packet.sel.grid,
-                min[1] + packet.sel.s.y * packet.sel.grid,
-                min[2] + packet.sel.s.z * packet.sel.grid,
-            ];
-
-            let d = (packet.sel.orient as usize) >> 1;
-            let dc = (packet.sel.orient as usize) & 1;
-            let dir = packet.dir;
-            let grid = packet.sel.grid;
-
-            let mut actual_mode = packet.mode as i32;
-            if actual_mode == 1
-                && (packet.sel.cx > 0
-                    || packet.sel.cy > 0
-                    || (packet.sel.cxs & 1) != 0
-                    || (packet.sel.cys & 1) != 0)
-            {
-                actual_mode = 0;
-            }
-
-            if actual_mode == 1 {
-                if dc == 1 {
-                    let old_face = max[d];
-                    let new_face = max[d] - dir * grid;
-                    min[d] = old_face.min(new_face);
-                    max[d] = old_face.max(new_face);
-                } else {
-                    let old_face = min[d];
-                    let new_face = min[d] + dir * grid;
-                    min[d] = old_face.min(new_face);
-                    max[d] = old_face.max(new_face);
-                }
-            } else {
-                if dc == 1 {
-                    min[d] = max[d] - grid;
-                } else {
-                    max[d] = min[d] + grid;
-                }
-            }
-            handle_edit_reject(ctx, min, max);
-        }
+        guard::geometry_edit(ctx, guard::edit_face_bounds(packet), |map| {
+            map.apply_edit_face(packet)
+        });
     }
 
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_edit_ent(packet));
-        if !ok {
-            let min = [
-                packet.pos.x as i32,
-                packet.pos.y as i32,
-                packet.pos.z as i32,
-            ];
-            let max = [min[0] + 1, min[1] + 1, min[2] + 1];
-            handle_edit_reject(ctx, min, max);
-        }
+        guard::entity_edit(ctx, &[packet.ent_id as usize], |map| {
+            map.apply_edit_ent(packet)
+        });
     }
 
     async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
@@ -1219,39 +1066,9 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
-        let delta = &packet.extra_data;
-        let mut size = 1;
-        for p in &delta.params {
-            size += 1 + p.name.len() + 1 + 16;
-        }
-        if delta.scale.is_some() {
-            size += 5;
-        }
-        if delta.rotation.is_some() {
-            size += 5;
-        }
-        if delta.offset.is_some() {
-            size += 9;
-        }
-        if delta.scroll.is_some() {
-            size += 9;
-        }
-        if delta.layer.is_some() {
-            size += 5;
-        }
-        if delta.alpha.is_some() {
-            size += 9;
-        }
-        if delta.color.is_some() {
-            size += 13;
-        }
-        crate::map_state::track_vslot_bloat(ctx.server(), size);
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_edit_v_slot(packet));
-        if !ok {
-            let (min, max) = packet.sel.bounds();
-            handle_edit_reject(ctx, min, max);
-        }
+        guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
+            map.apply_edit_v_slot(packet)
+        });
     }
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
@@ -1322,49 +1139,23 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        if let Some(p) = server.players.try_get(id) {
-            if let Some(cb) = &p.clipboard {
-                let payload = cb.payload.clone();
-                let mut ok = true;
-                with_map_state_mut(ctx, |state| ok = state.apply_paste(packet, &payload));
-
-                if !ok {
-                    let cb_sel = &payload.sel;
-                    let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-                    let max = [
-                        min[0] + cb_sel.s.x * packet.sel.grid,
-                        min[1] + cb_sel.s.y * packet.sel.grid,
-                        min[2] + cb_sel.s.z * packet.sel.grid,
-                    ];
-                    handle_edit_reject(ctx, min, max);
-                }
-            }
+        let payload = server
+            .players
+            .try_get(id)
+            .and_then(|p| p.clipboard.as_ref().map(|cb| cb.payload.clone()));
+        if let Some(payload) = payload {
+            let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
+            let max = [
+                min[0] + payload.sel.s.x * packet.sel.grid,
+                min[1] + payload.sel.s.y * packet.sel.grid,
+                min[2] + payload.sel.s.z * packet.sel.grid,
+            ];
+            guard::geometry_edit(ctx, (min, max), |map| map.apply_paste(packet, &payload));
         }
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_undo_redo(&packet.payload));
-        if !ok {
-            match &packet.payload.data {
-                sauer_proto::data::UndoData::Cubes { sel, .. } => {
-                    let max = [
-                        sel.o.x + sel.s.x * sel.grid,
-                        sel.o.y + sel.s.y * sel.grid,
-                        sel.o.z + sel.s.z * sel.grid,
-                    ];
-                    handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
-                }
-                sauer_proto::data::UndoData::Entities(ents) => {
-                    if let Some(ue) = ents.first() {
-                        let pos = ue.ent.position;
-                        let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
-                        let max = [min[0] + 1, min[1] + 1, min[2] + 1];
-                        handle_edit_reject(ctx, min, max);
-                    }
-                }
-            }
-        }
+        undo_redo(ctx, &packet.payload);
     }
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
@@ -1386,9 +1177,29 @@ impl Plugin for DeathrunEdit {
             state.active_trap_stack.clear();
             state.trap_edit = None;
             state.base_map = None;
-            state.client_vslot_bloat.clear();
-        } else if let Some(map) = state.map.as_mut() {
+            state.vault = None;
+            return;
+        }
+
+        // The base plugin already relayed the enlarge, so clients see it
+        // before the relocated vault arrives.
+        if let Some(map) = state.map.as_mut() {
             map.enlarge();
+        }
+        if let Some(base) = state.base_map.as_mut() {
+            base.enlarge();
+        }
+        let mut sync = crate::trap::persist::Sync::default();
+        let result = crate::trap::persist::relocate_if_needed(&mut state, &mut sync);
+        let out = crate::trap::persist::packets(&state, sync);
+        drop(state);
+        crate::trap::persist::send(ctx.server(), out);
+        if let Err(e) = result {
+            ui::send_warn(
+                ctx.server(),
+                id,
+                &format!("\x0C3[ERROR]\x0C7 Could not move the trap vault: {e}"),
+            );
         }
     }
 
@@ -1441,27 +1252,18 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
-        let mut ok = true;
-        with_map_state_mut(ctx, |state| ok = state.apply_undo_redo(&packet.payload));
-        if !ok {
-            match &packet.payload.data {
-                sauer_proto::data::UndoData::Cubes { sel, .. } => {
-                    let max = [
-                        sel.o.x + sel.s.x * sel.grid,
-                        sel.o.y + sel.s.y * sel.grid,
-                        sel.o.z + sel.s.z * sel.grid,
-                    ];
-                    handle_edit_reject(ctx, [sel.o.x, sel.o.y, sel.o.z], max);
-                }
-                sauer_proto::data::UndoData::Entities(ents) => {
-                    if let Some(ue) = ents.first() {
-                        let pos = ue.ent.position;
-                        let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
-                        let max = [min[0] + 1, min[1] + 1, min[2] + 1];
-                        handle_edit_reject(ctx, min, max);
-                    }
-                }
-            }
+        undo_redo(ctx, &packet.payload);
+    }
+}
+
+fn undo_redo(ctx: &Context, payload: &sauer_proto::data::UndoPayload) {
+    match &payload.data {
+        sauer_proto::data::UndoData::Cubes { sel, .. } => {
+            guard::geometry_edit(ctx, sel.bounds(), |map| map.apply_undo_redo(payload));
+        }
+        sauer_proto::data::UndoData::Entities(ents) => {
+            let ids: Vec<usize> = ents.iter().map(|ue| ue.index as usize).collect();
+            guard::entity_edit(ctx, &ids, |map| map.apply_undo_redo(payload));
         }
     }
 }

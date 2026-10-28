@@ -36,24 +36,7 @@ pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
     items.notgotitems = false;
 }
 
-#[derive(Clone)]
-pub struct Trap {
-    pub button_pos: [i32; 3],
-    pub button_size: i32,
-    pub button_orient: u8,
-
-    pub trigger_payload: Option<sauer_proto::data::ClipboardPayload>,
-    pub trigger_entities: Vec<ogz_rs::data::Entity>,
-
-    /// DelCube/paste region — tight diff bounds, grid-aligned.
-    pub clip_pos: [i32; 3],
-    pub clip_s: [i32; 3],
-    pub clip_grid: i32,
-
-    pub time: u32,
-    pub timeout: u32,
-    pub is_active: bool,
-}
+pub use crate::trap::Trap;
 
 pub struct DeathrunState {
     pub map: Option<sauer_map::Map>,
@@ -64,7 +47,10 @@ pub struct DeathrunState {
     pub trap_edit: Option<crate::trap::TrapEditState>,
     pub base_map: Option<Box<sauer_map::Map>>,
     pub active_trap_stack: Vec<usize>,
-    pub client_vslot_bloat: dashmap::DashMap<u64, usize>,
+    /// Where trap geometry and the trap record live in the map, once created.
+    pub vault: Option<crate::trap::vault::Vault>,
+    /// Generation of the last trap record written to the anchor.
+    pub record_generation: u32,
 }
 
 impl Default for DeathrunState {
@@ -77,32 +63,9 @@ impl Default for DeathrunState {
             trap_edit: None,
             base_map: None,
             active_trap_stack: Vec::new(),
-            client_vslot_bloat: dashmap::DashMap::new(),
+            vault: None,
+            record_generation: 0,
         }
-    }
-}
-
-pub fn track_vslot_bloat(server: &std::sync::Arc<Server>, bytes: usize) {
-    let state = get_server_state(server).read().unwrap();
-    let mut to_resend = Vec::new();
-    for mut entry in state.client_vslot_bloat.iter_mut() {
-        let id = *entry.key();
-        let new_size = *entry + bytes;
-        *entry = new_size;
-        if new_size > 3_000_000 {
-            *entry = 0;
-            to_resend.push(id);
-        }
-    }
-    drop(state);
-
-    for id in to_resend {
-        crate::ui::send_warn(
-            server,
-            id,
-            "\x0C3[INFO] Automatically reloading map to clear video memory bloat...",
-        );
-        crate::map_state::send_map_to_async(server, id);
     }
 }
 

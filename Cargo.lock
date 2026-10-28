@@ -1624,15 +1624,12 @@ dependencies = [
 name = "sauer-map"
 version = "0.1.0"
 dependencies = [
- "bitcode",
  "cube-string",
  "flate2",
  "glam",
  "ogz-rs",
  "sauer-core",
  "sauer-proto",
- "serde",
- "thiserror 2.0.18",
 ]
 
 [[package]]

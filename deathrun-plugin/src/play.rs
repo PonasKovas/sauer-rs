@@ -1,5 +1,4 @@
 use crate::map_state::{DeathrunState, Trap, get_server_state};
-use crate::trap::StoredTrap;
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
@@ -99,7 +98,6 @@ impl Default for PlayMaps {
 impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = Map::from_bytes(data).map_err(|e| e.to_string())?;
-        let mut traps = Vec::new();
         // Universal cleanup of magic active trap particles
         for ent in &mut state.entities {
             if ent.ent_type == ogz_rs::data::EntityType::Particles
@@ -111,55 +109,24 @@ impl PlayMaps {
             }
         }
 
-        if let Ok((entries, _stats)) = state.db_scan::<StoredTrap>() {
-            let mut stored = Vec::new();
-            for entry in entries {
-                let st = entry.data;
-                let bpos = st.button_pos;
-                let valid = entry.instances.iter().any(|inst| {
-                    inst.pos[0] >= bpos[0]
-                        && inst.pos[0] <= bpos[0] + 8
-                        && inst.pos[1] >= bpos[1]
-                        && inst.pos[1] <= bpos[1] + 8
-                        && inst.pos[2] >= bpos[2]
-                        && inst.pos[2] <= bpos[2] + 8
-                });
-                if valid {
-                    stored.push(st);
-                } else {
-                    tracing::warn!(
-                        "Rejected copied trap payload outside expected bounds at {:?}",
-                        entry.instances.first().map(|i| i.pos)
-                    );
-                }
-            }
-
-            for mut st in stored {
-                st.remap_vslots(&mut state);
-                if let Some(trap) = st.into_trap() {
-                    traps.push(trap);
-                }
-            }
-            if !traps.is_empty() {
-                info!("Loaded {} traps from map '{name}'", traps.len());
-            }
+        let loaded = crate::trap::persist::load(&state);
+        for w in &loaded.warnings {
+            tracing::warn!("map '{name}': {w}");
+        }
+        let traps = loaded.traps;
+        if !traps.is_empty() {
+            info!("Loaded {} traps from map '{name}'", traps.len());
+        }
+        // Players never save play maps, and the server keeps trap geometry in
+        // memory, so the vault is just dead weight for them.
+        if let Some(v) = loaded.vault {
+            crate::trap::vault::fill_rock(&mut state, v.origin, v.size);
         }
 
         crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
         for trap in &traps {
-            let b_max = [
-                trap.button_pos[0] + trap.button_size,
-                trap.button_pos[1] + trap.button_size,
-                trap.button_pos[2] + trap.button_size,
-            ];
-            state.protect_region(trap.button_pos, b_max);
-
-            let packets = crate::trap::stored::generate_trap_vslot_packets(
-                &crate::trap::StoredTrap::from_trap(trap),
-            );
-            for p in &packets {
-                state.apply_vslots(&p.sel, p.all_faces, p.delta != 0, &p.extra_data);
-            }
+            let (min, max) = trap.button_box();
+            state.protect_region(min, max);
         }
 
         if !self.rotation.contains(&name) {
@@ -782,7 +749,9 @@ impl Plugin for DeathrunPlay {
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read().unwrap();
             let is_first = server.client_count() == 1;
-            let is_solo_round = (lock.round_state == RoundState::Playing || lock.round_state == RoundState::MapLoading) && lock.evil_id.is_none();
+            let is_solo_round = (lock.round_state == RoundState::Playing
+                || lock.round_state == RoundState::MapLoading)
+                && lock.evil_id.is_none();
             let is_waiting =
                 lock.round_state == RoundState::NotStarted && server.client_count() > 1;
             (is_first, is_solo_round, is_waiting)
@@ -872,13 +841,7 @@ impl Plugin for DeathrunPlay {
 
                 if let Some(idx) = target_trap {
                     let trap = &state.traps[idx];
-                    if trap.clip_s != [0, 0, 0] {
-                        let t_min = trap.clip_pos;
-                        let t_max = [
-                            t_min[0] + trap.clip_s[0] * trap.clip_grid,
-                            t_min[1] + trap.clip_s[1] * trap.clip_grid,
-                            t_min[2] + trap.clip_s[2] * trap.clip_grid,
-                        ];
+                    if let Some((t_min, t_max)) = trap.geom.as_ref().map(|g| g.clip_box()) {
                         let len_x = t_max[0] - t_min[0];
                         let len_y = t_max[1] - t_min[1];
                         let len_z = t_max[2] - t_min[2];
@@ -921,18 +884,39 @@ impl Plugin for DeathrunPlay {
 
                         let mut edges = Vec::new();
                         let edge_defs = [
-                            (0, 1, 1, len_x), (2, 3, 1, len_x), (4, 5, 1, len_x), (6, 7, 1, len_x), // X edges
-                            (0, 2, 2, len_y), (1, 3, 2, len_y), (4, 6, 2, len_y), (5, 7, 2, len_y), // Y edges
-                            (0, 4, 0, len_z), (1, 5, 0, len_z), (2, 6, 0, len_z), (3, 7, 0, len_z), // Z edges
+                            (0, 1, 1, len_x),
+                            (2, 3, 1, len_x),
+                            (4, 5, 1, len_x),
+                            (6, 7, 1, len_x), // X edges
+                            (0, 2, 2, len_y),
+                            (1, 3, 2, len_y),
+                            (4, 6, 2, len_y),
+                            (5, 7, 2, len_y), // Y edges
+                            (0, 4, 0, len_z),
+                            (1, 5, 0, len_z),
+                            (2, 6, 0, len_z),
+                            (3, 7, 0, len_z), // Z edges
                         ];
 
                         for &(c1, c2, axis, len) in &edge_defs {
                             if is_looked_at[c1] && is_looked_at[c2] {
                                 continue;
                             } else if is_looked_at[c1] {
-                                edges.push((corners[c2][0], corners[c2][1], corners[c2][2], axis + 3, len));
+                                edges.push((
+                                    corners[c2][0],
+                                    corners[c2][1],
+                                    corners[c2][2],
+                                    axis + 3,
+                                    len,
+                                ));
                             } else {
-                                edges.push((corners[c1][0], corners[c1][1], corners[c1][2], axis, len));
+                                edges.push((
+                                    corners[c1][0],
+                                    corners[c1][1],
+                                    corners[c1][2],
+                                    axis,
+                                    len,
+                                ));
                             }
                         }
                         edges_to_draw = Some(edges);
