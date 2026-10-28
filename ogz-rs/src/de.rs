@@ -12,7 +12,6 @@ const MAX_LIGHTMAPS: i32 = 16_384;
 const MAX_PVS_BYTES: i32 = 256 * 1024 * 1024; // 256 MB
 const MAX_VARS: i32 = 65_536;
 const MAX_VSLOTS: i32 = 1_000_000;
-const MAX_BLENDMAP_RES: i32 = 8_192; // 8192² = 64 MB
 
 /// Leniently decompresses an .ogz file, handling concatenated GZIP streams
 /// and bypassing Sauerbraten's historically broken GZIP footers.
@@ -73,7 +72,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         return Err(OgzError::LimitExceeded("lightmaps"));
     }
 
-    let mut blendmap_res;
+    let blendmap_res;
     let map_vars;
     let mut map_vslots = 0;
 
@@ -373,26 +372,13 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         cursor.read_exact(&mut pvs_data)?;
     }
 
+    // The header field is only a "has blendmap" flag. The blendmap itself is a
+    // quadtree (engine `loadblendmap`), kept here as its raw serialized bytes.
     let mut blendmap_data = None;
     if version >= 28 && blendmap_res > 0 {
-        // Map version 28 has an engine quirk where it reads an extra int32
-        // to dictate the actual resolution before reading the pixel array.
-        let actual_res = if version == 28 {
-            cursor.read_i32::<LittleEndian>()?
-        } else {
-            blendmap_res
-        };
-
-        if actual_res <= 0 || actual_res > MAX_BLENDMAP_RES {
-            return Err(OgzError::LimitExceeded("blendmap resolution"));
-        }
-        let size = (actual_res as usize)
-            .checked_mul(actual_res as usize)
-            .ok_or(OgzError::LimitExceeded("blendmap size overflow"))?;
-        let mut bdata = vec![0u8; size];
-        cursor.read_exact(&mut bdata)?;
+        let mut bdata = Vec::new();
+        crate::blendmap::read_node(&mut cursor, &mut bdata, 0)?;
         blendmap_data = Some(bdata);
-        blendmap_res = actual_res; // Sync the resolution so it serializes properly later
     }
 
     Ok(OgzMap {

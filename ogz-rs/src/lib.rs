@@ -2,6 +2,7 @@
 //! It seamlessly handles all map versions up to 33, resolving all engine quirks including the historic
 //! broken GZIP trailer issue via lenient decoding.
 
+pub mod blendmap;
 pub mod data;
 mod de;
 mod error;
