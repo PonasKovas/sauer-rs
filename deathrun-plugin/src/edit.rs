@@ -171,7 +171,8 @@ impl Plugin for DeathrunEdit {
             is_trap_edit_active = state.trap_edit.is_some();
 
             if let Some(idx) = target_trap {
-                entity_frames = guard::entity_frames(&guard::trap_ent_changes(&state, idx));
+                let eye = Some((origin, forward));
+                entity_frames = guard::entity_frames(&guard::trap_ent_changes(&state, idx), eye);
 
                 let trap = &state.traps[idx];
                 let live = state
@@ -189,78 +190,7 @@ impl Plugin for DeathrunEdit {
                 let shown = live.or_else(|| trap.geom.as_ref().map(|g| g.clip_box()));
 
                 if let Some((t_min, t_max)) = shown {
-                    let len_x = t_max[0] - t_min[0];
-                    let len_y = t_max[1] - t_min[1];
-                    let len_z = t_max[2] - t_min[2];
-
-                    let corners = [
-                        [t_min[0], t_min[1], t_min[2]],
-                        [t_max[0], t_min[1], t_min[2]],
-                        [t_min[0], t_max[1], t_min[2]],
-                        [t_max[0], t_max[1], t_min[2]],
-                        [t_min[0], t_min[1], t_max[2]],
-                        [t_max[0], t_min[1], t_max[2]],
-                        [t_min[0], t_max[1], t_max[2]],
-                        [t_max[0], t_max[1], t_max[2]],
-                    ];
-
-                    let mut is_looked_at = [false; 8];
-                    let look_threshold_sq = 4.0 * 4.0;
-
-                    for (i, c) in corners.iter().enumerate() {
-                        let v = [
-                            c[0] as f32 - origin[0],
-                            c[1] as f32 - origin[1],
-                            c[2] as f32 - origin[2],
-                        ];
-                        let t = v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2];
-                        if t > 0.0 {
-                            let proj = [
-                                origin[0] + t * forward[0],
-                                origin[1] + t * forward[1],
-                                origin[2] + t * forward[2],
-                            ];
-                            let dist_sq = (c[0] as f32 - proj[0]).powi(2)
-                                + (c[1] as f32 - proj[1]).powi(2)
-                                + (c[2] as f32 - proj[2]).powi(2);
-                            if dist_sq < look_threshold_sq {
-                                is_looked_at[i] = true;
-                            }
-                        }
-                    }
-
-                    let mut edges = Vec::new();
-                    let edge_defs = [
-                        (0, 1, 1, len_x),
-                        (2, 3, 1, len_x),
-                        (4, 5, 1, len_x),
-                        (6, 7, 1, len_x), // X edges
-                        (0, 2, 2, len_y),
-                        (1, 3, 2, len_y),
-                        (4, 6, 2, len_y),
-                        (5, 7, 2, len_y), // Y edges
-                        (0, 4, 0, len_z),
-                        (1, 5, 0, len_z),
-                        (2, 6, 0, len_z),
-                        (3, 7, 0, len_z), // Z edges
-                    ];
-
-                    for &(c1, c2, axis, len) in &edge_defs {
-                        if is_looked_at[c1] && is_looked_at[c2] {
-                            continue;
-                        } else if is_looked_at[c1] {
-                            edges.push((
-                                corners[c2][0],
-                                corners[c2][1],
-                                corners[c2][2],
-                                axis + 3,
-                                len,
-                            ));
-                        } else {
-                            edges.push((corners[c1][0], corners[c1][1], corners[c1][2], axis, len));
-                        }
-                    }
-                    edges_to_draw = Some(edges);
+                    edges_to_draw = Some(guard::box_edges(t_min, t_max, eye));
                 }
             }
         } // Read Lock 1 Dropped
@@ -1182,15 +1112,9 @@ impl Plugin for DeathrunEdit {
         }
 
         // The base plugin already relayed the enlarge, so clients see it
-        // before the relocated vault arrives.
-        if let Some(map) = state.map.as_mut() {
-            map.enlarge();
-        }
-        if let Some(base) = state.base_map.as_mut() {
-            base.enlarge();
-        }
+        // before the new air octants and the relocated vault arrive.
         let mut sync = crate::trap::persist::Sync::default();
-        let result = crate::trap::persist::relocate_if_needed(&mut state, &mut sync);
+        let result = crate::trap::persist::client_enlarged(&mut state, &mut sync);
         let out = crate::trap::persist::packets(&state, sync);
         drop(state);
         crate::trap::persist::send(ctx.server(), out);

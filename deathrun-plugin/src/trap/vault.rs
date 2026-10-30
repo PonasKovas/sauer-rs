@@ -172,11 +172,15 @@ pub fn sel(o: [i32; 3], s: [i32; 3], grid: i32) -> Selection {
     }
 }
 
-/// Turns an aligned power-of-two cube back into plain rock.
-pub fn fill_rock(map: &mut Map, origin: [i32; 3], size: i32) {
+fn fill_rock(map: &mut Map, origin: [i32; 3], size: i32) {
     let s = sel(origin, [1; 3], size);
     map.fill(&s, true);
     map.set_texture(&s, ANCHOR_SLOT, true);
+}
+
+/// Removes a vault, leaving plain air (what enlarging adds).
+pub fn erase(map: &mut Map, vault: &Vault) {
+    map.fill(&sel(vault.origin, [1; 3], vault.size), false);
 }
 
 fn clear(map: &mut Map, min: [i32; 3], extent: [i32; 3], grid: i32) {
@@ -233,7 +237,8 @@ pub fn read_shelf(map: &Map, vault: &Vault, geom: &TrapGeom) -> Option<Clipboard
     Some(payload)
 }
 
-/// True when the box holds only untouched rock, ignoring the part covered by
+/// True when the box holds only untouched air or untouched rock (each part
+/// split off around `ours` may be either), ignoring the part covered by
 /// `ours` (the current vault, which we are free to overwrite).
 pub fn is_free(map: &Map, b: Box3, ours: Option<Box3>) -> bool {
     if (0..3).any(|i| b.0[i] < 0 || b.1[i] > map.size) {
@@ -249,7 +254,7 @@ pub fn is_free(map: &Map, b: Box3, ours: Option<Box3>) -> bool {
                 is_free(map, (min, std::array::from_fn(|i| min[i] + half[i])), ours)
             })
         }
-        _ => map.is_solid_region(b.0, b.1),
+        _ => map.is_untouched_region(b.0, b.1),
     }
 }
 
@@ -355,7 +360,26 @@ mod tests {
             Some((1, b"hello".to_vec()))
         );
 
-        fill_rock(&mut map, vault.origin, vault.size);
-        assert!(map.is_solid_region(vault.bounds().0, vault.bounds().1));
+        erase(&mut map, &vault);
+        assert!(map.is_untouched_region(vault.bounds().0, vault.bounds().1));
+        assert!(
+            map.get_cube(vault.origin[0] as f32, vault.origin[1] as f32, 0.0)
+                .unwrap()
+                .0
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn free_means_untouched_air_or_rock() {
+        let mut map = Map::new_empty(1024);
+        map.enlarge();
+        let air = Vault::at_far_corner(2048, 128).bounds();
+        assert!(is_free(&map, air, None));
+        // A mapper's build in the corner makes it unusable.
+        map.fill(&sel([1984, 1984, 0], [1; 3], 16), true);
+        assert!(!is_free(&map, air, None));
+        // Untouched rock (the bottom of a fresh map) is fine too.
+        assert!(is_free(&map, ([896, 896, 0], [1024, 1024, 128]), None));
     }
 }

@@ -77,15 +77,35 @@ fn record(vault: &Vault, traps: &[Trap], generation: u32) -> VSlotDelta {
     sauer_map::param_blob::encode(TAG, generation, &rec.to_bytes())
 }
 
+/// Enlarges every server copy of the map. Clients run the engine's enlarge,
+/// which fills the new bottom octants with rock, so those are resent as air.
+fn enlarge_maps(state: &mut DeathrunState, sync: &mut Sync) {
+    for m in maps(state) {
+        m.enlarge();
+    }
+    if let Some(map) = state.map.as_ref() {
+        sync.dirty.extend(map.enlarged_octants());
+    }
+}
+
+/// Enlarges the map from the server side (clients are told with `N_NEWMAP`).
 fn enlarge(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
     if state.map.as_ref().map_or(MAX_WORLD, |m| m.size) >= MAX_WORLD {
         return Err("the map is already at the maximum size, so the trap vault can't grow".into());
     }
-    for m in maps(state) {
-        m.enlarge();
-    }
+    enlarge_maps(state, sync);
     sync.enlarges += 1;
     Ok(())
+}
+
+/// A client enlarged the map (already relayed to everyone): follow it, turn
+/// the new rock into air for everyone, and move the vault to the new corner.
+pub fn client_enlarged(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
+    if state.map.as_ref().map_or(MAX_WORLD, |m| m.size) >= MAX_WORLD {
+        return Ok(()); // the engine refuses this too
+    }
+    enlarge_maps(state, sync);
+    relocate_if_needed(state, sync)
 }
 
 /// Clears a trap's old shelf before its geometry is replaced or removed.
@@ -137,7 +157,7 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     }
     if let Some(o) = old {
         for m in maps(state) {
-            vault::fill_rock(m, o.origin, o.size);
+            vault::erase(m, &o);
             m.unprotect_region(o.bounds().0, o.bounds().1);
         }
         sync.mark(o.bounds());
@@ -161,7 +181,7 @@ pub fn save(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
         if state.traps.is_empty() {
             return Ok(());
         }
-        // First trap in this map: enlarge so the vault sits in fresh rock, away from the map.
+        // First trap in this map: enlarge so the vault sits in fresh space, away from the map.
         return rebuild(state, sync, true);
     };
 
@@ -225,7 +245,7 @@ pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<
         target = Vault::at_far_corner(state.map.as_ref().unwrap().size, v.size);
     }
     for m in maps(state) {
-        vault::fill_rock(m, v.origin, v.size);
+        vault::erase(m, &v);
         m.unprotect_region(v.bounds().0, v.bounds().1);
     }
     sync.mark(v.bounds());
@@ -476,15 +496,25 @@ mod tests {
         save(&mut state, &mut Sync::default()).unwrap();
         let old = state.vault.unwrap();
 
-        state.map.as_mut().unwrap().enlarge();
         let mut sync = Sync::default();
-        relocate_if_needed(&mut state, &mut sync).unwrap();
+        client_enlarged(&mut state, &mut sync).unwrap();
+        assert_eq!(sync.enlarges, 0, "the client's enlarge was already relayed");
+        let map = state.map.as_ref().unwrap();
+        for octant in map.enlarged_octants() {
+            assert!(sync.dirty.contains(&octant), "new octant not resent as air");
+        }
         let new = state.vault.unwrap();
         assert!(new.is_at_far_corner(4096));
-        let map = state.map.as_ref().unwrap();
+        let empty = |p: [i32; 3]| {
+            map.get_cube(p[0] as f32, p[1] as f32, p[2] as f32)
+                .unwrap()
+                .0
+                .is_empty()
+        };
+        assert!(empty(old.origin), "old vault left behind");
         assert!(
-            map.is_solid_region(old.bounds().0, old.bounds().1),
-            "old vault left behind"
+            empty([3000, 100, 10]) && empty([100, 3000, 10]),
+            "new bottom octants not air"
         );
 
         let (_, loaded) = reload(&state);

@@ -187,6 +187,44 @@ impl Map {
         updates
     }
 
+    /// What `player_id` should currently see in entity slot `ent_id`, or `None`
+    /// if that slot is not a virtual entity. Used to undo a player grabbing one.
+    pub fn virt_ent_view(&self, player_id: u64, ent_id: usize) -> Option<EditEnt> {
+        let pool_idx = self
+            .virt_state
+            .global_pool
+            .iter()
+            .position(|&e| e == ent_id)?;
+        let shown = self.virt_state.players.get(&player_id).and_then(|p| {
+            p.namespaces.values().find_map(|ns| {
+                let i = ns.pool_indices.iter().position(|&k| k == pool_idx)?;
+                ns.ents.get(i)
+            })
+        });
+        Some(match shown {
+            Some(fake) => EditEnt {
+                ent_id: ent_id as i32,
+                pos: Vec3 {
+                    x: fake.position[0],
+                    y: fake.position[1],
+                    z: fake.position[2],
+                },
+                type_: fake.ent_type,
+                attrs: fake.attrs,
+            },
+            None => EditEnt {
+                ent_id: ent_id as i32,
+                pos: Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                type_: EntityType::Box,
+                attrs: [0; 5],
+            },
+        })
+    }
+
     pub fn clear_virt_ents(&mut self, player_id: u64, namespace: &str) -> VirtEntUpdates {
         self.update_virt_ents(player_id, namespace, Vec::new())
     }

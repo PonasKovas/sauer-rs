@@ -120,7 +120,7 @@ impl PlayMaps {
         // Players never save play maps, and the server keeps trap geometry in
         // memory, so the vault is just dead weight for them.
         if let Some(v) = loaded.vault {
-            crate::trap::vault::fill_rock(&mut state, v.origin, v.size);
+            crate::trap::vault::erase(&mut state, &v);
         }
 
         crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);

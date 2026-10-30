@@ -121,7 +121,7 @@ impl Map {
 
         map.compact_vslots();
         while map.size < 1024 {
-            map.enlarge_empty();
+            map.enlarge();
         }
         Ok(map)
     }
@@ -260,68 +260,61 @@ impl Map {
         self.vslots = self.get_compacted_vslots();
     }
 
-    pub fn enlarge_empty(&mut self) {
-        let new_size = self.size * 2;
-        let air = Node::Leaf(Cube {
-            edges: [0x00; 12],
-            textures: [0; 6],
-            material: Default::default(),
-        });
-        let old_root = std::mem::replace(&mut self.root, air.clone());
-        self.root = Node::Branch(Box::new([
-            old_root,
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air,
-        ]));
-        self.size = new_size;
-        if let Some(data) = &self.blendmap_data {
-            self.blendmap_data = Some(ogz_rs::blendmap::enlarged(data));
-        }
-    }
-
+    /// Doubles the world, keeping the old one in the origin octant. Unlike the
+    /// engine's `enlargemap`, which fills the three new bottom octants with
+    /// rock, every new octant is air, so callers that sync clients must send
+    /// [`Map::enlarged_octants`] after the client-side enlarge.
     pub fn enlarge(&mut self) {
-        let new_size = self.size * 2;
-        let solid = Node::Leaf(Cube {
-            edges: [0x80; 12],
-            textures: [1; 6],
-            material: Default::default(),
-        });
         let air = Node::Leaf(Cube {
             edges: [0x00; 12],
             textures: [0; 6],
             material: Default::default(),
         });
         let old_root = std::mem::replace(&mut self.root, air.clone());
-        self.root = Node::Branch(Box::new([
-            old_root,
-            solid.clone(),
-            solid.clone(),
-            solid,
-            air.clone(),
-            air.clone(),
-            air.clone(),
-            air,
-        ]));
-        self.size = new_size;
+        let mut children: [Node; 8] = std::array::from_fn(|_| air.clone());
+        children[0] = old_root;
+        self.root = Node::Branch(Box::new(children));
+        self.size *= 2;
         if let Some(data) = &self.blendmap_data {
             self.blendmap_data = Some(ogz_rs::blendmap::enlarged(data));
         }
     }
 
-    /// True when every cube in the box is entirely solid with no material,
-    /// i.e. untouched rock like the octants `enlarge` adds.
-    pub fn is_solid_region(&self, min: [i32; 3], max: [i32; 3]) -> bool {
-        fn check(node: &Node, pos: [i32; 3], size: i32, min: &[i32; 3], max: &[i32; 3]) -> bool {
+    /// The bottom octants the engine fills with rock when enlarging to the
+    /// current size (the ones [`Map::enlarge`] leaves as air).
+    pub fn enlarged_octants(&self) -> [([i32; 3], [i32; 3]); 3] {
+        let h = self.size / 2;
+        [[h, 0, 0], [0, h, 0], [h, h, 0]].map(|o| (o, o.map(|v| v + h)))
+    }
+
+    /// True when the box is untouched: all air, or all plain rock, with no materials.
+    pub fn is_untouched_region(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+        // `want`: None until the first leaf decides between rock (true) and air (false).
+        fn check(
+            node: &Node,
+            pos: [i32; 3],
+            size: i32,
+            min: &[i32; 3],
+            max: &[i32; 3],
+            want: &mut Option<bool>,
+        ) -> bool {
             if (0..3).any(|i| pos[i] >= max[i] || pos[i] + size <= min[i]) {
                 return true;
             }
             match node {
-                Node::Leaf(c) => c.is_entirely_solid() && c.material == Default::default(),
+                Node::Leaf(c) => {
+                    if c.material != Default::default() {
+                        return false;
+                    }
+                    let solid = if c.is_entirely_solid() {
+                        true
+                    } else if c.is_empty() {
+                        false
+                    } else {
+                        return false;
+                    };
+                    *want.get_or_insert(solid) == solid
+                }
                 Node::Branch(ch) => {
                     let half = size / 2;
                     (0..8).all(|i| {
@@ -330,12 +323,12 @@ impl Map {
                             pos[1] + ((i >> 1) & 1) as i32 * half,
                             pos[2] + ((i >> 2) & 1) as i32 * half,
                         ];
-                        check(&ch[i], p, half, min, max)
+                        check(&ch[i], p, half, min, max, want)
                     })
                 }
             }
         }
-        check(&self.root, [0, 0, 0], self.size, &min, &max)
+        check(&self.root, [0, 0, 0], self.size, &min, &max, &mut None)
     }
 
     /// Gives the selected faces a variant of texture `slot` carrying exactly the
