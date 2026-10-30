@@ -1,5 +1,8 @@
+use crate::Node;
 use ogz_rs::data::{VSlot, VSlotParam};
-use sauer_proto::data::VSlotDelta;
+use sauer_proto::data::clipboard::VSlotData;
+use sauer_proto::data::{VSlotDelta, VSlotDeltaParam};
+use std::collections::HashMap;
 
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
     let mut current = idx as i32;
@@ -51,6 +54,18 @@ pub fn resolve_vslot(
     ds: &VSlotDelta,
     delta: bool,
 ) -> u16 {
+    lookup_vslot(vslots, base_tex, ds, delta, true).expect("inserting lookup always succeeds")
+}
+
+/// Like [`resolve_vslot`], but with `insert == false` only finds an existing
+/// variant (the engine's `findvslot`).
+pub fn lookup_vslot(
+    vslots: &mut Vec<Option<VSlot>>,
+    base_tex: u16,
+    ds: &VSlotDelta,
+    delta: bool,
+    insert: bool,
+) -> Option<u16> {
     if vslots.len() <= base_tex as usize {
         vslots.resize(base_tex as usize + 1, None);
     }
@@ -147,10 +162,13 @@ pub fn resolve_vslot(
                     && vs.alpha == new_vs.alpha
                     && vs.color == new_vs.color
                 {
-                    return i as u16;
+                    return Some(i as u16);
                 }
             }
         }
+    }
+    if !insert {
+        return None;
     }
 
     let mut insert_idx = None;
@@ -164,13 +182,88 @@ pub fn resolve_vslot(
 
     if let Some(idx) = insert_idx {
         vslots[idx] = Some(new_vs);
-        idx as u16
+        Some(idx as u16)
     } else {
         if vslots.len() < min_safe_idx {
             vslots.resize(min_safe_idx, None);
         }
         let idx = vslots.len();
         vslots.push(Some(new_vs));
-        idx as u16
+        Some(idx as u16)
     }
+}
+
+/// The props of a vslot as a full (non-delta) description.
+pub fn to_delta(vs: &VSlot) -> VSlotDelta {
+    VSlotDelta {
+        params: vs
+            .params
+            .iter()
+            .map(|p| VSlotDeltaParam {
+                name: p.name.clone(),
+                values: p.values,
+            })
+            .collect(),
+        scale: vs.scale,
+        rotation: vs.rotation,
+        offset: vs.offset,
+        scroll: vs.scroll,
+        layer: vs.layer,
+        alpha: vs.alpha,
+        color: vs.color,
+    }
+}
+
+/// Resolves a texture a client sent as `0x10000 | slot` plus a packed vslot
+/// (`N_EDITT`, `N_REPLACE`) to a local index, like the engine's `unpacktex`.
+/// Plain indices are returned as they are. `None` when `insert` is false and
+/// no such variant exists, or the data is malformed.
+pub fn unpack_tex(
+    vslots: &mut Vec<Option<VSlot>>,
+    tex: i32,
+    extra: &mut &[u8],
+    insert: bool,
+) -> Option<u16> {
+    if tex < 0x10000 {
+        return Some(tex as u16);
+    }
+    let ds = VSlotDelta::read(extra).ok()?;
+    let slot = (tex & 0xFFFF) as u16;
+    if ds.is_empty() {
+        return Some(slot);
+    }
+    lookup_vslot(vslots, slot, &ds, false, insert)
+}
+
+/// Brings a client's packed vslots (from a clipboard or undo block) into this
+/// table, like the engine's `unpackvslots`, and points `nodes` at them.
+/// Texture indices without packed data are the same on every client (plain
+/// slots), so they are left alone.
+pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &mut [Node]) {
+    let mut map = HashMap::new();
+    for vd in incoming {
+        if vd.index == 0 || vd.slot == 0 {
+            continue; // engine: end marker / sky can't be edited
+        }
+        map.insert(
+            vd.index,
+            resolve_vslot(vslots, vd.slot, &to_delta(&vd.vslot), false),
+        );
+    }
+    if map.is_empty() {
+        return;
+    }
+    fn remap(node: &mut Node, map: &HashMap<u16, u16>) {
+        match node {
+            Node::Leaf(c) => {
+                for t in &mut c.textures {
+                    if let Some(n) = map.get(t) {
+                        *t = *n;
+                    }
+                }
+            }
+            Node::Branch(ch) => ch.iter_mut().for_each(|c| remap(c, map)),
+        }
+    }
+    nodes.iter_mut().for_each(|n| remap(n, &map));
 }

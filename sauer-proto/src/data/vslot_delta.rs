@@ -24,6 +24,12 @@ pub struct VSlotDelta {
 }
 
 impl VSlotDelta {
+    /// Reads one packed vslot (as in the `extra` data of `N_EDITT`/`N_REPLACE`),
+    /// up to and including its terminator.
+    pub fn read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+        Self::sauer_read(reader)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.params.is_empty()
             && self.scale.is_none()

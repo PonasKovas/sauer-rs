@@ -411,8 +411,12 @@ impl Map {
         if self.is_protected(min, max) {
             return false;
         }
-        self.set_texture(&packet.sel, packet.tex as u16, packet.all_faces);
-        self.invalidate_cache();
+        let extra = &mut &packet.extra_data[..];
+        // Malformed data: the client ignores the edit too.
+        if let Some(tex) = crate::vslot::unpack_tex(&mut self.vslots, packet.tex, extra, true) {
+            self.set_texture(&packet.sel, tex, packet.all_faces);
+            self.invalidate_cache();
+        }
         true
     }
 
@@ -524,7 +528,19 @@ impl Map {
         } else {
             None
         };
-        self.replace_texture(sel.as_ref(), packet.old_tex as u16, packet.new_tex as u16);
+        // Like the engine's `mpreplacetex`: the old texture must already exist,
+        // the new one is created if needed; on failure nothing changes.
+        let extra = &mut &packet.extra_data[..];
+        let Some(old_tex) =
+            crate::vslot::unpack_tex(&mut self.vslots, packet.old_tex, extra, false)
+        else {
+            return true;
+        };
+        let Some(new_tex) = crate::vslot::unpack_tex(&mut self.vslots, packet.new_tex, extra, true)
+        else {
+            return true;
+        };
+        self.replace_texture(sel.as_ref(), old_tex, new_tex);
         self.invalidate_cache();
         true
     }
@@ -644,7 +660,10 @@ impl Map {
         if self.is_protected(min, max) {
             return false;
         }
-        self.apply_block(&paste_sel, payload.nodes.clone(), true);
+        // The clipboard uses the sending client's vslot numbering.
+        let mut nodes = payload.nodes.clone();
+        crate::vslot::import(&mut self.vslots, &payload.vslots, &mut nodes);
+        self.apply_block(&paste_sel, nodes, true);
         true
     }
 
@@ -652,12 +671,17 @@ impl Map {
     /// Returns `false` if the rollback was rejected because it intersected a protected region.
     pub fn apply_undo_redo(&mut self, payload: &sauer_proto::data::UndoPayload) -> bool {
         match &payload.data {
-            sauer_proto::data::UndoData::Cubes { sel, nodes, .. } => {
+            sauer_proto::data::UndoData::Cubes {
+                sel, nodes, vslots, ..
+            } => {
                 let (min, max) = sel.bounds();
                 if self.is_protected(min, max) {
                     return false;
                 }
-                self.apply_block(sel, nodes.clone(), false);
+                // Undo blocks use the sending client's vslot numbering.
+                let mut nodes = nodes.clone();
+                crate::vslot::import(&mut self.vslots, vslots, &mut nodes);
+                self.apply_block(sel, nodes, false);
                 true
             }
             sauer_proto::data::UndoData::Entities(ents) => {
