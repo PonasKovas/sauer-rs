@@ -98,16 +98,7 @@ impl Default for PlayMaps {
 impl PlayMaps {
     pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
         let mut state = Map::from_bytes(data).map_err(|e| e.to_string())?;
-        // Universal cleanup of magic active trap particles
-        for ent in &mut state.entities {
-            if ent.ent_type == ogz_rs::data::EntityType::Particles
-                && ent.attrs[3] == 1337
-                && ent.attrs[4] == 7331
-            {
-                ent.ent_type = ogz_rs::data::EntityType::Empty;
-                ent.attrs = [0; 5];
-            }
-        }
+        state.strip_virtual_entities();
 
         let loaded = crate::trap::persist::load(&state);
         for w in &loaded.warnings {

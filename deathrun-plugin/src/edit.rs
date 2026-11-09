@@ -782,15 +782,7 @@ impl Plugin for DeathrunEdit {
                         .map_err(|e: ogz_rs::OgzError| e.to_string())?;
                     let t_parsed = t_start.elapsed();
 
-                    for ent in &mut map.entities {
-                        if ent.ent_type == ogz_rs::data::EntityType::Particles
-                            && ent.attrs[3] == 1337
-                            && ent.attrs[4] == 7331
-                        {
-                            ent.ent_type = ogz_rs::data::EntityType::Empty;
-                            ent.attrs = [0; 5];
-                        }
-                    }
+                    map.strip_virtual_entities();
 
                     let loaded = crate::trap::persist::load(&map);
                     crate::trap::placement::rebuild_all_trap_buttons(&mut map, &loaded.traps);

@@ -3,6 +3,11 @@ use sauer_proto::channel1::EditEnt;
 use sauer_proto::data::{EntityType, Vec3};
 use std::collections::{HashMap, HashSet};
 
+/// Stamped into the 5th attribute of every virtual entity, which none of the
+/// entity types used for them read. Clients save virtual entities into the
+/// `.ogz` like any other, so maps are cleaned of them on load.
+pub const VIRT_MARK: i32 = 7331;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FakeEnt {
     pub ent_type: EntityType,
@@ -33,6 +38,35 @@ pub struct VirtEntState {
     pub players: HashMap<u64, PlayerVirtState>,
 }
 
+const PLACEHOLDER_ATTRS: [i16; 5] = [0, 0, 0, 0, VIRT_MARK as i16];
+
+/// What an unused virtual slot holds: an inert box at the origin.
+fn placeholder(ent_id: usize) -> EditEnt {
+    EditEnt {
+        ent_id: ent_id as i32,
+        pos: Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        type_: EntityType::Box,
+        attrs: PLACEHOLDER_ATTRS.map(i32::from),
+    }
+}
+
+fn shown(ent_id: usize, fake: &FakeEnt) -> EditEnt {
+    EditEnt {
+        ent_id: ent_id as i32,
+        pos: Vec3 {
+            x: fake.position[0],
+            y: fake.position[1],
+            z: fake.position[2],
+        },
+        type_: fake.ent_type,
+        attrs: fake.attrs,
+    }
+}
+
 impl Map {
     /// Reconciles the physical entity list with the virtual entity pool.
     /// This ensures that every virtual entity ID managed by the global pool is backed by
@@ -54,9 +88,28 @@ impl Map {
             if ent.ent_type == ogz_rs::data::EntityType::Empty {
                 ent.ent_type = ogz_rs::data::EntityType::Box;
                 ent.position = [0.0; 3];
-                ent.attrs = [0; 5];
+                ent.attrs = PLACEHOLDER_ATTRS;
             }
         }
+    }
+
+    /// Empties virtual entities a client saved into the map: anything marked
+    /// with [`VIRT_MARK`], plus the unmarked origin boxes older servers used as
+    /// placeholders. Returns how many were removed.
+    pub fn strip_virtual_entities(&mut self) -> usize {
+        let mut removed = 0;
+        for ent in &mut self.entities {
+            let marked = ent.attrs[4] == VIRT_MARK as i16
+                && matches!(ent.ent_type, EntityType::Particles | EntityType::Box);
+            let old_placeholder =
+                ent.ent_type == EntityType::Box && ent.position == [0.0; 3] && ent.attrs == [0; 5];
+            if marked || old_placeholder {
+                ent.ent_type = EntityType::Empty;
+                ent.attrs = [0; 5];
+                removed += 1;
+            }
+        }
+        removed
     }
 
     /// Safely assigns virtual entities for a player under a specific namespace (e.g. "highlight", "progress").
@@ -65,8 +118,11 @@ impl Map {
         &mut self,
         player_id: u64,
         namespace: &str,
-        new_ents: Vec<FakeEnt>,
+        mut new_ents: Vec<FakeEnt>,
     ) -> VirtEntUpdates {
+        for e in &mut new_ents {
+            e.attrs[4] = VIRT_MARK;
+        }
         let mut updates = VirtEntUpdates::default();
 
         let mut player_state = self
@@ -82,17 +138,9 @@ impl Map {
         // 1. Reclaim excess pool indices
         while ns_state.pool_indices.len() > new_ents.len() {
             let pool_idx = ns_state.pool_indices.pop().unwrap();
-            let ent_id = self.virt_state.global_pool[pool_idx] as i32;
-            updates.personal.push(EditEnt {
-                ent_id,
-                pos: Vec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                type_: EntityType::Box,
-                attrs: [0; 5],
-            });
+            updates
+                .personal
+                .push(placeholder(self.virt_state.global_pool[pool_idx]));
         }
 
         // 2. Allocate new pool indices if needed
@@ -122,24 +170,14 @@ impl Map {
                     let empty_id = self.entities.len();
                     self.entities.push(ogz_rs::data::Entity {
                         position: [0.0; 3],
-                        attrs: [0; 5],
+                        attrs: PLACEHOLDER_ATTRS,
                         ent_type: ogz_rs::data::EntityType::Box,
                         extra_data: vec![],
                     });
 
                     let idx = self.virt_state.global_pool.len();
                     self.virt_state.global_pool.push(empty_id);
-
-                    updates.global_broadcast.push(EditEnt {
-                        ent_id: empty_id as i32,
-                        pos: Vec3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
-                        type_: EntityType::Box,
-                        attrs: [0; 5],
-                    });
+                    updates.global_broadcast.push(placeholder(empty_id));
                     idx
                 };
 
@@ -152,17 +190,8 @@ impl Map {
         for i in 0..new_ents.len() {
             if ns_state.ents.get(i) != Some(&new_ents[i]) {
                 let pool_idx = ns_state.pool_indices[i];
-                let ent_id = self.virt_state.global_pool[pool_idx] as i32;
-                updates.personal.push(EditEnt {
-                    ent_id,
-                    pos: Vec3 {
-                        x: new_ents[i].position[0],
-                        y: new_ents[i].position[1],
-                        z: new_ents[i].position[2],
-                    },
-                    type_: new_ents[i].ent_type,
-                    attrs: new_ents[i].attrs,
-                });
+                let ent_id = self.virt_state.global_pool[pool_idx];
+                updates.personal.push(shown(ent_id, &new_ents[i]));
             }
         }
 
@@ -188,33 +217,15 @@ impl Map {
             .global_pool
             .iter()
             .position(|&e| e == ent_id)?;
-        let shown = self.virt_state.players.get(&player_id).and_then(|p| {
+        let fake = self.virt_state.players.get(&player_id).and_then(|p| {
             p.namespaces.values().find_map(|ns| {
                 let i = ns.pool_indices.iter().position(|&k| k == pool_idx)?;
                 ns.ents.get(i)
             })
         });
-        Some(match shown {
-            Some(fake) => EditEnt {
-                ent_id: ent_id as i32,
-                pos: Vec3 {
-                    x: fake.position[0],
-                    y: fake.position[1],
-                    z: fake.position[2],
-                },
-                type_: fake.ent_type,
-                attrs: fake.attrs,
-            },
-            None => EditEnt {
-                ent_id: ent_id as i32,
-                pos: Vec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                type_: EntityType::Box,
-                attrs: [0; 5],
-            },
+        Some(match fake {
+            Some(fake) => shown(ent_id, fake),
+            None => placeholder(ent_id),
         })
     }
 
@@ -227,17 +238,9 @@ impl Map {
         if let Some(player_state) = self.virt_state.players.remove(&player_id) {
             for ns_state in player_state.namespaces.values() {
                 for &pool_idx in &ns_state.pool_indices {
-                    let ent_id = self.virt_state.global_pool[pool_idx] as i32;
-                    updates.personal.push(EditEnt {
-                        ent_id,
-                        pos: Vec3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        },
-                        type_: EntityType::Box,
-                        attrs: [0; 5],
-                    });
+                    updates
+                        .personal
+                        .push(placeholder(self.virt_state.global_pool[pool_idx]));
                 }
             }
         }
