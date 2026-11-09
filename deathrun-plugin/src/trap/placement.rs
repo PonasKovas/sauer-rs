@@ -133,10 +133,9 @@ pub fn get_outer_faces_vslot_packets(
 ) -> Vec<sauer_proto::channel1::EditVSlot> {
     use sauer_proto::data::VSlotDelta;
 
-    // Buttons are solid: see-through (alpha) buttons made Sauerbraten flicker
-    // when items or particles were near them.
     let mut data_sides = VSlotDelta::default();
     data_sides.color = Some((color[0], color[1], color[2]));
+    data_sides.alpha = Some((0.8, 0.8));
 
     let mut data_front = data_sides.clone();
     data_front.scale = Some(2.0);
@@ -194,7 +193,13 @@ pub fn build_button_geometry(map: &mut sauer_map::Map, adj: [i32; 3], size: i32,
     map.fill(&sel, true);
     map.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
     map.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
-    map.set_material(&sel, Default::default());
+    map.set_material(
+        &sel,
+        ogz_rs::data::Material {
+            alpha: true,
+            ..Default::default()
+        },
+    );
 
     for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
         map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
