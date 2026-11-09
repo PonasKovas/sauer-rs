@@ -115,24 +115,17 @@ impl Map {
                 let pool_idx = if let Some(idx) = found_idx {
                     idx
                 } else {
-                    let empty_id = self
-                        .entities
-                        .iter()
-                        .position(|e| e.ent_type == ogz_rs::data::EntityType::Empty)
-                        .unwrap_or_else(|| {
-                            let id = self.entities.len();
-                            self.entities.push(ogz_rs::data::Entity {
-                                position: [0.0; 3],
-                                attrs: [0; 5],
-                                ent_type: ogz_rs::data::EntityType::Empty,
-                                extra_data: vec![],
-                            });
-                            id
-                        });
-
-                    self.entities[empty_id].ent_type = ogz_rs::data::EntityType::Box;
-                    self.entities[empty_id].position = [0.0; 3];
-                    self.entities[empty_id].attrs = [0; 5];
+                    // Always a brand new slot at the end. An empty slot may be
+                    // empty only for now (e.g. an entity a trap removes while
+                    // active), and taking it would make a real entity virtual
+                    // once the slot is filled again.
+                    let empty_id = self.entities.len();
+                    self.entities.push(ogz_rs::data::Entity {
+                        position: [0.0; 3],
+                        attrs: [0; 5],
+                        ent_type: ogz_rs::data::EntityType::Box,
+                        extra_data: vec![],
+                    });
 
                     let idx = self.virt_state.global_pool.len();
                     self.virt_state.global_pool.push(empty_id);
