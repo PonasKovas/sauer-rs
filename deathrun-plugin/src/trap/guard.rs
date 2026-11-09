@@ -227,10 +227,14 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
 
 // ─── Indicators ──────────────────────────────────────────────────────────────
 
+// Particle colors are 12-bit 0xRGB (engine `colorfromattr`); entity attrs
+// are 16-bit, so anything wider gets cut off.
+/// The trap's geometry box.
+pub const GEOMETRY_COLOR: i32 = 0x0FF;
 /// Disappears when the trap fires.
-const GONE_COLOR: i32 = 0xFF3030;
+const GONE_COLOR: i32 = 0xF00;
 /// Appears when the trap fires.
-const NEW_COLOR: i32 = 0x30FF30;
+const NEW_COLOR: i32 = 0x0F0;
 const MAX_MARKED: usize = 20;
 /// Half the frame size: corners end up ~14 units from the entity, well clear of LOOK_RADIUS.
 const HALF: i32 = 8;

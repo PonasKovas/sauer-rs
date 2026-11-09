@@ -270,30 +270,12 @@ impl Plugin for DeathrunEdit {
 
         if update_highlight {
             if let Some(edges) = edges_to_draw {
-                let time_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis();
-                let hue = (time_ms % 2000) as f32 / 2000.0;
-                let h = hue * 6.0;
-                let x = 1.0 - ((h % 2.0) - 1.0).abs();
-                let (r, g, b) = match h as i32 {
-                    0 => (1.0, x, 0.0),
-                    1 => (x, 1.0, 0.0),
-                    2 => (0.0, 1.0, x),
-                    3 => (0.0, x, 1.0),
-                    4 => (x, 0.0, 1.0),
-                    _ => (1.0, 0.0, x),
-                };
-                let color_int =
-                    ((r * 255.0) as i32) << 16 | ((g * 255.0) as i32) << 8 | ((b * 255.0) as i32);
-
                 let mut fake_ents = Vec::new();
                 for edge in &edges {
                     fake_ents.push(sauer_map::virt_ents::FakeEnt {
                         ent_type: EntityType::Particles,
                         position: [edge.0 as f32, edge.1 as f32, edge.2 as f32],
-                        attrs: [7, edge.3, edge.4, color_int, 0],
+                        attrs: [7, edge.3, edge.4, guard::GEOMETRY_COLOR, 0],
                     });
                 }
                 let mut state_w = get_server_state(server).write().unwrap();
