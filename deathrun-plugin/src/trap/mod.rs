@@ -17,7 +17,9 @@ pub use trigger::trigger_trap;
 
 pub const BUTTON_SIZE: i32 = 8;
 pub const BUTTON_FRONT_TEX: u16 = 248;
-pub const BUTTON_SIDE_TEX: u16 = 242;
+pub const BUTTON_SIDE_TEX: u16 = 351;
+/// Texture scale of the button sides. 1/8 is the engine minimum (`vscale` clamps to it).
+pub const BUTTON_SIDE_SCALE: f32 = 0.125;
 pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
 pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
 

@@ -139,6 +139,7 @@ pub fn get_outer_faces_vslot_packets(
 
     let mut data_front = data_sides.clone();
     data_front.scale = Some(2.0);
+    data_sides.scale = Some(crate::trap::BUTTON_SIDE_SCALE);
 
     let proto_orient = Orient::try_from(orient as i32).unwrap_or(Orient::Left);
 
