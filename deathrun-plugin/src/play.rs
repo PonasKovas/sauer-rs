@@ -405,6 +405,14 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             }
         }
 
+        if end_if_decided_at_start(&server, &maps_clone, my_epoch, current_evil) {
+            let mut lock = maps_clone.write().unwrap();
+            if lock.round_epoch == my_epoch {
+                lock.round_task = None;
+            }
+            return;
+        }
+
         // Then broadcast the round state/gamemode to everyone
         ui::broadcast_round_start(&server, evil_name.as_deref());
 
@@ -538,6 +546,58 @@ fn check_win_conditions(
             }
         }
     }
+}
+
+/// Ends a round that was decided while its map was loading, e.g. because the
+/// only good player left: `check_win_conditions` skips rounds that aren't
+/// playing yet, so nothing else would notice. Nobody counts as alive until
+/// their client confirms the spawn, so this goes by who is still connected.
+/// Returns whether the round ended.
+fn end_if_decided_at_start(
+    server: &Arc<Server>,
+    maps: &Arc<RwLock<PlayMaps>>,
+    epoch: u64,
+    evil: Option<u64>,
+) -> bool {
+    let mut lock = maps.write().unwrap();
+    if lock.round_epoch != epoch || lock.round_state != RoundState::Playing {
+        return false;
+    }
+    let here = |id: u64| server.players.try_get(id).is_some();
+    let anyone_here = lock.spawned_this_round.iter().any(|&id| here(id));
+    if !anyone_here {
+        lock.round_state = RoundState::NotStarted;
+        server.set_master_mode(MasterMode::Veto);
+        return true;
+    }
+    let Some(evil) = evil else {
+        return false; // practice round, nothing to win
+    };
+    if !here(evil) {
+        declare_win(
+            server,
+            maps,
+            &mut lock,
+            "\x0C1Good\x0C7 (Evil disconnected)",
+            &[],
+        );
+        return true;
+    }
+    let good_here = lock
+        .spawned_this_round
+        .iter()
+        .any(|&id| id != evil && here(id));
+    if !good_here {
+        declare_win(
+            server,
+            maps,
+            &mut lock,
+            "\x0C3Evil\x0C7 (All Good players died/disconnected)",
+            &[],
+        );
+        return true;
+    }
+    false
 }
 
 fn declare_win(
