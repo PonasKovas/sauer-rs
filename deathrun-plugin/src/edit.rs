@@ -53,8 +53,6 @@ pub struct DeathrunEdit {
     last_particle_update: DashMap<u64, tokio::time::Instant>,
     trap_highlights: DashMap<u64, TrapHighlightState>,
     pending_welcome: DashMap<u64, WelcomeStep>,
-    /// The trap button each player currently sees through.
-    seethrough: DashMap<u64, crate::trap::placement::ButtonKey>,
     notes: crate::ServerNotes,
 }
 
@@ -65,7 +63,6 @@ impl DeathrunEdit {
             last_particle_update: DashMap::new(),
             trap_highlights: DashMap::new(),
             pending_welcome: DashMap::new(),
-            seethrough: DashMap::new(),
             notes: Default::default(),
         }
     }
@@ -84,7 +81,7 @@ impl Plugin for DeathrunEdit {
         self.last_particle_update.remove(&id);
         self.trap_highlights.remove(&id);
         self.pending_welcome.remove(&id);
-        self.seethrough.remove(&id);
+        crate::trap::placement::forget_seethrough(ctx.server(), id);
 
         let mut state_w = get_server_state(ctx.server()).write().unwrap();
         if let Some(map) = state_w.map.as_mut() {
@@ -114,6 +111,9 @@ impl Plugin for DeathrunEdit {
             ..Default::default()
         };
         server.extra.insert(RwLock::new(state));
+        server
+            .extra
+            .insert(crate::trap::placement::SeeThrough::default());
 
         server.register_command("#newtrap", "create a trap at the aimed surface", "");
         server.register_command("#deltrap", "remove the trap at the aimed surface", "");
@@ -235,12 +235,7 @@ impl Plugin for DeathrunEdit {
             }
         } // Read Lock 1 Dropped
 
-        crate::trap::placement::update_seethrough_button(
-            server,
-            id,
-            &self.seethrough,
-            seethrough_target,
-        );
+        crate::trap::placement::update_seethrough_button(server, id, seethrough_target);
 
         // --- WRITE PHASE 1: Update DashMap and Highlight Virt Ents ---
         let mut clear_highlight = false;
@@ -713,6 +708,8 @@ impl Plugin for DeathrunEdit {
     async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) {
         let id = ctx.id();
         let server = ctx.server();
+        // A freshly loaded map has every button solid again.
+        crate::trap::placement::mark_seethrough_stale_for(server, id);
         // A locked server keeps non-masters spectating, like vanilla.
         let locked = matches!(
             server.master_mode(),

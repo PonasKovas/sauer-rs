@@ -189,8 +189,6 @@ pub struct DeathrunPlay {
     maps: Arc<RwLock<PlayMaps>>,
     config: PlayConfig,
     trap_highlights: dashmap::DashMap<u64, crate::edit::TrapHighlightState>,
-    /// The trap button the terrorist currently sees through.
-    seethrough: dashmap::DashMap<u64, crate::trap::placement::ButtonKey>,
     notes: crate::ServerNotes,
 }
 
@@ -200,7 +198,6 @@ impl DeathrunPlay {
             maps: Arc::new(RwLock::new(PlayMaps::default())),
             config,
             trap_highlights: dashmap::DashMap::new(),
-            seethrough: dashmap::DashMap::new(),
             notes: Default::default(),
         }
     }
@@ -786,6 +783,9 @@ impl Plugin for DeathrunPlay {
         let (_, state) = self.maps.read().unwrap().make_active_state();
         server.extra.insert(RwLock::new(state));
         server.extra.insert(Arc::clone(&self.maps));
+        server
+            .extra
+            .insert(crate::trap::placement::SeeThrough::default());
     }
 
     async fn start(&self, server: &Arc<Server>) {
@@ -1003,12 +1003,7 @@ impl Plugin for DeathrunPlay {
                 }
             } // Drop read lock
 
-            crate::trap::placement::update_seethrough_button(
-                server,
-                id,
-                &self.seethrough,
-                seethrough_target,
-            );
+            crate::trap::placement::update_seethrough_button(server, id, seethrough_target);
 
             // --- WRITE PHASE: DashMap & Virtual Entities ---
             let mut clear_highlight = false;
@@ -1145,7 +1140,7 @@ impl Plugin for DeathrunPlay {
                 entry.active = hl_state_clone.active;
             }
         } else {
-            crate::trap::placement::update_seethrough_button(server, id, &self.seethrough, None);
+            crate::trap::placement::update_seethrough_button(server, id, None);
 
             let mut clear_highlight = false;
             if let Some(mut hl) = self.trap_highlights.get_mut(&id) {
@@ -1353,7 +1348,7 @@ impl Plugin for DeathrunPlay {
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.write().unwrap().remove_player_afk(id);
         self.trap_highlights.remove(&id);
-        self.seethrough.remove(&id);
+        crate::trap::placement::forget_seethrough(server, id);
 
         let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
         if let Some(map) = state_w.map.as_mut() {

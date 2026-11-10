@@ -215,19 +215,51 @@ pub fn button_key(trap: &crate::map_state::Trap) -> ButtonKey {
     (trap.button_pos, trap.button_size, trap.button_orient)
 }
 
+/// Which button each player sees through, kept in `Server::extra` (both modes
+/// insert it on init). The flag is false once geometry was resent over the
+/// buttons: that paste turns them solid on the client again, so the alpha has
+/// to be sent once more.
+#[derive(Default)]
+pub struct SeeThrough(dashmap::DashMap<u64, (ButtonKey, bool)>);
+
+/// Call after resending map geometry to clients: whoever is looking through a
+/// button gets its alpha again on their next position update.
+pub fn mark_seethrough_stale(server: &sauer_server::Server) {
+    if let Some(st) = server.extra.get::<SeeThrough>() {
+        st.0.iter_mut().for_each(|mut e| e.1 = false);
+    }
+}
+
+/// Like `mark_seethrough_stale`, for one player who just loaded a whole map.
+pub fn mark_seethrough_stale_for(server: &sauer_server::Server, id: u64) {
+    if let Some(mut e) = server
+        .extra
+        .get::<SeeThrough>()
+        .and_then(|st| st.0.get_mut(&id))
+    {
+        e.1 = false;
+    }
+}
+
+pub fn forget_seethrough(server: &sauer_server::Server, id: u64) {
+    if let Some(st) = server.extra.get::<SeeThrough>() {
+        st.0.remove(&id);
+    }
+}
+
 /// Makes `target` see-through for player `id` only, by giving its cubes alpha
 /// material on their client, and turns the previous one back to solid.
-/// `shown` remembers which button each player currently sees through.
-pub fn update_seethrough_button(
-    server: &sauer_server::Server,
-    id: u64,
-    shown: &dashmap::DashMap<u64, ButtonKey>,
-    target: Option<ButtonKey>,
-) {
-    let prev = shown.get(&id).map(|k| *k);
-    if prev == target {
+pub fn update_seethrough_button(server: &sauer_server::Server, id: u64, target: Option<ButtonKey>) {
+    let Some(shown) = server.extra.get::<SeeThrough>().map(|st| &st.0) else {
         return;
+    };
+    let prev = shown.get(&id).map(|e| *e);
+    match (prev, target) {
+        (None, None) => return,
+        (Some((old, true)), Some(new)) if old == new => return,
+        _ => {}
     }
+    let prev = prev.map(|(key, _)| key).filter(|&old| Some(old) != target);
 
     let send = |key: ButtonKey, alpha: bool| {
         let (pos, size, orient) = key;
@@ -263,7 +295,7 @@ pub fn update_seethrough_button(
     }
     if let Some(new) = target {
         send(new, true);
-        shown.insert(id, new);
+        shown.insert(id, (new, true));
     } else {
         shown.remove(&id);
     }

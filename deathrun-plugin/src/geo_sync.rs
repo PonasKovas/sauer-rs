@@ -42,6 +42,8 @@ pub async fn broadcast_payloads(
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
     }
+    // The paste turned any see-through trap buttons in it solid again.
+    crate::trap::placement::mark_seethrough_stale(server);
 }
 
 pub async fn send_payloads_to_clients(
@@ -61,4 +63,6 @@ pub async fn send_payloads_to_clients(
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
     }
+    // The paste turned any see-through trap buttons in it solid again.
+    crate::trap::placement::mark_seethrough_stale(server);
 }

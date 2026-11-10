@@ -168,4 +168,6 @@ pub async fn visual_rebuild_map<F>(
             server.send_chan1(id, batch);
         }
     }
+    // The rebuild turned any see-through trap buttons solid again.
+    crate::trap::placement::mark_seethrough_stale(server);
 }
