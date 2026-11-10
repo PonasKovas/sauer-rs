@@ -41,6 +41,23 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         apply_active_state(&mut new_map, &state.traps[t_idx], &virt_state.global_pool);
     }
 
+    // A trap's geometry can cover other traps' buttons and paste them back as
+    // they were when it was recorded, so redo every button in its current color.
+    for trap in &state.traps {
+        let (pos, size, orient) = (trap.button_pos, trap.button_size, trap.button_orient);
+        crate::trap::placement::build_button_geometry(&mut new_map, pos, size, orient);
+        if trap.is_active {
+            for pkt in crate::trap::placement::get_outer_faces_vslot_packets(
+                pos,
+                size,
+                orient,
+                BUTTON_COLOR_ACTIVE,
+            ) {
+                new_map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
+            }
+        }
+    }
+
     new_map.invalidate_cache();
     let world_size = new_map.size;
 
