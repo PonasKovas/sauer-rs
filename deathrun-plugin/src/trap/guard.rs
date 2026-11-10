@@ -268,15 +268,20 @@ pub fn entity_frames(changes: &[EntChange], eye: Option<Eye>) -> Vec<FakeEnt> {
             marks.push((a.pos, NEW_COLOR));
         }
     }
-    // With more than MAX_MARKED, frame the ones closest to the view line
-    // (infinite in both directions, through walls).
+    // Frame the ones in front of the player closest to the view ray (through
+    // walls); nothing behind them.
     if let Some((origin, forward)) = eye {
-        let line_dist_sq = |p: &[f32; 3]| {
+        let ahead = |p: &[f32; 3]| {
             let v: [f32; 3] = std::array::from_fn(|i| p[i] - origin[i]);
             let t = v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2];
-            (0..3).map(|i| (v[i] - t * forward[i]).powi(2)).sum::<f32>()
+            (t > 0.0).then(|| (0..3).map(|i| (v[i] - t * forward[i]).powi(2)).sum::<f32>())
         };
-        marks.sort_by(|a, b| line_dist_sq(&a.0).total_cmp(&line_dist_sq(&b.0)));
+        let mut keyed: Vec<_> = marks
+            .into_iter()
+            .filter_map(|m| ahead(&m.0).map(|d| (d, m)))
+            .collect();
+        keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        marks = keyed.into_iter().map(|(_, m)| m).collect();
     }
     marks
         .into_iter()
