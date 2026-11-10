@@ -72,6 +72,9 @@ pub struct PlayMaps {
     afk_last_move: HashMap<u64, Instant>,
     /// Players who have already received the AFK warning sound.
     afk_warned: HashSet<u64>,
+    /// Players spectated for being AFK who haven't moved since. They are not
+    /// picked as terrorist: they would likely waste the whole round.
+    afk_spectated: HashSet<u64>,
 }
 
 impl Default for PlayMaps {
@@ -91,6 +94,7 @@ impl Default for PlayMaps {
             afk_last_pos: HashMap::new(),
             afk_last_move: HashMap::new(),
             afk_warned: HashSet::new(),
+            afk_spectated: HashSet::new(),
         }
     }
 }
@@ -169,6 +173,7 @@ impl PlayMaps {
         if moved {
             self.afk_last_move.insert(id, Instant::now());
             self.afk_warned.remove(&id);
+            self.afk_spectated.remove(&id);
         }
     }
 
@@ -176,6 +181,7 @@ impl PlayMaps {
         self.afk_last_pos.remove(&id);
         self.afk_last_move.remove(&id);
         self.afk_warned.remove(&id);
+        self.afk_spectated.remove(&id);
     }
 }
 
@@ -267,7 +273,11 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         }
 
         let evil_id = if ids.len() > 1 {
-            Some(*ids.choose(&mut rand::thread_rng()).unwrap())
+            // Skip players who were spectated for being AFK, unless that's everyone.
+            let afk = maps_clone.read().unwrap().afk_spectated.clone();
+            let active: Vec<u64> = ids.iter().copied().filter(|id| !afk.contains(id)).collect();
+            let pool = if active.is_empty() { &ids } else { &active };
+            Some(*pool.choose(&mut rand::thread_rng()).unwrap())
         } else {
             None
         };
@@ -695,6 +705,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
             ui::warn_msg(&format!("{name} was spectated for being AFK.")),
         );
         server.set_spectator(*id, true);
+        maps.write().unwrap().afk_spectated.insert(*id);
     }
 
     if !to_spectate.is_empty() {
