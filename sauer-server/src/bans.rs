@@ -52,11 +52,21 @@ impl Server {
 
     /// Whether `password` hashed for this client matches the admin password.
     pub fn check_admin_pass(&self, id: u64, hash: &[u8]) -> bool {
+        if hash.is_empty() {
+            return false;
+        }
         let pass = self.admin_pass.read().unwrap();
         let (Some(cn), Some(p)) = (self.get_cn(id), self.players.try_get(id)) else {
             return false;
         };
-        !pass.is_empty() && hash == hash_password(cn, p.session_id, &pass).as_bytes()
+        let ok = !pass.is_empty() && hash == hash_password(cn, p.session_id, &pass).as_bytes();
+        let result = match (pass.is_empty(), ok) {
+            (true, _) => "no admin_pass is configured",
+            (false, true) => "accepted",
+            (false, false) => "wrong password",
+        };
+        tracing::info!("cn {cn} tried an admin password: {result}");
+        ok
     }
 }
 
