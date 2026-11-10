@@ -120,6 +120,58 @@ pub fn free_shelf(state: &mut DeathrunState, geom: &TrapGeom, sync: &mut Sync) {
     }
 }
 
+/// Vault spot for a max size map, which can't grow to make room: the bottom
+/// corner farthest from where people play, overwriting whatever is there.
+/// "Where people play" is the per-axis median of spawns and teleports, so a
+/// few far-off ones don't pull it around. An existing vault keeps its corner,
+/// so it never moves and leaves a hole behind.
+fn corner_away_from_play(map: &Map, size: i32, old: Option<Vault>) -> Vault {
+    use ogz_rs::data::EntityType;
+    let far = map.size - size;
+    if let Some(o) = old {
+        let side = |v: i32| if v == 0 { 0 } else { far };
+        return Vault {
+            origin: [side(o.origin[0]), side(o.origin[1]), 0],
+            size,
+        };
+    }
+
+    let (mut xs, mut ys): (Vec<f32>, Vec<f32>) = map
+        .entities
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.ent_type,
+                EntityType::PlayerStart | EntityType::Teleport | EntityType::TeleDest
+            )
+        })
+        .map(|e| (e.position[0], e.position[1]))
+        .unzip();
+    let median = |v: &mut Vec<f32>| {
+        if v.is_empty() {
+            return map.size as f32 / 2.0;
+        }
+        v.sort_by(f32::total_cmp);
+        v[v.len() / 2]
+    };
+    let center = [median(&mut xs), median(&mut ys)];
+
+    [[0, 0], [far, 0], [0, far], [far, far]]
+        .into_iter()
+        .map(|[x, y]| Vault {
+            origin: [x, y, 0],
+            size,
+        })
+        .max_by(|a, b| {
+            let dist = |v: &Vault| {
+                let mid = v.origin.map(|o| (o + v.size / 2) as f32);
+                (mid[0] - center[0]).powi(2) + (mid[1] - center[1]).powi(2)
+            };
+            dist(a).total_cmp(&dist(b))
+        })
+        .unwrap()
+}
+
 /// Lays every shelf out again in a vault at the far corner, growing it and
 /// enlarging the world as needed, then rebuilds it there.
 fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Result<(), String> {
@@ -140,18 +192,17 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     let (size, positions) = vault::pack_fresh(start, &items)
         .ok_or("the traps' geometry is too big to fit in the vault")?;
 
-    // A max size map can't grow, so the vault goes in its far corner anyway and
-    // overwrites whatever is there. Nobody plays out in that corner.
     let at_max = |state: &DeathrunState| state.map.as_ref().map_or(true, |m| m.size >= MAX_WORLD);
     if fresh_octant && !at_max(state) {
         enlarge(state, sync)?;
     }
     let target = loop {
         let map = state.map.as_ref().ok_or("no map loaded")?;
+        if at_max(state) && size <= map.size / 2 {
+            break corner_away_from_play(map, size, old);
+        }
         let target = Vault::at_far_corner(map.size, size);
-        if size <= map.size / 2
-            && (at_max(state) || vault::is_free(map, target.bounds(), old.map(|v| v.bounds())))
-        {
+        if size <= map.size / 2 && vault::is_free(map, target.bounds(), old.map(|v| v.bounds())) {
             break target;
         }
         enlarge(state, sync)?;
