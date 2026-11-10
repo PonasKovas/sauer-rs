@@ -55,6 +55,18 @@ where
     }
 }
 
+/// Like the engine's `setmaster`: once nobody holds master, the mode goes back to open.
+fn reopen_if_masterless(server: &Server) {
+    let has_master = server
+        .players
+        .map
+        .iter()
+        .any(|p| p.privilege >= Privilege::Master);
+    if !has_master && server.master_mode() != MasterMode::Open {
+        server.set_master_mode(MasterMode::Open);
+    }
+}
+
 /// Returns true if `target_id` is alive with a matching `life_sequence`.
 /// Guards against hitting a player who has already respawned.
 fn check_hit(server: &Server, target_id: u64, life_sequence: i32) -> bool {
@@ -404,6 +416,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         if had_privilege {
             server.broadcast_current_master();
+            reopen_if_masterless(server);
         }
     }
 
@@ -804,6 +817,52 @@ impl<P: Plugin> Plugin for Base<P> {
         if ctx.server().get_privilege(ctx.id()) >= Privilege::Master {
             ctx.server().set_master_mode(packet.mode);
         }
+    }
+
+    /// Mirrors the engine's `N_SETMASTER` handling (no passwords or auth).
+    async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) {
+        let id = ctx.id();
+        let server = ctx.server();
+        let Some(target) = server.get_id(packet.client_num as u8) else {
+            return;
+        };
+        let own = server.get_privilege(id);
+        let theirs = server.get_privilege(target);
+
+        if target != id {
+            // Give or take another player's master.
+            if own < Privilege::Master || theirs >= own || (packet.val && theirs != Privilege::None) {
+                return;
+            }
+        } else if packet.val {
+            // Claim master for yourself.
+            if own >= Privilege::Master {
+                return;
+            }
+            let spectating = server
+                .players
+                .try_get(id)
+                .map_or(true, |p| p.client_state == ClientState::Spectator);
+            if spectating {
+                crate::ui::send_warn(server, id, "Spectators may not claim master.");
+                return;
+            }
+            if server.players.map.iter().any(|p| p.privilege != Privilege::None) {
+                crate::ui::send_warn(server, id, "Master is already claimed.");
+                return;
+            }
+        } else if own == Privilege::None {
+            return;
+        }
+
+        let name = server.players.get(target).name.clone();
+        let verb = if packet.val { "claimed" } else { "relinquished" };
+        server.broadcast_chan1(&channel1::ServMsg {
+            text: format!("{} {verb} master", name.to_utf8()).lossy_cubestring(),
+        });
+        let privilege = if packet.val { Privilege::Master } else { Privilege::None };
+        server.set_privilege(target, privilege);
+        reopen_if_masterless(server);
     }
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {

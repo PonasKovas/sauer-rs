@@ -1414,6 +1414,13 @@ impl Plugin for DeathrunPlay {
         }
     }
 
+    async fn set_master(&self, ctx: &mut Context, _packet: &channel1::SetMaster) {
+        // Rounds set the master mode themselves, and a master giving it up
+        // would reopen the server mid-round.
+        ctx.cancel();
+        ui::send_warn(ctx.server(), ctx.id(), "Master is disabled on this server.");
+    }
+
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
         let id = ctx.id();
         let server = ctx.server();

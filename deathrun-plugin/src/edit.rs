@@ -10,7 +10,7 @@ use sauer_map::Map;
 use sauer_proto::{
     Client, channel0,
     channel1::{self, EditMode},
-    data::{ClientState, Direction, EntityType, GameMode, PlayerState, Privilege},
+    data::{ClientState, Direction, EntityType, GameMode, MasterMode, PlayerState, Privilege},
 };
 use sauer_server::{
     Server,
@@ -701,7 +701,10 @@ impl Plugin for DeathrunEdit {
     async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) {
         let id = ctx.id();
         let server = ctx.server();
-        if !is_waiting_for_map(server) {
+        // A locked server keeps non-masters spectating, like vanilla.
+        let locked = matches!(server.master_mode(), MasterMode::Locked | MasterMode::Private)
+            && server.get_privilege(id) < Privilege::Master;
+        if !is_waiting_for_map(server) && !locked {
             let is_spectator = server
                 .players
                 .try_get(id)
@@ -911,8 +914,10 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server();
 
+        // First one in gets master and locks the server, so nobody joins in on their editing.
         if server.client_count() == 1 {
             server.set_privilege(id, Privilege::Master);
+            server.set_master_mode(MasterMode::Locked);
         }
 
         server.send_chan1(
