@@ -129,10 +129,6 @@ impl Plugin for DeathrunEdit {
             ui::section("Map setup"),
             ui::tip("/newent playerstart 0 1", "good team spawn"),
             ui::tip("/newent playerstart 0 2", "terrorist spawn"),
-            ui::tip(
-                "/newent playerstart 0 0",
-                "spawn for both teams, only used by a team with no spawns of its own",
-            ),
             ui::tip("/newent flag", "finish: good players who touch it complete the map"),
         ]);
     }
