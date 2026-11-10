@@ -58,6 +58,8 @@ pub struct Server {
     /// Tracks each player's current map vote (id → map name). Cleared on map change.
     pub map_votes: RwLock<HashMap<u64, CubeString>>,
     pub commands: RwLock<Vec<command::CommandInfo>>,
+    /// Extra lines shown at the end of `#help`, below the command list.
+    pub help_lines: RwLock<Vec<CubeString>>,
 }
 
 impl Server {
@@ -86,6 +88,7 @@ impl Server {
                 desc: "list all server commands".to_string(),
                 usage: "".to_string(),
             }]),
+            help_lines: RwLock::new(Vec::new()),
         }
     }
 
@@ -95,6 +98,11 @@ impl Server {
             desc: desc.to_string(),
             usage: usage.to_string(),
         });
+    }
+
+    /// Appends lines to the end of the `#help` output.
+    pub fn add_help_lines(&self, lines: impl IntoIterator<Item = CubeString>) {
+        self.help_lines.write().unwrap().extend(lines);
     }
 
     // ── Server Query Responses ────────────────────────────────────────────────

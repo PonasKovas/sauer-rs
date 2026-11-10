@@ -122,6 +122,19 @@ impl Plugin for DeathrunEdit {
             "set trap timeout (default 20 000ms)",
             "<ms>",
         );
+
+        // Matches how play.rs reads the map: playerstart attr 2 is the team,
+        // and good players finish by touching any flag.
+        server.add_help_lines([
+            ui::section("Map setup"),
+            ui::tip("/newent playerstart 0 1", "good team spawn"),
+            ui::tip("/newent playerstart 0 2", "terrorist spawn"),
+            ui::tip(
+                "/newent playerstart 0 0",
+                "spawn for both teams, only used by a team with no spawns of its own",
+            ),
+            ui::tip("/newent flag", "finish: good players who touch it complete the map"),
+        ]);
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {

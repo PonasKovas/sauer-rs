@@ -649,6 +649,7 @@ impl<P: Plugin> Plugin for Base<P> {
                     }
                     lines.push(crate::ui::tip(&usage, &c.desc));
                 }
+                lines.extend(ctx.server().help_lines.read().unwrap().iter().cloned());
                 crate::ui::send_banner(ctx.server(), ctx.id(), &lines);
             } else if let Some(plugin) = self.plugin.upgrade() {
                 plugin.on_command(ctx, &args).await;
