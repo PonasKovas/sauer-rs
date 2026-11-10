@@ -140,13 +140,18 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     let (size, positions) = vault::pack_fresh(start, &items)
         .ok_or("the traps' geometry is too big to fit in the vault")?;
 
-    if fresh_octant {
+    // A max size map can't grow, so the vault goes in its far corner anyway and
+    // overwrites whatever is there. Nobody plays out in that corner.
+    let at_max = |state: &DeathrunState| state.map.as_ref().map_or(true, |m| m.size >= MAX_WORLD);
+    if fresh_octant && !at_max(state) {
         enlarge(state, sync)?;
     }
     let target = loop {
         let map = state.map.as_ref().ok_or("no map loaded")?;
         let target = Vault::at_far_corner(map.size, size);
-        if size <= map.size / 2 && vault::is_free(map, target.bounds(), old.map(|v| v.bounds())) {
+        if size <= map.size / 2
+            && (at_max(state) || vault::is_free(map, target.bounds(), old.map(|v| v.bounds())))
+        {
             break target;
         }
         enlarge(state, sync)?;
