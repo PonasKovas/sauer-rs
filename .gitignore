@@ -3,3 +3,4 @@ target
 lua-api/
 
 .gcroots/
+dist/
