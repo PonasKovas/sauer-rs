@@ -28,6 +28,9 @@ mod welcome;
 pub use builder::ServerBuilder;
 pub use items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime};
 pub use players::{ClipboardData, PlayerData, Players};
+
+/// Stands in for a client id in cn slots taken with `Server::reserve_cn`.
+const RESERVED_ID: u64 = u64::MAX;
 pub use plugin::{Context, Plugin, ServerQueryContext};
 
 pub struct Server {
@@ -166,9 +169,12 @@ impl Server {
             .map(|i| i as u8)
     }
 
+    /// The connected client using `cn`. `None` for a free or reserved cn: a
+    /// reserved one belongs to a fake player (like a plugin's bot) with no
+    /// player data, so packets aimed at it are ignored.
     pub fn get_id(&self, cn: u8) -> Option<u64> {
         let cns = self.cns.read().unwrap();
-        cns[cn as usize]
+        cns[cn as usize].filter(|&id| id != RESERVED_ID)
     }
 
     pub fn reserve_cn(&self, cn: u8) -> bool {
@@ -176,7 +182,7 @@ impl Server {
         if cns[cn as usize].is_some() {
             return false;
         }
-        cns[cn as usize] = Some(u64::MAX);
+        cns[cn as usize] = Some(RESERVED_ID);
         true
     }
 
