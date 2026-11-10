@@ -651,6 +651,12 @@ impl<P: Plugin> Plugin for Base<P> {
                 }
                 lines.extend(ctx.server().help_lines.read().unwrap().iter().cloned());
                 crate::ui::send_banner(ctx.server(), ctx.id(), &lines);
+            } else if !ctx.server().commands.read().unwrap().iter().any(|c| c.name == cmd) {
+                crate::ui::send_warn(
+                    ctx.server(),
+                    id,
+                    &format!("Unknown command {cmd}. Type #help to see all commands."),
+                );
             } else if let Some(plugin) = self.plugin.upgrade() {
                 plugin.on_command(ctx, &args).await;
             }

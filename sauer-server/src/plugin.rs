@@ -158,6 +158,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// Fired when a player sends a `#`-prefixed command.
     /// `args[0]` is the command name; remaining elements are the arguments.
     /// Quoted arguments have their outer `"` stripped.
+    /// Only fires for commands added with `Server::register_command`; unknown ones get an error reply.
     fn on_command(
         &self,
         ctx: &mut Context,

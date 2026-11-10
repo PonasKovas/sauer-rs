@@ -259,7 +259,7 @@ fn callbacks() -> Vec<Entry> {
         CallbackDef { name: "map_changed",        sig: "map_changed(id: number, map_name: string, mode: number, event: Event)", doc: "Called when a client requests a map change.",                          cancellable: true  },
         CallbackDef { name: "on_spawn",           sig: "on_spawn(id: number, state: SpawnState, event: Event)", doc: "Called when a player spawns. Modify `state` fields to override spawn attributes.",    cancellable: true  },
         CallbackDef { name: "on_chat",            sig: "on_chat(id: number, text: string, event: Event)",  doc: "Called for each chat message. Cancel to suppress it.",                                       cancellable: true  },
-        CallbackDef { name: "on_command",         sig: "on_command(id: number, args: table, event: Event)", doc: "Called when a client sends a server command. `args[1]` is the command name.",              cancellable: true  },
+        CallbackDef { name: "on_command",         sig: "on_command(id: number, args: table, event: Event)", doc: "Called when a client sends a registered server command (see `register_command`). `args[1]` is the command name.", cancellable: true  },
         CallbackDef { name: "map",                sig: "map(id: number, data: string, event: Event)",      doc: "Called when a client uploads map data (binary string).",                                     cancellable: true  },
         CallbackDef { name: "server_query",       sig: "server_query(addr: string, request: table, event: Event)", doc: "Called for each ExtInfo/server-browser UDP query. `request.type` identifies the query kind.", cancellable: true },
         // Channel 0
