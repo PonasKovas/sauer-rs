@@ -91,6 +91,13 @@ impl UserData for LuaServer {
         /// Return the client number (cn) assigned to a peer ID, or nil if not connected.
         methods.add_method("get_cn", |_lua, this, id: u64| Ok(this.inner.get_cn(id)));
 
+        /// The session id the client was given in its first ServInfo. Any
+        /// ServInfo sent later must repeat it: the client stores it again and
+        /// uses it to hash passwords (`/setmaster PASSWORD`).
+        methods.add_method("get_session_id", |_lua, this, id: u64| {
+            Ok(this.inner.players.try_get(id).map(|p| p.session_id))
+        });
+
         /// Register a server command visible in `/help`. `usage` is optional.
         methods.add_method(
             "register_command",

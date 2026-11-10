@@ -4,7 +4,8 @@
 -- with a bouncing, randomly-coloured "sauer-rs" banner in the server
 -- description.  Duplicate N_CONNECT packets (the client re-sends Connect on
 -- every ServInfo it receives) are blocked so BasePlugin never sees them a
--- second time.
+-- second time. Each ServInfo must repeat the client's session id: the client
+-- stores it again and hashes passwords with it, so 0 would break /setmaster.
 
 local tasks = {}  -- [id] = TaskHandle
 
@@ -53,7 +54,7 @@ function connect(id, packet, event)
         server:send_serv_info(id, {
             client_num   = cn,
             protocol     = PROTOCOL_VERSION,
-            session_id   = 0,
+            session_id   = server:get_session_id(id) or 0,
             has_password = false,
             server_desc  = desc,
             server_auth  = "",

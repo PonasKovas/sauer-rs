@@ -366,6 +366,7 @@ fn hand_written_sig(name: &str) -> String {
         "disconnect"       => "server:disconnect(id: number)".into(),
         "peer_address"     => "server:peer_address(id: number): string".into(),
         "get_cn"           => "server:get_cn(id: number): number|nil".into(),
+        "get_session_id"   => "server:get_session_id(id: number): number|nil".into(),
         "register_command" => "server:register_command(name: string, desc: string, usage?: string)".into(),
         "send_server_query"=> "server:send_server_query(addr: string, response: table)".into(),
         "set_interval"     => "server:set_interval(interval_ms: number, func: function): TaskHandle".into(),
