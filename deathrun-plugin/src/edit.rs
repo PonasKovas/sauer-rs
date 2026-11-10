@@ -55,6 +55,7 @@ pub struct DeathrunEdit {
     pending_welcome: DashMap<u64, WelcomeStep>,
     /// The trap button each player currently sees through.
     seethrough: DashMap<u64, crate::trap::placement::ButtonKey>,
+    notes: crate::ServerNotes,
 }
 
 impl DeathrunEdit {
@@ -65,7 +66,14 @@ impl DeathrunEdit {
             trap_highlights: DashMap::new(),
             pending_welcome: DashMap::new(),
             seethrough: DashMap::new(),
+            notes: Default::default(),
         }
+    }
+
+    /// Lines shown in every welcome wall and at the end of `#help` (see `ServerNotes`).
+    pub fn with_notes(mut self, notes: Vec<String>) -> Self {
+        self.notes = crate::ServerNotes::from_strings(notes);
+        self
     }
 }
 
@@ -97,6 +105,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn init(&self, server: &mut Server) {
+        self.notes.install(server);
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::CoopEdit;
         server.reserve_cn(crate::SERVER_BOT_CN);
@@ -133,7 +142,10 @@ impl Plugin for DeathrunEdit {
             ui::section("Map setup"),
             ui::tip("/newent playerstart 0 1", "good team spawn"),
             ui::tip("/newent playerstart 0 2", "terrorist spawn"),
-            ui::tip("/newent flag", "finish: good players who touch it complete the map"),
+            ui::tip(
+                "/newent flag",
+                "finish: good players who touch it complete the map",
+            ),
         ]);
     }
 
@@ -702,8 +714,10 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server();
         // A locked server keeps non-masters spectating, like vanilla.
-        let locked = matches!(server.master_mode(), MasterMode::Locked | MasterMode::Private)
-            && server.get_privilege(id) < Privilege::Master;
+        let locked = matches!(
+            server.master_mode(),
+            MasterMode::Locked | MasterMode::Private
+        ) && server.get_privilege(id) < Privilege::Master;
         if !is_waiting_for_map(server) && !locked {
             let is_spectator = server
                 .players

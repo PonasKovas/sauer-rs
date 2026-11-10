@@ -113,51 +113,66 @@ pub fn broadcast_map_changed(server: &Server, player_name: &str, map_name: &str)
 
 // ─── Welcome messages ─────────────────────────────────────────────────────────
 
+/// The host's notes (see `ServerNotes`) as wall lines, indented like the rest.
+pub fn note_lines(notes: &[CubeString]) -> impl Iterator<Item = CubeString> + '_ {
+    notes.iter().map(|n| {
+        let mut line = b().color(THEME.body).push_str("  ").build();
+        line.extend(n.as_bytes().iter().copied());
+        line
+    })
+}
+
+fn server_notes(server: &Server) -> Vec<CubeString> {
+    server
+        .extra
+        .get::<crate::ServerNotes>()
+        .map(|n| note_lines(&n.0).collect())
+        .unwrap_or_default()
+}
+
 pub fn send_welcome_edit(server: &Server, id: u64) {
-    send_banner(
-        server,
-        id,
-        &[
-            // Newest lines end up at the bottom of the console, so the most
-            // important info goes last.
-            section("Saving"),
-            tip(
-                "/savemap",
-                "like a normal map. It must be edited on deathrun server for the traps to work.",
-            ),
-            body(""),
-            b().color(THEME.evil)
-                .push_str("  WARNING: DO NOT /savemap while ANY trap is active!")
-                .build(),
-            b().color(THEME.dim)
-                .push_str("  Wait for all triggered traps to finish and revert first,")
-                .build(),
-            b().color(THEME.dim)
-                .push_str("  otherwise the map will be permanently broken.")
-                .build(),
-            section("Trap commands  (aim at a wall first)"),
-            tip("#help", "list all server commands"),
-            tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
-            tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
-            tip("#trapinfo", "print info about the trap (size, overhead)"),
-            tip("#endtrap", "finish editing the trap"),
-            tip("#edittrap", "enter edit mode for a trap without resetting"),
-            tip(
-                "#settrap",
-                "reset and enter edit mode for a trap (just make edits now)",
-            ),
-            tip("#deltrap", "remove the trap at the aimed surface"),
-            tip("#newtrap", "create a trap at the aimed surface"),
-            section("Getting started"),
-            body("  Just start editing, or"),
-            tip(
-                "/map",
-                "select local map to start editing (/sendmap afterwards to start editing)",
-            ),
-            body("  Build and test Deathrun maps here."),
-            header("DEATHRUN EDIT SERVER"),
-        ],
-    );
+    let mut lines = vec![
+        // Newest lines end up at the bottom of the console, so the most
+        // important info goes last.
+        section("Saving"),
+        tip(
+            "/savemap",
+            "like a normal map. It must be edited on deathrun server for the traps to work.",
+        ),
+        body(""),
+        b().color(THEME.evil)
+            .push_str("  WARNING: DO NOT /savemap while ANY trap is active!")
+            .build(),
+        b().color(THEME.dim)
+            .push_str("  Wait for all triggered traps to finish and revert first,")
+            .build(),
+        b().color(THEME.dim)
+            .push_str("  otherwise the map will be permanently broken.")
+            .build(),
+        section("Trap commands  (aim at a wall first)"),
+        tip("#help", "list all server commands"),
+        tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
+        tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
+        tip("#trapinfo", "print info about the trap (size, overhead)"),
+        tip("#endtrap", "finish editing the trap"),
+        tip("#edittrap", "enter edit mode for a trap without resetting"),
+        tip(
+            "#settrap",
+            "reset and enter edit mode for a trap (just make edits now)",
+        ),
+        tip("#deltrap", "remove the trap at the aimed surface"),
+        tip("#newtrap", "create a trap at the aimed surface"),
+        section("Getting started"),
+        body("  Just start editing, or"),
+        tip(
+            "/map",
+            "select local map to start editing (/sendmap afterwards to start editing)",
+        ),
+    ];
+    lines.extend(server_notes(server));
+    lines.push(body("  Build and test Deathrun maps here."));
+    lines.push(header("DEATHRUN EDIT SERVER"));
+    send_banner(server, id, &lines);
 }
 
 pub fn send_welcome_play(server: &Server, id: u64, map_name: Option<&str>, is_solo: bool) {
@@ -194,6 +209,7 @@ pub fn send_welcome_play(server: &Server, id: u64, map_name: Option<&str>, is_so
             .push_str(": controls traps, tries to stop the good team.")
             .build(),
     );
+    lines.extend(server_notes(server));
     lines.push(header("DEATHRUN"));
 
     send_banner(server, id, &lines);

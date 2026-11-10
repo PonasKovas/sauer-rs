@@ -44,7 +44,18 @@ struct Config {
     #[serde(default)]
     pub deathrun_play: PlayConfig,
     #[serde(default)]
+    pub deathrun: DeathrunConfig,
+    #[serde(default)]
     pub telegram: TelegramConfig,
+}
+
+/// Settings for both modes.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct DeathrunConfig {
+    /// Shown in every welcome wall and at the end of #help, e.g. where to send
+    /// new maps. Sauer color codes work ("\f2green").
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,7 +305,7 @@ async fn main() {
                 .bind_addr(config.bind_addr)
                 .max_peers(config.max_peers)
                 .plugin(config.base)
-                .plugin(DeathrunEdit::new())
+                .plugin(DeathrunEdit::new().with_notes(config.deathrun.notes.clone()))
                 .plugin(telegram_plugin)
                 .plugin(lua_plugin);
 
@@ -303,7 +314,8 @@ async fn main() {
             }
         }
         ServerMode::Play => {
-            let play = DeathrunPlay::new(config.deathrun_play.clone());
+            let play = DeathrunPlay::new(config.deathrun_play.clone())
+                .with_notes(config.deathrun.notes.clone());
 
             if let Some(ref map_dir) = config.map_dir {
                 let known = load_initial_maps(map_dir, &play).await;

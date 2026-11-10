@@ -10,6 +10,13 @@ admin_pass = ""
 master_mode = "Locked"
 updatemaster = false
 
+[deathrun]
+# Lines added to every welcome wall and to the end of #help, for things like
+# where to send new maps. Sauer color codes work: "\f0" to "\f8".
+notes = [
+    # "\f7Made a map? Send it to \f1github.com/you/maps",
+]
+
 [deathrun_play]
 afk_timeout_secs = 10
 

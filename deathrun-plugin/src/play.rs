@@ -185,6 +185,7 @@ pub struct DeathrunPlay {
     trap_highlights: dashmap::DashMap<u64, crate::edit::TrapHighlightState>,
     /// The trap button the terrorist currently sees through.
     seethrough: dashmap::DashMap<u64, crate::trap::placement::ButtonKey>,
+    notes: crate::ServerNotes,
 }
 
 impl DeathrunPlay {
@@ -194,7 +195,14 @@ impl DeathrunPlay {
             config,
             trap_highlights: dashmap::DashMap::new(),
             seethrough: dashmap::DashMap::new(),
+            notes: Default::default(),
         }
+    }
+
+    /// Lines shown in every welcome wall and at the end of `#help` (see `ServerNotes`).
+    pub fn with_notes(mut self, notes: Vec<String>) -> Self {
+        self.notes = crate::ServerNotes::from_strings(notes);
+        self
     }
 
     pub fn maps_handle(&self) -> Arc<RwLock<PlayMaps>> {
@@ -696,6 +704,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
 
 impl Plugin for DeathrunPlay {
     async fn init(&self, server: &mut Server) {
+        self.notes.install(server);
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::TeamPlay;
         *server.master_mode.write().unwrap() = MasterMode::Veto;
