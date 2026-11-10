@@ -939,11 +939,11 @@ impl<P: Plugin> Plugin for Base<P> {
         });
 
         server.ban_ip(ip);
-        // Everyone else on that IP goes too, unless they outrank the kicker.
+        // Everyone else on that IP goes too, except the kicker and anyone above them.
         for other in server.client_ids() {
             let same_ip = server.peer_addr(other).is_some_and(|a| a.ip() == ip);
             let p = server.get_privilege(other);
-            if same_ip && p <= own && p < Privilege::Admin {
+            if other != id && same_ip && p <= own && p < Privilege::Admin {
                 server.disconnect_with(other, crate::bans::DISC_KICK);
             }
         }
