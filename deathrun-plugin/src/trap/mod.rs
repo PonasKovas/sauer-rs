@@ -22,6 +22,9 @@ pub const BUTTON_SIDE_TEX: u16 = 351;
 pub const BUTTON_SIDE_SCALE: f32 = 0.125;
 pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
 pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
+/// Button alpha while someone aims at it. Only takes effect on clients the
+/// button was made see-through for (see `placement::update_seethrough_button`).
+pub const BUTTON_SEETHROUGH_ALPHA: f32 = 0.3;
 
 /// Limit for one trap's compressed geometry (what gets sent when it fires).
 pub const TRAP_BUDGET: usize = 1024 * 1024;

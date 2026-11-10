@@ -135,7 +135,10 @@ pub fn get_outer_faces_vslot_packets(
 
     let mut data_sides = VSlotDelta::default();
     data_sides.color = Some((color[0], color[1], color[2]));
-    data_sides.alpha = Some((0.8, 0.8));
+    // Ignored by the engine unless the cube has alpha material, which buttons
+    // only get on the client of whoever is aiming at them.
+    let a = crate::trap::BUTTON_SEETHROUGH_ALPHA;
+    data_sides.alpha = Some((a, a));
 
     let mut data_front = data_sides.clone();
     data_front.scale = Some(2.0);
@@ -194,16 +197,75 @@ pub fn build_button_geometry(map: &mut sauer_map::Map, adj: [i32; 3], size: i32,
     map.fill(&sel, true);
     map.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
     map.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
-    map.set_material(
-        &sel,
-        ogz_rs::data::Material {
-            alpha: true,
-            ..Default::default()
-        },
-    );
+    // Solid for everyone. This also undoes the alpha material in maps saved by
+    // someone who was looking through a button at the time.
+    map.set_material(&sel, Default::default());
 
     for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
         map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
+    }
+}
+
+// ─── See-through buttons ──────────────────────────────────────────────────────
+
+/// A button's `(pos, size, orient)`.
+pub type ButtonKey = ([i32; 3], i32, u8);
+
+pub fn button_key(trap: &crate::map_state::Trap) -> ButtonKey {
+    (trap.button_pos, trap.button_size, trap.button_orient)
+}
+
+/// Makes `target` see-through for player `id` only, by giving its cubes alpha
+/// material on their client, and turns the previous one back to solid.
+/// `shown` remembers which button each player currently sees through.
+pub fn update_seethrough_button(
+    server: &sauer_server::Server,
+    id: u64,
+    shown: &dashmap::DashMap<u64, ButtonKey>,
+    target: Option<ButtonKey>,
+) {
+    let prev = shown.get(&id).map(|k| *k);
+    if prev == target {
+        return;
+    }
+
+    let send = |key: ButtonKey, alpha: bool| {
+        let (pos, size, orient) = key;
+        let mat = ogz_rs::data::Material {
+            alpha,
+            ..Default::default()
+        };
+        server.send_chan1(
+            id,
+            &sauer_proto::Client {
+                client_num: crate::SERVER_BOT_CN as i32,
+                packet: sauer_proto::channel1::EditMat {
+                    sel: get_outer_face_selections(pos, size, orient)[0].clone(),
+                    mat: mat.to_bits() as i32,
+                    filter: -1,
+                },
+            },
+        );
+    };
+
+    if let Some(old) = prev {
+        // Skip it if the map changed since: the client got a fresh map with a
+        // solid button, and the spot may now hold something else.
+        let still_there = crate::map_state::get_server_state(server)
+            .read()
+            .unwrap()
+            .traps
+            .iter()
+            .any(|t| button_key(t) == old);
+        if still_there {
+            send(old, false);
+        }
+    }
+    if let Some(new) = target {
+        send(new, true);
+        shown.insert(id, new);
+    } else {
+        shown.remove(&id);
     }
 }
 

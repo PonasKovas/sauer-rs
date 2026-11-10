@@ -183,6 +183,8 @@ pub struct DeathrunPlay {
     maps: Arc<RwLock<PlayMaps>>,
     config: PlayConfig,
     trap_highlights: dashmap::DashMap<u64, crate::edit::TrapHighlightState>,
+    /// The trap button the terrorist currently sees through.
+    seethrough: dashmap::DashMap<u64, crate::trap::placement::ButtonKey>,
 }
 
 impl DeathrunPlay {
@@ -191,6 +193,7 @@ impl DeathrunPlay {
             maps: Arc::new(RwLock::new(PlayMaps::default())),
             config,
             trap_highlights: dashmap::DashMap::new(),
+            seethrough: dashmap::DashMap::new(),
         }
     }
 
@@ -789,6 +792,7 @@ impl Plugin for DeathrunPlay {
         if is_evil && is_playing {
             // --- READ PHASE: Raycast & AABB Calc ---
             let target_trap;
+            let seethrough_target;
             let mut edges_to_draw = None;
 
             {
@@ -829,6 +833,8 @@ impl Plugin for DeathrunPlay {
                         hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
                     })
                 });
+                seethrough_target =
+                    target_trap.map(|idx| crate::trap::placement::button_key(&state.traps[idx]));
 
                 if let Some(idx) = target_trap {
                     let trap = &state.traps[idx];
@@ -914,6 +920,13 @@ impl Plugin for DeathrunPlay {
                     }
                 }
             } // Drop read lock
+
+            crate::trap::placement::update_seethrough_button(
+                server,
+                id,
+                &self.seethrough,
+                seethrough_target,
+            );
 
             // --- WRITE PHASE: DashMap & Virtual Entities ---
             let mut clear_highlight = false;
@@ -1050,6 +1063,8 @@ impl Plugin for DeathrunPlay {
                 entry.active = hl_state_clone.active;
             }
         } else {
+            crate::trap::placement::update_seethrough_button(server, id, &self.seethrough, None);
+
             let mut clear_highlight = false;
             if let Some(mut hl) = self.trap_highlights.get_mut(&id) {
                 if hl.active {
@@ -1256,6 +1271,7 @@ impl Plugin for DeathrunPlay {
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.write().unwrap().remove_player_afk(id);
         self.trap_highlights.remove(&id);
+        self.seethrough.remove(&id);
 
         let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
         if let Some(map) = state_w.map.as_mut() {

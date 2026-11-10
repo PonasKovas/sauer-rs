@@ -53,6 +53,8 @@ pub struct DeathrunEdit {
     last_particle_update: DashMap<u64, tokio::time::Instant>,
     trap_highlights: DashMap<u64, TrapHighlightState>,
     pending_welcome: DashMap<u64, WelcomeStep>,
+    /// The trap button each player currently sees through.
+    seethrough: DashMap<u64, crate::trap::placement::ButtonKey>,
 }
 
 impl DeathrunEdit {
@@ -62,6 +64,7 @@ impl DeathrunEdit {
             last_particle_update: DashMap::new(),
             trap_highlights: DashMap::new(),
             pending_welcome: DashMap::new(),
+            seethrough: DashMap::new(),
         }
     }
 }
@@ -73,6 +76,7 @@ impl Plugin for DeathrunEdit {
         self.last_particle_update.remove(&id);
         self.trap_highlights.remove(&id);
         self.pending_welcome.remove(&id);
+        self.seethrough.remove(&id);
 
         let mut state_w = get_server_state(ctx.server()).write().unwrap();
         if let Some(map) = state_w.map.as_mut() {
@@ -148,6 +152,7 @@ impl Plugin for DeathrunEdit {
         let mut edges_to_draw = None;
         let mut entity_frames = Vec::new();
         let is_trap_edit_active;
+        let seethrough_target;
 
         let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
 
@@ -190,6 +195,8 @@ impl Plugin for DeathrunEdit {
             let edited_trap = state.trap_edit.as_ref().map(|e| e.trap_idx);
             target_trap = edited_trap.or(hit_trap);
             is_trap_edit_active = state.trap_edit.is_some();
+            seethrough_target =
+                hit_trap.map(|idx| crate::trap::placement::button_key(&state.traps[idx]));
 
             if let Some(idx) = target_trap {
                 let eye = Some((origin, forward));
@@ -215,6 +222,13 @@ impl Plugin for DeathrunEdit {
                 }
             }
         } // Read Lock 1 Dropped
+
+        crate::trap::placement::update_seethrough_button(
+            server,
+            id,
+            &self.seethrough,
+            seethrough_target,
+        );
 
         // --- WRITE PHASE 1: Update DashMap and Highlight Virt Ents ---
         let mut clear_highlight = false;
