@@ -127,6 +127,16 @@ pub(crate) async fn handle_client<P: Plugin>(
 
 // ── Packet buffering / receive loop ──────────────────────────────────────────
 
+fn log_bad_packet(channel: u8, data: &[u8], err: &impl std::fmt::Display) {
+    const SHOWN: usize = 256;
+    let hex: String = data.iter().take(SHOWN).map(|b| format!("{b:02x}")).collect();
+    let more = if data.len() > SHOWN { "..." } else { "" };
+    tracing::warn!(
+        "dropped rest of a packet on channel {channel} ({} bytes): {err}; data: {hex}{more}",
+        data.len()
+    );
+}
+
 struct SauerReceiver {
     rx: ConnectionReceiver,
     session: Session,
@@ -164,23 +174,38 @@ impl SauerReceiver {
                 None => bail!("connection closed"),
             };
 
+            // A message that fails to parse (odd values, modded clients) drops
+            // the rest of its packet instead of the player: the engine reads
+            // plain ints and never kicks for their values.
             match channel {
                 sauer_proto::CHANNEL_POSITIONS => {
                     let mut reader = Reader::<C2S<Chan0>>::new(&data, &mut self.session);
                     while let Some(msg) = reader.next() {
-                        self.buffer.push_back(Packet::Chan0(msg?));
+                        match msg {
+                            Ok(msg) => self.buffer.push_back(Packet::Chan0(msg)),
+                            Err(e) => {
+                                log_bad_packet(channel, &data, &e);
+                                break;
+                            }
+                        }
                     }
                 }
                 sauer_proto::CHANNEL_MESSAGES => {
                     let mut reader = Reader::<C2S<Chan1>>::new(&data, &mut self.session);
                     while let Some(msg) = reader.next() {
-                        self.buffer.push_back(Packet::Chan1(msg?));
+                        match msg {
+                            Ok(msg) => self.buffer.push_back(Packet::Chan1(msg)),
+                            Err(e) => {
+                                log_bad_packet(channel, &data, &e);
+                                break;
+                            }
+                        }
                     }
                 }
                 sauer_proto::CHANNEL_MAPS => {
                     self.buffer.push_back(Packet::Chan2(data));
                 }
-                _ => panic!("unexpected ENet channel"),
+                _ => tracing::warn!("ignored packet on unexpected channel {channel}"),
             }
         }
     }
