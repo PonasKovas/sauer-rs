@@ -39,10 +39,20 @@ pub struct TrapHighlightState {
     pub active: bool,
 }
 
+/// Where a joining player is in the map load sequence. The info wall is held
+/// back until the map is loaded so the client's own map output doesn't bury it.
+enum WelcomeStep {
+    /// Waiting for the client to load the map from N_MAPCHANGE.
+    InitialLoad,
+    /// The map was sent with N_SENDMAP, waiting for the client to load it.
+    SentMap,
+}
+
 pub struct DeathrunEdit {
     player_dirs: DashMap<u64, Direction>,
     last_particle_update: DashMap<u64, tokio::time::Instant>,
     trap_highlights: DashMap<u64, TrapHighlightState>,
+    pending_welcome: DashMap<u64, WelcomeStep>,
 }
 
 impl DeathrunEdit {
@@ -51,6 +61,7 @@ impl DeathrunEdit {
             player_dirs: DashMap::new(),
             last_particle_update: DashMap::new(),
             trap_highlights: DashMap::new(),
+            pending_welcome: DashMap::new(),
         }
     }
 }
@@ -61,6 +72,7 @@ impl Plugin for DeathrunEdit {
         self.player_dirs.remove(&id);
         self.last_particle_update.remove(&id);
         self.trap_highlights.remove(&id);
+        self.pending_welcome.remove(&id);
 
         let mut state_w = get_server_state(ctx.server()).write().unwrap();
         if let Some(map) = state_w.map.as_mut() {
@@ -680,6 +692,17 @@ impl Plugin for DeathrunEdit {
                 );
             }
         }
+
+        if let Some((_, step)) = self.pending_welcome.remove(&id) {
+            let has_map = get_server_state(server).read().unwrap().map.is_some();
+            if matches!(step, WelcomeStep::InitialLoad) && has_map {
+                crate::map_state::send_map_to_async(server, id);
+                info!("sent map state to id {id} after welcome");
+                self.pending_welcome.insert(id, WelcomeStep::SentMap);
+            } else {
+                ui::send_welcome_edit(server, id);
+            }
+        }
     }
 
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
@@ -890,9 +913,8 @@ impl Plugin for DeathrunEdit {
             server.set_spectator(id, true);
         }
 
-        crate::map_state::send_map_to_async(ctx.server(), id);
-        info!("sent map state to id {id} after welcome");
-        ui::send_welcome_edit(server, id);
+        // The map and the info wall go out from map_crc once the client has loaded.
+        self.pending_welcome.insert(id, WelcomeStep::InitialLoad);
     }
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {

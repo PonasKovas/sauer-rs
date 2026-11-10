@@ -118,27 +118,23 @@ pub fn send_welcome_edit(server: &Server, id: u64) {
         server,
         id,
         &[
+            // Newest lines end up at the bottom of the console, so the most
+            // important info goes last and the reference stuff goes first.
             header("DEATHRUN EDIT SERVER"),
             body("  Build and test Deathrun maps here."),
-            section("Getting started"),
-            body("  Just start editing, or"),
-            tip(
-                "/map",
-                "select local map to start editing (/sendmap afterwards to start editing)",
-            ),
             section("Trap commands  (aim at a wall first)"),
-            tip("#newtrap", "create a trap at the aimed surface"),
-            tip("#deltrap", "remove the trap at the aimed surface"),
+            tip("#help", "list all server commands"),
+            tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
+            tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
+            tip("#trapinfo", "print info about the trap (size, overhead)"),
+            tip("#edittrap", "enter edit mode for a trap without resetting"),
             tip(
                 "#settrap",
                 "reset and enter edit mode for a trap (just make edits now)",
             ),
-            tip("#edittrap", "enter edit mode for a trap without resetting"),
             tip("#endtrap", "finish editing the trap"),
-            tip("#trapinfo", "print info about the trap (size, overhead)"),
-            tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
-            tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
-            tip("#help", "list all server commands"),
+            tip("#deltrap", "remove the trap at the aimed surface"),
+            tip("#newtrap", "create a trap at the aimed surface"),
             section("Saving"),
             tip(
                 "/savemap",
@@ -154,24 +150,19 @@ pub fn send_welcome_edit(server: &Server, id: u64) {
             b().color(THEME.dim)
                 .push_str("  otherwise the map will be permanently broken.")
                 .build(),
+            section("Getting started"),
+            body("  Just start editing, or"),
+            tip(
+                "/map",
+                "select local map to start editing (/sendmap afterwards to start editing)",
+            ),
         ],
     );
 }
 
 pub fn send_welcome_play(server: &Server, id: u64, map_name: Option<&str>, is_solo: bool) {
-    let mut lines = vec![
-        header("DEATHRUN"),
-        b().color(THEME.evil)
-            .push_str("  Terrorist")
-            .color(THEME.body)
-            .push_str(": controls traps, tries to stop the good team.")
-            .build(),
-        b().color(THEME.good)
-            .push_str("  Good")
-            .color(THEME.body)
-            .push_str(": complete the map alive or kill the terrorist!")
-            .build(),
-    ];
+    // Most important info last, it stays visible the longest in the console.
+    let mut lines = vec![header("DEATHRUN")];
 
     if let Some(name) = map_name {
         lines.push(
@@ -182,6 +173,21 @@ pub fn send_welcome_play(server: &Server, id: u64, map_name: Option<&str>, is_so
                 .build(),
         );
     }
+
+    lines.push(
+        b().color(THEME.evil)
+            .push_str("  Terrorist")
+            .color(THEME.body)
+            .push_str(": controls traps, tries to stop the good team.")
+            .build(),
+    );
+    lines.push(
+        b().color(THEME.good)
+            .push_str("  Good")
+            .color(THEME.body)
+            .push_str(": complete the map alive or kill the terrorist!")
+            .build(),
+    );
 
     if is_solo {
         lines.push(
