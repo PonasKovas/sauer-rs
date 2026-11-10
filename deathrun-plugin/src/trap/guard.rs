@@ -268,6 +268,16 @@ pub fn entity_frames(changes: &[EntChange], eye: Option<Eye>) -> Vec<FakeEnt> {
             marks.push((a.pos, NEW_COLOR));
         }
     }
+    // With more than MAX_MARKED, frame the ones closest to the view line
+    // (infinite in both directions, through walls).
+    if let Some((origin, forward)) = eye {
+        let line_dist_sq = |p: &[f32; 3]| {
+            let v: [f32; 3] = std::array::from_fn(|i| p[i] - origin[i]);
+            let t = v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2];
+            (0..3).map(|i| (v[i] - t * forward[i]).powi(2)).sum::<f32>()
+        };
+        marks.sort_by(|a, b| line_dist_sq(&a.0).total_cmp(&line_dist_sq(&b.0)));
+    }
     marks
         .into_iter()
         .take(MAX_MARKED)
