@@ -60,6 +60,11 @@ impl Peer {
         let _ = self.raw.try_disconnect(0);
     }
 
+    /// Disconnects with an engine `DISC_*` reason the client shows.
+    pub fn try_disconnect_with(&self, reason: u32) {
+        let _ = self.raw.try_disconnect(reason);
+    }
+
     pub fn addr(&self) -> SocketAddr {
         self.raw.remote_addr().into()
     }

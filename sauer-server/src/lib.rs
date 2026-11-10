@@ -10,6 +10,7 @@ use sauer_proto::{
 use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
 use std::{fmt::Debug, sync::Arc};
 
+mod bans;
 mod base;
 mod builder;
 pub mod command;
@@ -60,6 +61,13 @@ pub struct Server {
     pub commands: RwLock<Vec<command::CommandInfo>>,
     /// Extra lines shown at the end of `#help`, below the command list.
     pub help_lines: RwLock<Vec<CubeString>>,
+    /// Password for claiming admin with `/setmaster PASSWORD`. Empty disables it.
+    pub admin_pass: RwLock<String>,
+    /// IPs kicked with `/kick`, and when each ban runs out.
+    pub bans: RwLock<Vec<(std::net::IpAddr, std::time::Instant)>>,
+    /// Whether the master mode goes back to open once nobody holds master
+    /// (engine behavior). Off for servers whose plugin sets the mode itself.
+    pub reopen_when_masterless: RwLock<bool>,
 }
 
 impl Server {
@@ -89,6 +97,9 @@ impl Server {
                 usage: "".to_string(),
             }]),
             help_lines: RwLock::new(Vec::new()),
+            admin_pass: RwLock::new(String::new()),
+            bans: RwLock::new(Vec::new()),
+            reopen_when_masterless: RwLock::new(true),
         }
     }
 

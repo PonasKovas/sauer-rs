@@ -6,6 +6,7 @@ map_dir = "maps/"
 [base]
 server_desc = "sauer-rs"
 server_auth = ""
+admin_pass = ""
 master_mode = "Locked"
 updatemaster = false
 

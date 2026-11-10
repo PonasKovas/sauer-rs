@@ -75,6 +75,9 @@ struct BaseConfig {
     pub server_auth: String,
     #[serde(default)]
     pub has_password: bool,
+    /// Password for claiming admin with `/setmaster PASSWORD`. Empty disables admin.
+    #[serde(default)]
+    pub admin_pass: String,
     #[serde(default = "default_master_mode")]
     pub master_mode: MasterMode,
     #[serde(default = "default_updatemaster")]
@@ -99,6 +102,7 @@ impl Default for BaseConfig {
             server_desc: default_server_desc(),
             server_auth: String::new(),
             has_password: false,
+            admin_pass: String::new(),
             master_mode: MasterMode::Open,
             updatemaster: default_updatemaster(),
         }
@@ -110,6 +114,7 @@ impl Plugin for BaseConfig {
         *server.server_desc.write().unwrap() = self.server_desc.as_str().lossy_cubestring();
         *server.server_auth.write().unwrap() = self.server_auth.as_str().lossy_cubestring();
         *server.has_password.write().unwrap() = self.has_password;
+        *server.admin_pass.write().unwrap() = self.admin_pass.clone();
         *server.master_mode.write().unwrap() = self.master_mode;
         *server.update_master.write().unwrap() = self.updatemaster;
     }

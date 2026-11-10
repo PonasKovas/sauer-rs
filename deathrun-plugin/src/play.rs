@@ -4,7 +4,7 @@ use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
 
 use rand::seq::SliceRandom;
-use sauer_proto::data::PlayerState;
+use sauer_proto::data::{PlayerState, Privilege};
 use sauer_proto::{
     Client, channel0, channel1,
     data::{ClientState, EntityType, GameMode, MasterMode, SetTeamReason},
@@ -699,6 +699,8 @@ impl Plugin for DeathrunPlay {
         *server.map_name.write().unwrap() = "".lossy_cubestring();
         *server.game_mode.write().unwrap() = GameMode::TeamPlay;
         *server.master_mode.write().unwrap() = MasterMode::Veto;
+        // Rounds set the master mode, so it must not snap back to open.
+        *server.reopen_when_masterless.write().unwrap() = false;
         server.reserve_cn(crate::SERVER_BOT_CN);
 
         let (_, state) = self.maps.read().unwrap().make_active_state();
@@ -1414,11 +1416,21 @@ impl Plugin for DeathrunPlay {
         }
     }
 
-    async fn set_master(&self, ctx: &mut Context, _packet: &channel1::SetMaster) {
-        // Rounds set the master mode themselves, and a master giving it up
-        // would reopen the server mid-round.
+    async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) {
+        // Only admin (with the password) here: rounds set the master mode, and
+        // players handing master around would fight them. Giving up admin and
+        // the admin managing others go through to the base handler.
+        let server = ctx.server();
+        let id = ctx.id();
+        let is_admin = server.get_privilege(id) >= Privilege::Admin;
+        let claims_admin = server.get_id(packet.client_num as u8) == Some(id)
+            && packet.val
+            && server.check_admin_pass(id, packet.hash.as_bytes());
+        if is_admin || claims_admin {
+            return;
+        }
+        ui::send_warn(server, id, "Master is disabled on this server.");
         ctx.cancel();
-        ui::send_warn(ctx.server(), ctx.id(), "Master is disabled on this server.");
     }
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {

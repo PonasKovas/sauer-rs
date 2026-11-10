@@ -55,15 +55,31 @@ where
     }
 }
 
-/// Like the engine's `setmaster`: once nobody holds master, the mode goes back to open.
+/// Like the engine's `setmaster`: once nobody holds master, the mode goes back
+/// to open. Unlike the engine, bans go too: nobody left can lift them.
 fn reopen_if_masterless(server: &Server) {
     let has_master = server
         .players
         .map
         .iter()
         .any(|p| p.privilege >= Privilege::Master);
-    if !has_master && server.master_mode() != MasterMode::Open {
-        server.set_master_mode(MasterMode::Open);
+    if !has_master {
+        server.clear_bans();
+        let reopen = *server.reopen_when_masterless.read().unwrap();
+        if reopen && server.master_mode() != MasterMode::Open {
+            server.set_master_mode(MasterMode::Open);
+        }
+    }
+}
+
+/// Engine `MAXTEAMLEN`.
+const MAX_TEAM_LEN: usize = 4;
+
+fn priv_name(p: Privilege) -> &'static str {
+    match p {
+        Privilege::Admin => "admin",
+        Privilege::Auth => "auth",
+        _ => "master",
     }
 }
 
@@ -418,6 +434,11 @@ impl<P: Plugin> Plugin for Base<P> {
             server.broadcast_current_master();
             reopen_if_masterless(server);
         }
+        // Engine `noclients`: bans clear once the server is empty. This one is
+        // still in the client list until this hook returns.
+        if server.client_count() <= 1 {
+            server.clear_bans();
+        }
     }
 
     async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
@@ -429,6 +450,12 @@ impl<P: Plugin> Plugin for Base<P> {
             .map(|c| c.to_string())
             .unwrap_or_else(|| "?".to_string());
         info!("{} (cn {}) connected.", packet.name, cn_str);
+
+        if server.peer_addr(id).is_some_and(|a| server.is_banned(a.ip())) {
+            info!("{} (cn {}) is banned, disconnecting.", packet.name, cn_str);
+            server.disconnect_with(id, crate::bans::DISC_IPBAN);
+            return;
+        }
 
         server.init_name(id, packet.name.clone());
         server.init_model(id, packet.player_model);
@@ -829,40 +856,126 @@ impl<P: Plugin> Plugin for Base<P> {
         let own = server.get_privilege(id);
         let theirs = server.get_privilege(target);
 
-        if target != id {
+        let new = if target != id {
             // Give or take another player's master.
             if own < Privilege::Master || theirs >= own || (packet.val && theirs != Privilege::None) {
                 return;
             }
+            if packet.val { Privilege::Master } else { Privilege::None }
         } else if packet.val {
-            // Claim master for yourself.
-            if own >= Privilege::Master {
+            // Claim for yourself: admin with the right password, otherwise master.
+            let want = if server.check_admin_pass(id, packet.hash.as_bytes()) {
+                Privilege::Admin
+            } else {
+                Privilege::Master
+            };
+            if own >= want {
                 return;
             }
-            let spectating = server
-                .players
-                .try_get(id)
-                .map_or(true, |p| p.client_state == ClientState::Spectator);
-            if spectating {
-                crate::ui::send_warn(server, id, "Spectators may not claim master.");
-                return;
+            if want == Privilege::Master {
+                let spectating = server
+                    .players
+                    .try_get(id)
+                    .map_or(true, |p| p.client_state == ClientState::Spectator);
+                if spectating {
+                    crate::ui::send_warn(server, id, "Spectators may not claim master.");
+                    return;
+                }
+                let taken = server
+                    .players
+                    .map
+                    .iter()
+                    .any(|p| *p.key() != id && p.privilege != Privilege::None);
+                if taken {
+                    crate::ui::send_warn(server, id, "Master is already claimed.");
+                    return;
+                }
             }
-            if server.players.map.iter().any(|p| p.privilege != Privilege::None) {
-                crate::ui::send_warn(server, id, "Master is already claimed.");
-                return;
-            }
+            want
         } else if own == Privilege::None {
             return;
-        }
+        } else {
+            Privilege::None
+        };
 
         let name = server.players.get(target).name.clone();
-        let verb = if packet.val { "claimed" } else { "relinquished" };
+        let msg = match new {
+            Privilege::None => format!("{} relinquished {}", name.to_utf8(), priv_name(theirs)),
+            p => format!("{} claimed {}", name.to_utf8(), priv_name(p)),
+        };
         server.broadcast_chan1(&channel1::ServMsg {
-            text: format!("{} {verb} master", name.to_utf8()).lossy_cubestring(),
+            text: msg.lossy_cubestring(),
         });
-        let privilege = if packet.val { Privilege::Master } else { Privilege::None };
-        server.set_privilege(target, privilege);
+        server.set_privilege(target, new);
         reopen_if_masterless(server);
+    }
+
+    /// Engine `trykick`: kicks and bans the IP for 4 hours. Admins can't be kicked.
+    async fn kick(&self, ctx: &mut Context, packet: &channel1::Kick) {
+        let id = ctx.id();
+        let server = ctx.server();
+        let own = server.get_privilege(id);
+        let Some(victim) = server.get_id(packet.victim_cn as u8) else {
+            return;
+        };
+        let theirs = server.get_privilege(victim);
+        if own < Privilege::Master || victim == id || theirs > own || theirs >= Privilege::Admin {
+            return;
+        }
+        let Some(ip) = server.peer_addr(victim).map(|a| a.ip()) else {
+            return;
+        };
+
+        let kicker = server.players.get(id).name.to_utf8();
+        let kicked = server.players.get(victim).name.to_utf8();
+        let reason = packet.reason.to_utf8();
+        let msg = if reason.is_empty() {
+            format!("{kicker} kicked {kicked}")
+        } else {
+            format!("{kicker} kicked {kicked} because: {reason}")
+        };
+        server.broadcast_chan1(&channel1::ServMsg {
+            text: msg.lossy_cubestring(),
+        });
+
+        server.ban_ip(ip);
+        // Everyone else on that IP goes too, unless they outrank the kicker.
+        for other in server.client_ids() {
+            let same_ip = server.peer_addr(other).is_some_and(|a| a.ip() == ip);
+            let p = server.get_privilege(other);
+            if same_ip && p <= own && p < Privilege::Admin {
+                server.disconnect_with(other, crate::bans::DISC_KICK);
+            }
+        }
+    }
+
+    async fn clear_bans(&self, ctx: &mut Context, _packet: &channel1::ClearBans) {
+        let server = ctx.server();
+        if server.get_privilege(ctx.id()) >= Privilege::Master {
+            server.clear_bans();
+            server.broadcast_chan1(&channel1::ServMsg {
+                text: "cleared all bans".lossy_cubestring(),
+            });
+        }
+    }
+
+    /// Engine `N_SETTEAM`: masters move players between teams in team modes.
+    async fn set_team(&self, ctx: &mut Context, packet: &channel1::SetTeamClient) {
+        let server = ctx.server();
+        if server.get_privilege(ctx.id()) < Privilege::Master
+            || !server.game_mode.read().unwrap().has_teams()
+            || packet.team.as_bytes().is_empty()
+        {
+            return;
+        }
+        let Some(target) = server.get_id(packet.client_num as u8) else {
+            return;
+        };
+        let stripped = packet.team.strip_colors();
+        let team = CubeString::from_bytes(stripped.as_bytes().iter().take(MAX_TEAM_LEN).copied().collect());
+        if server.players.get(target).team != team {
+            server.set_team(target, team, SetTeamReason::Forced);
+        }
     }
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {

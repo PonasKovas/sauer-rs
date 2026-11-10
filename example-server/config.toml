@@ -5,6 +5,7 @@ plugin_dir = "plugins/"
 [base]
 server_desc = "sauer-rs"
 server_auth = ""
+admin_pass = ""
 map = "complex"
 mode = "CoopEdit"
 master_mode = "Locked"

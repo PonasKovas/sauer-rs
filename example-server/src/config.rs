@@ -48,6 +48,9 @@ pub struct BaseConfig {
     pub server_auth: String,
     #[serde(default)]
     pub has_password: bool,
+    /// Password for claiming admin with `/setmaster PASSWORD`. Empty disables admin.
+    #[serde(default)]
+    pub admin_pass: String,
     #[serde(default = "default_map")]
     pub map: String,
     #[serde(default = "default_game_mode")]
@@ -84,6 +87,7 @@ impl Default for BaseConfig {
             server_desc: default_server_desc(),
             server_auth: String::new(),
             has_password: false,
+            admin_pass: String::new(),
             map: default_map(),
             mode: GameMode::Ffa,
             master_mode: MasterMode::Open,
@@ -97,6 +101,7 @@ impl Plugin for BaseConfig {
         *server.server_desc.write().unwrap() = self.server_desc.as_str().lossy_cubestring();
         *server.server_auth.write().unwrap() = self.server_auth.as_str().lossy_cubestring();
         *server.has_password.write().unwrap() = self.has_password;
+        *server.admin_pass.write().unwrap() = self.admin_pass.clone();
         *server.map_name.write().unwrap() = self.map.as_str().lossy_cubestring();
         *server.game_mode.write().unwrap() = self.mode;
         *server.master_mode.write().unwrap() = self.master_mode;

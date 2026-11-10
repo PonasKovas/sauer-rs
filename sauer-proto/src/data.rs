@@ -177,7 +177,7 @@ make_enum!([i32] ClientState {
 });
 
 make_enum!([i32] Privilege {
-    None = 0, Auth = 1, Master = 2, Admin = 3,
+    None = 0, Master = 1, Auth = 2, Admin = 3,
 });
 
 // No make_enum! macro for these two because they have some special retarded format on the wire
