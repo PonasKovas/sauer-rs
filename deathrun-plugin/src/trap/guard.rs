@@ -3,7 +3,9 @@
 //! base-state entities change.
 
 use super::ents::{self, EntChange};
+use super::frame::outline;
 use super::persist;
+use crate::aim::Aim;
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_kit::virt_ents::FakeEnt;
@@ -281,7 +283,7 @@ pub fn trap_ent_changes(state: &DeathrunState, trap: super::TrapId) -> Vec<EntCh
 /// Coloured frames around the entities a trap deletes (red) and creates
 /// (green); a move shows both. Big enough that looking at the entity itself
 /// never lands on a frame corner.
-pub fn entity_frames(changes: &[EntChange], eye: Option<Eye>) -> Vec<FakeEnt> {
+pub fn entity_frames(changes: &[EntChange], eye: Option<&Aim>) -> Vec<FakeEnt> {
     let mut marks = Vec::new();
     for c in changes {
         if let Some(b) = c.base() {
@@ -293,15 +295,10 @@ pub fn entity_frames(changes: &[EntChange], eye: Option<Eye>) -> Vec<FakeEnt> {
     }
     // Frame the ones in front of the player closest to the view ray (through
     // walls); nothing behind them.
-    if let Some((origin, forward)) = eye {
-        let ahead = |p: &[f32; 3]| {
-            let v: [f32; 3] = std::array::from_fn(|i| p[i] - origin[i]);
-            let t = v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2];
-            (t > 0.0).then(|| (0..3).map(|i| (v[i] - t * forward[i]).powi(2)).sum::<f32>())
-        };
+    if let Some(eye) = eye {
         let mut keyed: Vec<_> = marks
             .into_iter()
-            .filter_map(|m| ahead(&m.0).map(|d| (d, m)))
+            .filter_map(|m| eye.distance_sq(m.0).map(|d| (d, m)))
             .collect();
         keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
         marks = keyed.into_iter().map(|(_, m)| m).collect();
@@ -311,79 +308,14 @@ pub fn entity_frames(changes: &[EntChange], eye: Option<Eye>) -> Vec<FakeEnt> {
         .take(MAX_MARKED)
         .flat_map(|(pos, color)| {
             let c = pos.map(|v| v.round() as i32);
-            box_edges(c.map(|v| v - HALF), c.map(|v| v + HALF), eye)
-                .into_iter()
-                .map(move |(x, y, z, axis, len)| FakeEnt {
-                    ent_type: EntityType::Particles,
-                    position: [x as f32, y as f32, z as f32],
-                    attrs: [7, axis, len, color, 0],
-                })
+            outline(Aabb::cube(c.map(|v| v - HALF), 2 * HALF), eye, color)
         })
         .collect()
-}
-
-/// Camera position and view direction.
-pub type Eye = ([f32; 3], [f32; 3]);
-
-/// Within this distance of the view ray a frame corner could be grabbed in edit mode.
-const LOOK_RADIUS: f32 = 4.0;
-
-fn looked_at(c: [i32; 3], (origin, forward): Eye) -> bool {
-    let v: [f32; 3] = std::array::from_fn(|i| c[i] as f32 - origin[i]);
-    let t = v[0] * forward[0] + v[1] * forward[1] + v[2] * forward[2];
-    if t <= 0.0 {
-        return false;
-    }
-    let dist_sq: f32 = (0..3).map(|i| (v[i] - t * forward[i]).powi(2)).sum();
-    dist_sq < LOOK_RADIUS * LOOK_RADIUS
-}
-
-/// The 12 edges of a box as `(x, y, z, dir, length)` particle segments
-/// (dir 1 = +x, 2 = +y, 0 = +z; +3 runs the other way). Each particle is an
-/// entity sitting at one end of its edge, so a corner the player looks at
-/// gets no particle: its edges start from the far end instead, or are left
-/// out when both ends are looked at. That keeps the frame from being
-/// grabbed in edit mode.
-pub fn box_edges(min: [i32; 3], max: [i32; 3], eye: Option<Eye>) -> Vec<(i32, i32, i32, i32, i32)> {
-    let corner = |i: usize| -> [i32; 3] {
-        std::array::from_fn(|a| if (i >> a) & 1 == 1 { max[a] } else { min[a] })
-    };
-    let hot: [bool; 8] = std::array::from_fn(|i| eye.is_some_and(|e| looked_at(corner(i), e)));
-    let mut out = Vec::with_capacity(12);
-    // (axis bit in the corner index, particle dir)
-    for (bit, dir) in [(0usize, 1), (1, 2), (2, 0)] {
-        let len = max[bit] - min[bit];
-        for i in (0..8).filter(|i| (i >> bit) & 1 == 0) {
-            let j = i | (1 << bit);
-            let (from, dir) = match (hot[i], hot[j]) {
-                (true, true) => continue,
-                (true, false) => (corner(j), dir + 3),
-                _ => (corner(i), dir),
-            };
-            out.push((from[0], from[1], from[2], dir, len));
-        }
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn no_particle_on_a_looked_at_corner() {
-        let (min, max) = ([0, 0, 0], [16, 16, 16]);
-        assert_eq!(box_edges(min, max, None).len(), 12);
-
-        // Looking straight at the max corner from far away along the diagonal.
-        let f = 1.0 / 3f32.sqrt();
-        let eye = ([116.0, 116.0, 116.0], [-f, -f, -f]);
-        let edges = box_edges(min, max, Some(eye));
-        assert_eq!(edges.len(), 12);
-        assert!(edges.iter().all(|e| [e.0, e.1, e.2] != max));
-        // The three edges ending at that corner now start at their other end.
-        assert_eq!(edges.iter().filter(|e| e.3 >= 3).count(), 3);
-    }
 
     #[test]
     fn looking_at_entity_misses_frame_corners() {
@@ -392,8 +324,11 @@ mod tests {
             pos: [100.0, 100.0, 100.0],
             attrs: [0; 5],
         })];
-        let eye = ([100.0, 0.0, 100.0], [0.0, 1.0, 0.0]);
-        let frames = entity_frames(&changes, Some(eye));
+        let eye = Aim {
+            origin: [100.0, 0.0, 100.0],
+            forward: [0.0, 1.0, 0.0],
+        };
+        let frames = entity_frames(&changes, Some(&eye));
         assert_eq!(frames.len(), 12);
         assert!(
             frames.iter().all(|f| f.attrs[1] < 3),

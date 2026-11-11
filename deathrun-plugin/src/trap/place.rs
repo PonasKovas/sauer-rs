@@ -14,12 +14,13 @@ use super::placement::{
     get_outer_face_selections,
 };
 use super::{BUTTON_SIZE, Trap, TrapGeom, TrapId, TrapMode, TrapPhase, persist};
+use crate::aim::Aim;
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_kit::virt_ents::FakeEnt;
 use sauer_map::Map;
 use sauer_proto::channel1;
-use sauer_proto::data::{ClipboardPayload, EntityType};
+use sauer_proto::data::ClipboardPayload;
 use sauer_server::Server;
 use std::sync::Arc;
 
@@ -28,7 +29,6 @@ use sauer_core::Aabb;
 const FRAMES: &str = "place_frames";
 /// The frames of traps the preview sits in, in the preview's yellow.
 const FRAME_COLOR: i32 = 0xFF0;
-const MAX_REACH: f32 = 2048.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -138,10 +138,10 @@ fn cell_at(hit_pt: [f32; 3], orient: u8, world_size: i32) -> Option<[i32; 3]> {
 
 /// The trap whose button the ray hits, counting only the button itself, not
 /// the air around it in its cell.
-pub fn button_hit(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Option<TrapId> {
-    let (hit_pt, _, _) = raycast(state, origin, ray)?;
+pub fn button_hit(state: &DeathrunState, aim: &Aim) -> Option<TrapId> {
+    let (hit_pt, _, _) = raycast(state, aim)?;
     // Just past the surface, inside whatever was hit.
-    let inside: [f32; 3] = std::array::from_fn(|i| hit_pt[i] + ray[i] * 0.01);
+    let inside: [f32; 3] = std::array::from_fn(|i| hit_pt[i] + aim.forward[i] * 0.01);
     state.traps.iter().find_map(|t| {
         let Aabb { min, max } =
             get_outer_face_selections(t.button_pos, t.button_size, t.button_orient)[0].bounds();
@@ -152,13 +152,10 @@ pub fn button_hit(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Opt
 }
 
 /// Hit point, face orient and world size of the first surface along the ray.
-fn raycast(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Option<([f32; 3], u8, i32)> {
+fn raycast(state: &DeathrunState, aim: &Aim) -> Option<([f32; 3], u8, i32)> {
     let map = state.map.as_ref()?;
-    let hit = sauer_map::raycast::raycast_with_filter(map, origin, ray, MAX_REACH, |c| {
-        !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
-    })?;
-    let pt = std::array::from_fn(|i| origin[i] + ray[i] * hit.dist);
-    Some((pt, hit.orient, map.size))
+    let hit = aim.hit(map)?;
+    Some((aim.at(hit.dist), hit.orient, map.size))
 }
 
 /// Frames of the traps whose geometry covers `cell`.
@@ -194,12 +191,12 @@ fn verdict(state: &DeathrunState, moving: Option<TrapId>, key: ButtonKey) -> Ver
 }
 
 /// Where the button would go for a player aiming along `ray`.
-fn aim(state: &DeathrunState, moving: Option<TrapId>, origin: [f32; 3], ray: [f32; 3]) -> Target {
+fn target(state: &DeathrunState, moving: Option<TrapId>, aim: &Aim) -> Target {
     // Other buttons count as any surface: the new one goes on top.
-    if moving.is_some() && button_hit(state, origin, ray) == moving {
+    if moving.is_some() && button_hit(state, aim) == moving {
         return Target::Back;
     }
-    let Some((hit_pt, orient, world_size)) = raycast(state, origin, ray) else {
+    let Some((hit_pt, orient, world_size)) = raycast(state, aim) else {
         return Target::Nowhere;
     };
     let Some(pos) = cell_at(hit_pt, orient, world_size) else {
@@ -248,12 +245,7 @@ fn frames(state: &DeathrunState, target: Target) -> Vec<FakeEnt> {
     };
     frames_around(state, cell_box(key))
         .into_iter()
-        .flat_map(|b| super::guard::box_edges(b.min, b.max, None))
-        .map(|(x, y, z, dir, len)| FakeEnt {
-            ent_type: EntityType::Particles,
-            position: [x as f32, y as f32, z as f32],
-            attrs: [7, dir, len, FRAME_COLOR, 0],
-        })
+        .flat_map(|b| super::frame::outline(b, None, FRAME_COLOR))
         .collect()
 }
 
@@ -307,13 +299,6 @@ pub fn reshow_for(server: &Server, id: u64) {
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
-fn name(server: &Server, id: u64) -> String {
-    server
-        .players
-        .with(id, |p| p.name.strip_colors().to_utf8())
-        .unwrap_or_else(|| "Someone".to_string())
-}
-
 fn announce(server: &Server, text: String) {
     server.broadcast(&channel1::ServMsg {
         text: format!("\x0C6[TRAP]\x0C7 {text}").lossy_cubestring(),
@@ -325,12 +310,12 @@ pub fn busy_message(server: &Server, state: &DeathrunState) -> Option<String> {
     let p = state.mode.placing()?;
     Some(format!(
         "{} is placing a trap button. Wait until they finish.",
-        name(server, p.player)
+        crate::ui::player_name(server, p.player)
     ))
 }
 
 /// `#tnew` and `#tmove`: starts placing a button, places it, or cancels.
-pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray: [f32; 3]) {
+pub fn command(server: &Arc<Server>, id: u64, kind: Kind, aim: Aim) {
     let mut state = get_server_state(server).write();
     let refusal = match &state.mode {
         TrapMode::Editing(e) => Some(format!(
@@ -347,9 +332,9 @@ pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray:
     if let Some(text) = refusal {
         crate::ui::send_warn(server, id, &text);
     } else if state.mode.placing().is_some() {
-        finish(server, &mut state, id, origin, ray);
+        finish(server, &mut state, id, aim);
     } else {
-        start(server, state, id, kind, origin, ray);
+        start(server, state, id, kind, aim);
     }
 }
 
@@ -358,13 +343,12 @@ fn start(
     mut state: parking_lot::RwLockWriteGuard<'_, DeathrunState>,
     id: u64,
     kind: Kind,
-    origin: [f32; 3],
-    ray: [f32; 3],
+    aim: Aim,
 ) {
     let moving = match kind {
         Kind::New => None,
         Kind::Move => {
-            let Some(trap) = button_hit(&state, origin, ray) else {
+            let Some(trap) = button_hit(&state, &aim) else {
                 crate::ui::send_warn(server, id, "Aim at a trap button to move it.");
                 return;
             };
@@ -378,7 +362,7 @@ fn start(
             Some(trap)
         }
     };
-    let target = aim(&state, moving, origin, ray);
+    let target = target(&state, moving, &aim);
     state.mode = TrapMode::Placing(Placing {
         player: id,
         trap: moving,
@@ -393,7 +377,10 @@ fn start(
         Some(n) => format!("moving the button of trap {n}"),
         None => "placing a new trap button".to_string(),
     };
-    announce(server, format!("{} is {what}.", name(server, id)));
+    announce(
+        server,
+        format!("{} is {what}.", crate::ui::player_name(server, id)),
+    );
     let back = match kind {
         Kind::New => "aim where it can't go (red)",
         Kind::Move => "aim back at the button",
@@ -407,18 +394,12 @@ fn start(
     );
 }
 
-fn finish(
-    server: &Arc<Server>,
-    state: &mut DeathrunState,
-    id: u64,
-    origin: [f32; 3],
-    ray: [f32; 3],
-) {
+fn finish(server: &Arc<Server>, state: &mut DeathrunState, id: u64, aim: Aim) {
     let Some(p) = state.mode.placing() else {
         return;
     };
     let moving = p.trap;
-    let target = aim(state, moving, origin, ray);
+    let target = target(state, moving, &aim);
     let refused = match target {
         Target::Cell(key, Verdict::Good | Verdict::InFrame) => Ok(key),
         Target::Back => Err(None),
@@ -438,7 +419,10 @@ fn finish(
             end(server, state);
             announce(
                 server,
-                format!("{} cancelled placing the button.", name(server, id)),
+                format!(
+                    "{} cancelled placing the button.",
+                    crate::ui::player_name(server, id)
+                ),
             );
             return;
         }
@@ -477,7 +461,10 @@ fn finish(
 
     let verb = if moving.is_some() { "moved" } else { "placed" };
     let number = state.trap_number(trap);
-    let mut text = format!("{} {verb} the button of trap {number}.", name(server, id));
+    let mut text = format!(
+        "{} {verb} the button of trap {number}.",
+        crate::ui::player_name(server, id)
+    );
     if matches!(target, Target::Cell(_, Verdict::InFrame)) {
         text.push_str(" It is inside a trap's frame.");
     }
@@ -538,7 +525,7 @@ fn follow_locked(server: &Server, state: &mut DeathrunState, target: Target) {
 }
 
 /// Moves the preview along with the placing player's aim.
-pub fn follow(server: &Server, id: u64, origin: [f32; 3], ray: [f32; 3]) {
+pub fn follow(server: &Server, id: u64, aim: Aim) {
     // Checked under the read lock first: every player's position update gets here.
     if !is_placer(&get_server_state(server).read(), id) {
         return;
@@ -548,7 +535,7 @@ pub fn follow(server: &Server, id: u64, origin: [f32; 3], ray: [f32; 3]) {
         return;
     }
     let moving = state.mode.placing().and_then(|p| p.trap);
-    let target = aim(&state, moving, origin, ray);
+    let target = target(&state, moving, &aim);
     follow_locked(server, &mut state, target);
 }
 

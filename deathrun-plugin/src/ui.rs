@@ -6,6 +6,14 @@ fn b() -> cube_string::CubeStringBuilder {
     CubeString::builder()
 }
 
+/// A player's name without colors, for messages. "Someone" once they left.
+pub fn player_name(server: &Server, id: u64) -> String {
+    server
+        .players
+        .with(id, |p| p.name.strip_colors().to_utf8())
+        .unwrap_or_else(|| "Someone".to_string())
+}
+
 // ─── Game event messages ──────────────────────────────────────────────────────
 
 pub fn broadcast_trap_edit_started(server: &Server, trap_idx: usize) {

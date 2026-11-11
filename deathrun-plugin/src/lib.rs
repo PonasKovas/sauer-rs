@@ -1,3 +1,4 @@
+pub mod aim;
 pub mod edit;
 pub mod geo_sync;
 pub mod map_state;

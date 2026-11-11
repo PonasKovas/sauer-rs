@@ -1,6 +1,8 @@
+use crate::aim::Aim;
 use crate::map_state::{
     DeathrunState, get_server_state, is_waiting_for_map, update_server_items, with_map_state_mut,
 };
+use crate::trap::frame;
 use crate::trap::{cmd_deltrap, guard, place::Kind};
 use crate::ui;
 use bytes::Bytes;
@@ -26,13 +28,6 @@ pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
 pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
 pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
 
-pub struct TrapHighlightState {
-    pub trap: Option<crate::trap::TrapId>,
-    pub look_start: tokio::time::Instant,
-    pub last_sent: tokio::time::Instant,
-    pub active: bool,
-}
-
 /// Where a joining player is in the map load sequence. The info wall is held
 /// back until the map is loaded so the client's own map output doesn't bury it.
 enum WelcomeStep {
@@ -45,7 +40,7 @@ enum WelcomeStep {
 pub struct DeathrunEdit {
     player_dirs: DashMap<u64, Direction>,
     last_particle_update: DashMap<u64, tokio::time::Instant>,
-    trap_highlights: DashMap<u64, TrapHighlightState>,
+    highlights: crate::trap::highlight::Highlights,
     pending_welcome: DashMap<u64, WelcomeStep>,
     notes: crate::ServerNotes,
 }
@@ -55,7 +50,7 @@ impl DeathrunEdit {
         Self {
             player_dirs: DashMap::new(),
             last_particle_update: DashMap::new(),
-            trap_highlights: DashMap::new(),
+            highlights: Default::default(),
             pending_welcome: DashMap::new(),
             notes: Default::default(),
         }
@@ -66,6 +61,74 @@ impl DeathrunEdit {
         self.notes = crate::ServerNotes::from_strings(notes);
         self
     }
+
+    /// The particle beside the view of everyone while a trap is being edited,
+    /// so they see their edits go into the trap. Moves at most every 100 ms.
+    fn update_edit_particle(
+        &self,
+        server: &Server,
+        id: u64,
+        aim: &Aim,
+        dir: Direction,
+        editing: bool,
+    ) {
+        if !editing {
+            if self.last_particle_update.remove(&id).is_some() {
+                let mut state = get_server_state(server).write();
+                state
+                    .virt
+                    .clear(id, "edit_particle")
+                    .send(server, id, crate::SERVER_BOT_CN);
+            }
+            return;
+        }
+        let now = tokio::time::Instant::now();
+        match self.last_particle_update.get_mut(&id) {
+            Some(last) if now.duration_since(*last).as_millis() < 100 => return,
+            Some(mut last) => *last = now,
+            None => {
+                self.last_particle_update.insert(id, now);
+            }
+        }
+
+        // Off to the side of the view ray, a bit in front of whatever is there.
+        let [f, r, u] = crate::aim::view_basis(dir.yaw as f32, dir.pitch as f32);
+        let local = crate::aim::forward(
+            TRAP_EDIT_PARTICLE_YAW_OFFSET,
+            TRAP_EDIT_PARTICLE_PITCH_OFFSET,
+        );
+        let dir: [f32; 3] =
+            std::array::from_fn(|i| r[i] * local[0] + f[i] * local[1] + u[i] * local[2]);
+        let side = Aim {
+            origin: aim.origin,
+            forward: dir,
+        };
+        let dist = {
+            let state = get_server_state(server).read();
+            state
+                .map
+                .as_ref()
+                .and_then(|map| {
+                    sauer_map::raycast::raycast_with_filter(
+                        map,
+                        side.origin,
+                        side.forward,
+                        TRAP_EDIT_PARTICLE_MAX_DIST,
+                        |c| !c.is_empty() || c.material != sauer_core::Material::default(),
+                    )
+                })
+                .map_or(TRAP_EDIT_PARTICLE_MAX_DIST, |hit| (hit.dist - 1.0).max(1.0))
+        };
+        let particle = sauer_kit::virt_ents::FakeEnt {
+            ent_type: EntityType::Particles,
+            position: side.at(dist),
+            attrs: TRAP_EDIT_PARTICLE_ATTRS,
+        };
+        let mut state = get_server_state(server).write();
+        state
+            .show_virt(id, "edit_particle", vec![particle])
+            .send(server, id, crate::SERVER_BOT_CN);
+    }
 }
 
 impl Plugin for DeathrunEdit {
@@ -73,7 +136,7 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         self.player_dirs.remove(&id);
         self.last_particle_update.remove(&id);
-        self.trap_highlights.remove(&id);
+        self.highlights.forget(id);
         self.pending_welcome.remove(&id);
         crate::trap::placement::forget_seethrough(ctx.server(), id);
         crate::trap::place::cancel_for(ctx.server(), id, "the player left");
@@ -140,290 +203,73 @@ impl Plugin for DeathrunEdit {
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) -> Flow {
         let id = ctx.id();
         self.player_dirs.insert(id, packet.dir);
-
         let server = ctx.server();
         let is_spectator = server
             .players
             .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(true);
-
-        // --- READ PHASE 1: Target Trap & AABB ---
-        let target_trap;
-        let mut edges_to_draw = None;
-        let mut entity_frames = Vec::new();
-        let is_trap_edit_active;
-        let seethrough_target;
-
-        let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
-        let yaw_rad = (packet.dir.yaw as f32).to_radians();
-        let pitch_rad = (packet.dir.pitch as f32).to_radians();
-        let forward = [
-            -yaw_rad.sin() * pitch_rad.cos(),
-            yaw_rad.cos() * pitch_rad.cos(),
-            pitch_rad.sin(),
-        ];
+        let aim = Aim::new(packet.pos, packet.dir);
 
         if is_spectator {
             crate::trap::place::cancel_for(server, id, "the player went spectator");
         } else {
-            crate::trap::place::follow(server, id, origin, forward);
+            crate::trap::place::follow(server, id, aim);
         }
 
-        {
-            let state = get_server_state(server).read();
-
-            let mut dist = 2048.0;
-            if let Some(map) = state.map.as_ref() {
-                if let Some(hit) =
-                    sauer_map::raycast::raycast_with_filter(map, origin, forward, 2048.0, |c| {
-                        !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
-                    })
-                {
-                    dist = hit.dist;
-                }
-            }
-            let hit_pt = [
-                origin[0] + forward[0] * dist,
-                origin[1] + forward[1] * dist,
-                origin[2] + forward[2] * dist,
-            ];
-
-            let hit_trap = if is_spectator {
-                None
-            } else {
-                state
-                    .traps
-                    .iter()
-                    .find(|trap| trap.contains_button_point(hit_pt, 0.5))
-                    .map(|trap| trap.id)
-            };
-
-            let edited_trap = state.mode.editing().map(|e| e.trap);
-            let moving_trap = state
-                .mode
-                .placing()
-                .filter(|p| p.player == id)
-                .and_then(|p| p.trap);
-            target_trap = edited_trap.or(moving_trap).or(hit_trap);
-            is_trap_edit_active = edited_trap.is_some();
-            seethrough_target = hit_trap
-                .and_then(|t| state.trap(t))
-                .map(crate::trap::placement::button_key);
-
-            if let Some((trap_id, trap)) = target_trap.and_then(|t| Some((t, state.trap(t)?))) {
-                let eye = Some((origin, forward));
-                entity_frames =
-                    guard::entity_frames(&guard::trap_ent_changes(&state, trap_id), eye);
-
-                let live = state
+        // The trap being edited, else the one whose button this player moves,
+        // else the one whose button they aim at gets outlined.
+        let (target, editing, seethrough, outline, entity_frames) =
+            {
+                let state = get_server_state(server).read();
+                let hit_trap = (!is_spectator)
+                    .then(|| state.trap_at(aim.hit_point(state.map.as_ref())))
+                    .flatten();
+                let edited = state.mode.editing().map(|e| e.trap);
+                let moving = state
                     .mode
-                    .editing()
-                    .filter(|e| e.trap == trap_id)
-                    .and_then(|edit| {
-                        crate::trap::commands::geometry_bounds(
-                            &edit.original_map,
-                            state.map.as_ref()?,
-                            trap.geom.as_ref(),
-                        )
-                    });
-                let shown = live.or_else(|| trap.geom.as_ref().map(|g| g.clip_box()));
+                    .placing()
+                    .filter(|p| p.player == id)
+                    .and_then(|p| p.trap);
+                let target = edited.or(moving).or(hit_trap);
+                let seethrough = hit_trap
+                    .and_then(|t| state.trap(t))
+                    .map(crate::trap::placement::button_key);
 
-                if let Some(Aabb {
-                    min: t_min,
-                    max: t_max,
-                }) = shown
-                {
-                    edges_to_draw = Some(guard::box_edges(t_min, t_max, eye));
-                }
-            }
-        } // Read Lock 1 Dropped
-
-        crate::trap::placement::update_seethrough_button(server, id, seethrough_target);
-
-        // --- WRITE PHASE 1: Update DashMap and Highlight Virt Ents ---
-        let mut clear_highlight = false;
-        let mut update_highlight = false;
-        let mut target_changed = false;
-
-        let mut hl_state_clone = {
-            let mut hl_state =
-                self.trap_highlights
-                    .entry(id)
-                    .or_insert_with(|| TrapHighlightState {
-                        trap: None,
-                        look_start: tokio::time::Instant::now(),
-                        last_sent: tokio::time::Instant::now(),
-                        active: false,
-                    });
-
-            if hl_state.trap != target_trap {
-                target_changed = true;
-                if hl_state.active {
-                    clear_highlight = true;
-                }
-                hl_state.trap = target_trap;
-                hl_state.look_start = tokio::time::Instant::now();
-                hl_state.active = false;
-            }
-
-            if target_trap.is_some() {
-                if hl_state.last_sent.elapsed().as_millis() > 100 {
-                    update_highlight = true;
-                    hl_state.last_sent = tokio::time::Instant::now();
-                }
-            }
-
-            TrapHighlightState {
-                trap: hl_state.trap,
-                look_start: hl_state.look_start,
-                last_sent: hl_state.last_sent,
-                active: hl_state.active,
-            }
-        };
-
-        if clear_highlight {
-            let mut state_w = get_server_state(server).write();
-            {
-                let up = state_w.virt.clear(id, "highlight");
-                up.send(server, id, crate::SERVER_BOT_CN);
-            }
-            hl_state_clone.active = false;
-        }
-
-        if update_highlight {
-            if let Some(edges) = edges_to_draw {
-                let mut fake_ents = Vec::new();
-                for edge in &edges {
-                    fake_ents.push(sauer_kit::virt_ents::FakeEnt {
-                        ent_type: EntityType::Particles,
-                        position: [edge.0 as f32, edge.1 as f32, edge.2 as f32],
-                        attrs: [7, edge.3, edge.4, guard::GEOMETRY_COLOR, 0],
-                    });
-                }
-                let mut state_w = get_server_state(server).write();
-                {
-                    let up = state_w.show_virt(id, "highlight", fake_ents);
-                    up.send(server, id, crate::SERVER_BOT_CN);
-                }
-                hl_state_clone.active = true;
-            } else if hl_state_clone.active {
-                let mut state_w = get_server_state(server).write();
-                {
-                    let up = state_w.virt.clear(id, "highlight");
-                    up.send(server, id, crate::SERVER_BOT_CN);
-                }
-                hl_state_clone.active = false;
-            }
-        }
-
-        if let Some(mut entry) = self.trap_highlights.get_mut(&id) {
-            entry.active = hl_state_clone.active;
-        }
-
-        // Frames around entities the trap deletes (red) or creates (green).
-        if update_highlight || target_changed {
-            let mut state_w = get_server_state(server).write();
-            {
-                let up = state_w.show_virt(id, "trap_ents", entity_frames);
-                up.send(server, id, crate::SERVER_BOT_CN);
-            }
-        }
-
-        // --- READ PHASE 2: Check particle timer ---
-        let mut should_update_pos = false;
-        let mut clear_particle = false;
-
-        if is_trap_edit_active {
-            let now = tokio::time::Instant::now();
-            if let Some(mut last) = self.last_particle_update.get_mut(&id) {
-                if now.duration_since(*last).as_millis() >= 100 {
-                    *last = now;
-                    should_update_pos = true;
-                }
-            } else {
-                self.last_particle_update.insert(id, now);
-                should_update_pos = true;
-            }
-        } else if self.last_particle_update.remove(&id).is_some() {
-            clear_particle = true;
-        }
-
-        // --- WRITE PHASE 2: Update Particle Virt Ents ---
-        if clear_particle {
-            let mut state_w = get_server_state(server).write();
-            {
-                let up = state_w.virt.clear(id, "edit_particle");
-                up.send(server, id, crate::SERVER_BOT_CN);
-            }
-        }
-
-        if should_update_pos {
-            let yaw_rad = (packet.dir.yaw as f32).to_radians();
-            let pitch_rad = (packet.dir.pitch as f32).to_radians();
-
-            let yaw_off_rad = TRAP_EDIT_PARTICLE_YAW_OFFSET.to_radians();
-            let pitch_off_rad = TRAP_EDIT_PARTICLE_PITCH_OFFSET.to_radians();
-
-            // Calculate the orthonormal basis vectors for the camera
-            let f = [
-                -yaw_rad.sin() * pitch_rad.cos(),
-                yaw_rad.cos() * pitch_rad.cos(),
-                pitch_rad.sin(),
-            ];
-
-            let r = [yaw_rad.cos(), yaw_rad.sin(), 0.0];
-
-            let u = [
-                yaw_rad.sin() * pitch_rad.sin(),
-                -yaw_rad.cos() * pitch_rad.sin(),
-                pitch_rad.cos(),
-            ];
-
-            // Calculate the offset vector in local camera space
-            let local_x = -yaw_off_rad.sin() * pitch_off_rad.cos();
-            let local_y = yaw_off_rad.cos() * pitch_off_rad.cos();
-            let local_z = pitch_off_rad.sin();
-
-            // Transform back to world space
-            let forward_edit = [
-                r[0] * local_x + f[0] * local_y + u[0] * local_z,
-                r[1] * local_x + f[1] * local_y + u[1] * local_z,
-                r[2] * local_x + f[2] * local_y + u[2] * local_z,
-            ];
-
-            let mut dist_edit = TRAP_EDIT_PARTICLE_MAX_DIST;
-
-            {
-                let state_r = get_server_state(server).read();
-                if let Some(map) = state_r.map.as_ref() {
-                    if let Some(hit) = sauer_map::raycast::raycast_with_filter(
-                        map,
-                        origin,
-                        forward_edit,
-                        TRAP_EDIT_PARTICLE_MAX_DIST,
-                        |c| !c.is_empty() || c.material != sauer_core::Material::default(),
-                    ) {
-                        dist_edit = (hit.dist - 1.0).max(1.0);
-                    }
-                }
-            } // Read Lock 2 Dropped
-
-            let fake_ent = sauer_kit::virt_ents::FakeEnt {
-                ent_type: EntityType::Particles,
-                position: [
-                    origin[0] + forward_edit[0] * dist_edit,
-                    origin[1] + forward_edit[1] * dist_edit,
-                    origin[2] + forward_edit[2] * dist_edit,
-                ],
-                attrs: TRAP_EDIT_PARTICLE_ATTRS,
+                let (outline, entity_frames) =
+                    match target.and_then(|t| state.trap(t)) {
+                        Some(trap) => {
+                            // While editing, the frame follows the edit so far.
+                            let live = state.mode.editing().filter(|e| e.trap == trap.id).and_then(
+                                |edit| {
+                                    crate::trap::commands::geometry_bounds(
+                                        &edit.original_map,
+                                        state.map.as_ref()?,
+                                        trap.geom.as_ref(),
+                                    )
+                                },
+                            );
+                            let shown = live.or_else(|| trap.geom.as_ref().map(|g| g.clip_box()));
+                            let outline =
+                                shown.map(|b| frame::outline(b, Some(&aim), guard::GEOMETRY_COLOR));
+                            let changes = guard::trap_ent_changes(&state, trap.id);
+                            (outline, guard::entity_frames(&changes, Some(&aim)))
+                        }
+                        None => (None, Vec::new()),
+                    };
+                (target, edited.is_some(), seethrough, outline, entity_frames)
             };
 
-            let mut state_w = get_server_state(server).write();
-            {
-                let up = state_w.show_virt(id, "edit_particle", vec![fake_ent]);
-                up.send(server, id, crate::SERVER_BOT_CN);
-            }
+        crate::trap::placement::update_seethrough_button(server, id, seethrough);
+        let update = self.highlights.update(server, id, target, outline);
+        // Frames around entities the trap deletes (red) or creates (green).
+        if update.redrawn || update.target_changed {
+            let mut state = get_server_state(server).write();
+            state
+                .show_virt(id, "trap_ents", entity_frames)
+                .send(server, id, crate::SERVER_BOT_CN);
         }
+
+        self.update_edit_particle(server, id, &aim, packet.dir, editing);
         Flow::Continue
     }
 
@@ -457,27 +303,18 @@ impl Plugin for DeathrunEdit {
             return Flow::Continue;
         }
 
-        let dir = match self.player_dirs.get(&id) {
-            Some(d) => *d,
-            None => return Flow::Continue,
+        let Some(dir) = self.player_dirs.get(&id).map(|d| *d) else {
+            return Flow::Continue;
         };
-
-        let yaw_rad = (dir.yaw as f32).to_radians();
-        let pitch_rad = (dir.pitch as f32).to_radians();
-        let ray = [
-            -yaw_rad.sin() * pitch_rad.cos(),
-            yaw_rad.cos() * pitch_rad.cos(),
-            pitch_rad.sin(),
-        ];
-        let origin = [pos.x, pos.y, pos.z + 14.0];
+        let aim = Aim::new(pos, dir);
 
         match cmd {
             "#tnew" => {
-                crate::trap::place::command(&server, id, Kind::New, origin, ray);
+                crate::trap::place::command(&server, id, Kind::New, aim);
                 return Flow::Continue;
             }
             "#tmove" => {
-                crate::trap::place::command(&server, id, Kind::Move, origin, ray);
+                crate::trap::place::command(&server, id, Kind::Move, aim);
                 return Flow::Continue;
             }
             _ => {}
@@ -485,20 +322,10 @@ impl Plugin for DeathrunEdit {
 
         let hit_pt = {
             let state = get_server_state(&server).read();
-            let map = match state.map.as_ref() {
-                None => return Flow::Continue,
-                Some(m) => m,
+            let Some(map) = state.map.as_ref() else {
+                return Flow::Continue;
             };
-            sauer_map::raycast::raycast_with_filter(map, origin, ray, 2048.0, |c| {
-                !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
-            })
-            .map(|hit| {
-                [
-                    origin[0] + ray[0] * hit.dist,
-                    origin[1] + ray[1] * hit.dist,
-                    origin[2] + ray[2] * hit.dist,
-                ]
-            })
+            aim.hit(map).map(|hit| aim.at(hit.dist))
         };
 
         // Finishing an edit works wherever the player aims.
@@ -552,17 +379,7 @@ impl Plugin for DeathrunEdit {
             let Some(dir) = self.player_dirs.get(&id).map(|d| *d) else {
                 return Flow::Continue;
             };
-            let (yaw, pitch) = (
-                (dir.yaw as f32).to_radians(),
-                (dir.pitch as f32).to_radians(),
-            );
-            let ray = [
-                -yaw.sin() * pitch.cos(),
-                yaw.cos() * pitch.cos(),
-                pitch.sin(),
-            ];
-            let origin = [pos.x, pos.y, pos.z + 14.0];
-            crate::trap::place::command(&server, id, kind, origin, ray);
+            crate::trap::place::command(&server, id, kind, Aim::new(pos, dir));
             return Flow::Continue;
         }
 
@@ -674,10 +491,7 @@ impl Plugin for DeathrunEdit {
         }
 
         let size_kb = data.len() / 1024;
-        let player_name = server
-            .players
-            .with(id, |p| p.name.strip_colors().to_utf8())
-            .unwrap_or_else(|| "Someone".to_string());
+        let player_name = crate::ui::player_name(server, id);
 
         server.broadcast(&sauer_proto::channel1::ServMsg {
             text: format!(
@@ -1055,10 +869,7 @@ impl Plugin for DeathrunEdit {
             },
         );
 
-        let player_name = server
-            .players
-            .with(id, |p| p.name.strip_colors().to_utf8())
-            .unwrap_or_else(|| "Someone".to_string());
+        let player_name = crate::ui::player_name(server, id);
         let map_str = packet.map_name.strip_colors().to_utf8();
         ui::broadcast_map_changed(server, &player_name, &map_str);
         Flow::Cancel
