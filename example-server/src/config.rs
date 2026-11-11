@@ -104,8 +104,6 @@ impl Plugin for BaseConfig {
         *server.admin_pass.write().unwrap() = self.admin_pass.clone();
         if self.admin_pass.is_empty() {
             tracing::info!("admin password not set, /setmaster PASSWORD is off");
-        } else {
-            tracing::info!("admin password set");
         }
         *server.map_name.write().unwrap() = self.map.as_str().lossy_cubestring();
         *server.game_mode.write().unwrap() = self.mode;

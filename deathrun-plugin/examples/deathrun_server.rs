@@ -128,8 +128,6 @@ impl Plugin for BaseConfig {
         *server.admin_pass.write().unwrap() = self.admin_pass.clone();
         if self.admin_pass.is_empty() {
             tracing::info!("admin password not set, /setmaster PASSWORD is off");
-        } else {
-            tracing::info!("admin password set");
         }
         *server.master_mode.write().unwrap() = self.master_mode;
         *server.update_master.write().unwrap() = self.updatemaster;
