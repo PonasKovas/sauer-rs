@@ -5,7 +5,7 @@ use mlua::{
 };
 use sauer_proto::{
     channel1,
-    server_query::{ExtInfoResponse, ScoreData, ServerQueryResponse},
+    server_query::{ExtInfoResponse, PlayerStats, PlayerStatsBody, ScoreData, ServerQueryResponse},
 };
 use sauer_server::Server;
 use std::net::SocketAddr;
@@ -134,40 +134,40 @@ impl UserData for LuaServer {
                     "Uptime" => ServerQueryResponse::ExtInfo(ExtInfoResponse::Uptime {
                         seconds: table.get("seconds")?,
                     }),
-                    "PlayerStats" => ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                        client_number: table.get("client_number")?,
-                        ok: table.get("ok")?,
-                    }),
-                    "PlayerStatsIds" => {
-                        let ids: Vec<i32> = table.get("ids")?;
-                        ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds { ids })
-                    }
-                    "PlayerStatsStats" => {
-                        let ip_table: Option<Vec<u8>> = table.get("ip")?;
-                        let ip = ip_table.and_then(|v| {
-                            if v.len() == 3 {
-                                Some([v[0], v[1], v[2]])
-                            } else {
-                                None
+                    // A player stats reply is one of these per packet; each
+                    // carries the requested cn (nil for all players).
+                    "PlayerStatsError" | "PlayerStatsIds" | "PlayerStatsStats" => {
+                        let body = match t.as_str() {
+                            "PlayerStatsError" => PlayerStatsBody::Error,
+                            "PlayerStatsIds" => PlayerStatsBody::Ids(table.get("ids")?),
+                            _ => {
+                                let ip: Option<Vec<u8>> = table.get("ip")?;
+                                let ip = match ip.as_deref() {
+                                    Some(&[a, b, c]) => [a, b, c],
+                                    _ => [0; 3],
+                                };
+                                PlayerStatsBody::Stats(PlayerStats {
+                                    client_num: table.get("client_num")?,
+                                    ping: table.get("ping")?,
+                                    name: table.get("name")?,
+                                    team: table.get("team")?,
+                                    frags: table.get("frags")?,
+                                    flags: table.get("flags")?,
+                                    deaths: table.get("deaths")?,
+                                    teamkills: table.get("teamkills")?,
+                                    accuracy: table.get("accuracy")?,
+                                    health: table.get("health")?,
+                                    armour: table.get("armour")?,
+                                    gunselect: table.get("gunselect")?,
+                                    privilege: table.get("privilege")?,
+                                    state: table.get("state")?,
+                                    ip,
+                                })
                             }
-                        });
-
-                        ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsStats {
-                            client_num: table.get("client_num")?,
-                            ping: table.get("ping")?,
-                            name: table.get("name")?,
-                            team: table.get("team")?,
-                            frags: table.get("frags")?,
-                            flags: table.get("flags")?,
-                            deaths: table.get("deaths")?,
-                            teamkills: table.get("teamkills")?,
-                            damage: table.get("damage")?,
-                            health: table.get("health")?,
-                            armour: table.get("armour")?,
-                            gunselect: table.get("gunselect")?,
-                            privilege: table.get("privilege")?,
-                            state: table.get("state")?,
-                            ip,
+                        };
+                        ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
+                            client_number: table.get("client_number")?,
+                            body,
                         })
                     }
                     "TeamScore" => {
@@ -177,7 +177,12 @@ impl UserData for LuaServer {
                                 .filter_map(|t| {
                                     let team_name = t.get("team_name").ok()?;
                                     let score = t.get("score").ok()?;
-                                    Some(ScoreData { team_name, score })
+                                    let bases = t.get("bases").ok()?;
+                                    Some(ScoreData {
+                                        team_name,
+                                        score,
+                                        bases,
+                                    })
                                 })
                                 .collect()
                         });

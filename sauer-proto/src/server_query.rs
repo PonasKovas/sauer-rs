@@ -131,47 +131,73 @@ impl ExtInfoRequest {
     }
 }
 
-/// ExtInfo responses from the server
+/// ExtInfo responses from the server (engine `fpsgame/extinfo.h`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExtInfoResponse {
     Uptime {
         seconds: i32,
     },
+    /// One packet of a player stats reply. Every packet repeats the header
+    /// (the requested cn, or `None` for all players), and a reply is the ids
+    /// packet followed by one stats packet per player, or a lone error.
     PlayerStats {
         client_number: Option<i32>,
-        ok: bool,
-    },
-    PlayerStatsIds {
-        ids: Vec<i32>,
-    },
-    PlayerStatsStats {
-        client_num: i32,
-        ping: i32,
-        name: CubeString,
-        team: CubeString,
-        frags: i32,
-        flags: i32,
-        deaths: i32,
-        teamkills: i32,
-        damage: i32,
-        health: i32,
-        armour: i32,
-        gunselect: Gun,
-        privilege: Privilege,
-        state: ClientState,
-        ip: Option<[u8; 3]>,
+        body: PlayerStatsBody,
     },
     TeamScore {
         game_mode: i32,
         remaining_time: i32,
+        /// `None` when the mode has no teams.
         scores: Option<Vec<ScoreData>>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlayerStatsBody {
+    /// The requested cn isn't on the server.
+    Error,
+    Ids(Vec<i32>),
+    Stats(PlayerStats),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerStats {
+    pub client_num: i32,
+    pub ping: i32,
+    pub name: CubeString,
+    pub team: CubeString,
+    pub frags: i32,
+    pub flags: i32,
+    pub deaths: i32,
+    pub teamkills: i32,
+    /// Accuracy in percent (damage dealt per damage shot).
+    pub accuracy: i32,
+    pub health: i32,
+    pub armour: i32,
+    pub gunselect: Gun,
+    pub privilege: Privilege,
+    pub state: ClientState,
+    /// The first three bytes of the player's IPv4 address, or zeros.
+    pub ip: [u8; 3],
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoreData {
     pub team_name: CubeString,
     pub score: i32,
+    /// Bases the team holds in capture modes, `None` in other modes.
+    pub bases: Option<Vec<i32>>,
+}
+
+/// The ACK and version every ExtInfo reply has after the echoed request.
+fn read_ack(r: &mut &[u8]) -> Result<(), ParseError> {
+    if i32::sauer_read(r)? != EXT_ACK {
+        return Err(ParseError::InvalidExtInfo);
+    }
+    match i32::sauer_read(r)? {
+        EXT_VERSION => Ok(()),
+        version => Err(ParseError::ExtInfoVersionMismatch(version)),
+    }
 }
 
 impl ExtInfoResponse {
@@ -183,53 +209,42 @@ impl ExtInfoResponse {
                 EXT_VERSION.sauer_write(w);
                 seconds.sauer_write(w);
             }
-            Self::PlayerStats { client_number, ok } => {
+            Self::PlayerStats {
+                client_number,
+                body,
+            } => {
                 EXT_PLAYERSTATS.sauer_write(w);
                 client_number.unwrap_or(-1).sauer_write(w);
                 EXT_ACK.sauer_write(w);
                 EXT_VERSION.sauer_write(w);
-                if *ok { EXT_NO_ERROR } else { EXT_ERROR }.sauer_write(w);
-            }
-            Self::PlayerStatsIds { ids } => {
-                EXT_PLAYERSTATS_RESP_IDS.sauer_write(w);
-                for id in ids {
-                    id.sauer_write(w);
-                }
-            }
-            Self::PlayerStatsStats {
-                client_num,
-                ping,
-                name,
-                team,
-                frags,
-                flags,
-                deaths,
-                teamkills,
-                damage,
-                health,
-                armour,
-                gunselect,
-                privilege,
-                state,
-                ip,
-            } => {
-                EXT_PLAYERSTATS_RESP_STATS.sauer_write(w);
-                client_num.sauer_write(w);
-                ping.sauer_write(w);
-                name.sauer_write(w);
-                team.sauer_write(w);
-                frags.sauer_write(w);
-                flags.sauer_write(w);
-                deaths.sauer_write(w);
-                teamkills.sauer_write(w);
-                damage.sauer_write(w);
-                health.sauer_write(w);
-                armour.sauer_write(w);
-                (*gunselect as i32).sauer_write(w);
-                (*privilege as i32).sauer_write(w);
-                (*state as i32).sauer_write(w);
-                if let Some(ip) = ip {
-                    w.extend_from_slice(ip);
+                match body {
+                    PlayerStatsBody::Error => EXT_ERROR.sauer_write(w),
+                    PlayerStatsBody::Ids(ids) => {
+                        EXT_NO_ERROR.sauer_write(w);
+                        EXT_PLAYERSTATS_RESP_IDS.sauer_write(w);
+                        for id in ids {
+                            id.sauer_write(w);
+                        }
+                    }
+                    PlayerStatsBody::Stats(p) => {
+                        EXT_NO_ERROR.sauer_write(w);
+                        EXT_PLAYERSTATS_RESP_STATS.sauer_write(w);
+                        p.client_num.sauer_write(w);
+                        p.ping.sauer_write(w);
+                        p.name.sauer_write(w);
+                        p.team.sauer_write(w);
+                        p.frags.sauer_write(w);
+                        p.flags.sauer_write(w);
+                        p.deaths.sauer_write(w);
+                        p.teamkills.sauer_write(w);
+                        p.accuracy.sauer_write(w);
+                        p.health.sauer_write(w);
+                        p.armour.sauer_write(w);
+                        p.gunselect.sauer_write(w);
+                        p.privilege.sauer_write(w);
+                        p.state.sauer_write(w);
+                        w.extend_from_slice(&p.ip);
+                    }
                 }
             }
             Self::TeamScore {
@@ -248,13 +263,18 @@ impl ExtInfoResponse {
                 .sauer_write(w);
                 game_mode.sauer_write(w);
                 remaining_time.sauer_write(w);
-
-                if let Some(scores) = scores {
-                    for score in scores {
-                        score.team_name.sauer_write(w);
-                        score.score.sauer_write(w);
+                for score in scores.iter().flatten() {
+                    score.team_name.sauer_write(w);
+                    score.score.sauer_write(w);
+                    match &score.bases {
+                        Some(bases) => {
+                            (bases.len() as i32).sauer_write(w);
+                            for b in bases {
+                                b.sauer_write(w);
+                            }
+                        }
+                        None => (-1).sauer_write(w),
                     }
-                    (-1).sauer_write(w);
                 }
             }
         }
@@ -267,130 +287,80 @@ impl ExtInfoResponse {
             return Err(ParseError::InvalidExtInfo);
         }
 
-        let msg_type = i32::sauer_read(r)?;
-
-        Ok(match msg_type {
+        Ok(match i32::sauer_read(r)? {
             EXT_UPTIME => {
-                if i32::sauer_read(r)? != EXT_ACK {
-                    return Err(ParseError::InvalidExtInfo);
+                read_ack(r)?;
+                Self::Uptime {
+                    seconds: i32::sauer_read(r)?,
                 }
-                let version = i32::sauer_read(r)?;
-                if version != EXT_VERSION {
-                    return Err(ParseError::ExtInfoVersionMismatch(version));
-                }
-
-                let seconds = i32::sauer_read(r)?;
-                Self::Uptime { seconds }
             }
             EXT_PLAYERSTATS => {
                 let cn = i32::sauer_read(r)?;
-
-                if i32::sauer_read(r)? != EXT_ACK {
-                    return Err(ParseError::InvalidExtInfo);
-                }
-                let version = i32::sauer_read(r)?;
-                if version != EXT_VERSION {
-                    return Err(ParseError::ExtInfoVersionMismatch(version));
-                }
-
-                let ok = i32::sauer_read(r)? == EXT_NO_ERROR;
-
-                Self::PlayerStats {
-                    client_number: if cn < 0 { None } else { Some(cn) },
-                    ok,
-                }
-            }
-            EXT_PLAYERSTATS_RESP_IDS => {
-                let mut ids = Vec::new();
-                while r.len() > 0 {
-                    ids.push(i32::sauer_read(r)?);
-                }
-
-                Self::PlayerStatsIds { ids }
-            }
-            EXT_PLAYERSTATS_RESP_STATS => {
-                let client_num = i32::sauer_read(r)?;
-                let ping = i32::sauer_read(r)?;
-                let name = CubeString::sauer_read(r)?;
-                let team = CubeString::sauer_read(r)?;
-                let frags = i32::sauer_read(r)?;
-                let flags = i32::sauer_read(r)?;
-                let deaths = i32::sauer_read(r)?;
-                let teamkills = i32::sauer_read(r)?;
-                let damage = i32::sauer_read(r)?;
-                let health = i32::sauer_read(r)?;
-                let armour = i32::sauer_read(r)?;
-                let gunselect_val = i32::sauer_read(r)?;
-                let privilege_val = i32::sauer_read(r)?;
-                let state_val = i32::sauer_read(r)?;
-
-                let ip = if r.len() > 0 {
-                    Some([u8::sauer_read(r)?, u8::sauer_read(r)?, u8::sauer_read(r)?])
+                read_ack(r)?;
+                let body = if i32::sauer_read(r)? != EXT_NO_ERROR {
+                    PlayerStatsBody::Error
                 } else {
-                    None
+                    match i32::sauer_read(r)? {
+                        EXT_PLAYERSTATS_RESP_IDS => {
+                            let mut ids = Vec::new();
+                            while !r.is_empty() {
+                                ids.push(i32::sauer_read(r)?);
+                            }
+                            PlayerStatsBody::Ids(ids)
+                        }
+                        EXT_PLAYERSTATS_RESP_STATS => PlayerStatsBody::Stats(PlayerStats {
+                            client_num: i32::sauer_read(r)?,
+                            ping: i32::sauer_read(r)?,
+                            name: CubeString::sauer_read(r)?,
+                            team: CubeString::sauer_read(r)?,
+                            frags: i32::sauer_read(r)?,
+                            flags: i32::sauer_read(r)?,
+                            deaths: i32::sauer_read(r)?,
+                            teamkills: i32::sauer_read(r)?,
+                            accuracy: i32::sauer_read(r)?,
+                            health: i32::sauer_read(r)?,
+                            armour: i32::sauer_read(r)?,
+                            gunselect: Gun::sauer_read(r)?,
+                            privilege: Privilege::sauer_read(r)?,
+                            state: ClientState::sauer_read(r)?,
+                            ip: [u8::sauer_read(r)?, u8::sauer_read(r)?, u8::sauer_read(r)?],
+                        }),
+                        _ => return Err(ParseError::InvalidExtInfo),
+                    }
                 };
-
-                Self::PlayerStatsStats {
-                    client_num,
-                    ping,
-                    name,
-                    team,
-                    frags,
-                    flags,
-                    deaths,
-                    teamkills,
-                    damage,
-                    health,
-                    armour,
-                    gunselect: Gun::try_from(gunselect_val).map_err(|_| {
-                        ParseError::InvalidEnumValue {
-                            value: gunselect_val,
-                            enum_name: "Gun",
-                        }
-                    })?,
-                    privilege: Privilege::try_from(privilege_val).map_err(|_| {
-                        ParseError::InvalidEnumValue {
-                            value: privilege_val,
-                            enum_name: "Privilege",
-                        }
-                    })?,
-                    state: ClientState::try_from(state_val).map_err(|_| {
-                        ParseError::InvalidEnumValue {
-                            value: state_val,
-                            enum_name: "ClientState",
-                        }
-                    })?,
-                    ip,
+                Self::PlayerStats {
+                    client_number: (cn >= 0).then_some(cn),
+                    body,
                 }
             }
             EXT_TEAMSCORE => {
-                if i32::sauer_read(r)? != EXT_ACK {
-                    return Err(ParseError::InvalidExtInfo);
-                }
-                let version = i32::sauer_read(r)?;
-                if version != EXT_VERSION {
-                    return Err(ParseError::ExtInfoVersionMismatch(version));
-                }
-
+                read_ack(r)?;
                 let error = i32::sauer_read(r)? != EXT_NO_ERROR;
                 let game_mode = i32::sauer_read(r)?;
                 let remaining_time = i32::sauer_read(r)?;
-
                 let scores = if error {
                     None
                 } else {
                     let mut scores = Vec::new();
-
-                    while r.get(1).copied().unwrap_or(0xFF) != 0xFF {
+                    while !r.is_empty() {
                         let team_name = CubeString::sauer_read(r)?;
                         let score = i32::sauer_read(r)?;
-
-                        scores.push(ScoreData { team_name, score });
+                        let bases = match i32::sauer_read(r)? {
+                            n if n < 0 => None,
+                            n => Some(
+                                (0..n)
+                                    .map(|_| i32::sauer_read(r))
+                                    .collect::<Result<_, _>>()?,
+                            ),
+                        };
+                        scores.push(ScoreData {
+                            team_name,
+                            score,
+                            bases,
+                        });
                     }
-
                     Some(scores)
                 };
-
                 Self::TeamScore {
                     game_mode,
                     remaining_time,

@@ -184,7 +184,8 @@ impl<P: Plugin> Plugin for Base<P> {
         request: &sauer_proto::server_query::ServerQueryRequest,
     ) -> Flow {
         use sauer_proto::server_query::{
-            ExtInfoRequest, ExtInfoResponse, ServerQueryRequest, ServerQueryResponse,
+            ExtInfoRequest, ExtInfoResponse, PlayerStats, PlayerStatsBody, ScoreData,
+            ServerQueryRequest, ServerQueryResponse,
         };
 
         let server = ctx.server();
@@ -223,7 +224,11 @@ impl<P: Plugin> Plugin for Base<P> {
                         );
                     }
                     ExtInfoRequest::PlayerStats { client_number } => {
-                        let send = |resp| {
+                        let send = |body| {
+                            let resp = ExtInfoResponse::PlayerStats {
+                                client_number: *client_number,
+                                body,
+                            };
                             server
                                 .send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(resp))
                         };
@@ -232,41 +237,48 @@ impl<P: Plugin> Plugin for Base<P> {
                             {
                                 Some(id) => vec![id],
                                 None => {
-                                    send(ExtInfoResponse::PlayerStats {
-                                        client_number: Some(*cn),
-                                        ok: false,
-                                    });
+                                    send(PlayerStatsBody::Error);
                                     return Flow::Continue;
                                 }
                             },
                             None => server.client_ids(),
                         };
-                        let stats: Vec<(i32, ExtInfoResponse)> = ids
+                        let stats: Vec<PlayerStats> = ids
                             .into_iter()
                             .filter_map(|id| ext_player_stats(server, id))
                             .collect();
-                        send(ExtInfoResponse::PlayerStats {
-                            client_number: *client_number,
-                            ok: true,
-                        });
-                        send(ExtInfoResponse::PlayerStatsIds {
-                            ids: stats.iter().map(|(cn, _)| *cn).collect(),
-                        });
-                        for (_, resp) in stats {
-                            send(resp);
+                        send(PlayerStatsBody::Ids(
+                            stats.iter().map(|s| s.client_num).collect(),
+                        ));
+                        for s in stats {
+                            send(PlayerStatsBody::Stats(s));
                         }
                     }
                     ExtInfoRequest::TeamScore => {
-                        let game_mode = server.game.read().mode as i32;
-                        let scores = if server.game.read().mode.has_teams() {
-                            Some(Vec::new()) // TODO: actual team scores
-                        } else {
-                            None
-                        };
+                        let mode = server.game.read().mode;
+                        // Like the engine: every team someone is playing on, with its frags.
+                        let scores = mode.has_teams().then(|| {
+                            let mut scores: Vec<ScoreData> = Vec::new();
+                            let players = server.players.filter_map(|_, p| {
+                                (p.status != Status::Spectator && !p.team.is_empty())
+                                    .then(|| (p.team.clone(), p.frags))
+                            });
+                            for (team, frags) in players {
+                                match scores.iter_mut().find(|s| s.team_name == team) {
+                                    Some(s) => s.score += frags,
+                                    None => scores.push(ScoreData {
+                                        team_name: team,
+                                        score: frags,
+                                        bases: None,
+                                    }),
+                                }
+                            }
+                            scores
+                        });
                         server.send_server_query(
                             ctx.addr(),
                             &ServerQueryResponse::ExtInfo(ExtInfoResponse::TeamScore {
-                                game_mode,
+                                game_mode: mode as i32,
                                 remaining_time: 0, // TODO
                                 scores,
                             }),
@@ -1116,26 +1128,23 @@ impl<P: Plugin> Plugin for Base<P> {
 }
 
 /// One player's ExtInfo stats reply, with their cn.
-fn ext_player_stats(
-    server: &Server,
-    id: u64,
-) -> Option<(i32, sauer_proto::server_query::ExtInfoResponse)> {
+fn ext_player_stats(server: &Server, id: u64) -> Option<sauer_proto::server_query::PlayerStats> {
     let cn = i32::from(server.get_cn(id)?);
     let insta = server.game.read().mode.is_insta();
     // Only the first three octets go out, like the engine.
-    let ip = server.peer_addr(id).map(|a| match a.ip() {
-        std::net::IpAddr::V4(v4) => {
+    let ip = match server.peer_addr(id).map(|a| a.ip()) {
+        Some(std::net::IpAddr::V4(v4)) => {
             let [a, b, c, _] = v4.octets();
             [a, b, c]
         }
         _ => [0, 0, 0],
-    });
+    };
     server.players.with(id, |p| {
         let state = p
             .state
             .clone()
             .unwrap_or_else(|| crate::players::state::make_spawn_state(insta, 0));
-        let stats = sauer_proto::server_query::ExtInfoResponse::PlayerStatsStats {
+        sauer_proto::server_query::PlayerStats {
             client_num: cn,
             ping: p.ping,
             name: p.name.clone(),
@@ -1144,14 +1153,13 @@ fn ext_player_stats(
             flags: p.flags,
             deaths: p.deaths,
             teamkills: p.teamkills,
-            damage: 0, // TODO
+            accuracy: 0, // TODO
             health: state.health,
             armour: state.armour,
             gunselect: state.gun_select,
             privilege: p.privilege,
             state: p.status.client_state(),
             ip,
-        };
-        (cn, stats)
+        }
     })
 }
