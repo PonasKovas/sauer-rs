@@ -14,7 +14,7 @@ mod edit_var_value;
 mod flag_state;
 pub(crate) mod tex_ref;
 pub(crate) mod vec3;
-pub mod vslot_delta;
+mod vslot;
 
 pub use base_info::BaseInfo;
 pub use base_spawn::BaseSpawn;
@@ -23,9 +23,10 @@ pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
 pub use tex_ref::TexRef;
-pub use vslot_delta::{VSlotDelta, VSlotDeltaParam};
 
-pub use sauer_core::{EntityType, ItemType, Orient, Selection as SelInfo, Vec3};
+pub use sauer_core::{
+    EntityType, ItemType, Orient, Selection as SelInfo, VSlotParam, VSlotProps, Vec3,
+};
 
 impl crate::internal::SauerWrite for Orient {
     fn sauer_write(&self, out: &mut Vec<u8>) {

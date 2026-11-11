@@ -12,7 +12,7 @@
 
 use super::{Trap, TrapGeom};
 use sauer_map::{Map, Selection};
-use sauer_proto::data::{ClipboardPayload, Orient, VSlotDelta, Vec3};
+use sauer_proto::data::{ClipboardPayload, Orient, VSlotProps, Vec3};
 
 pub const MIN_SIZE: i32 = 64;
 pub const MAX_SIZE: i32 = 1 << 15;
@@ -188,7 +188,7 @@ fn clear(map: &mut Map, min: [i32; 3], extent: [i32; 3], grid: i32) {
     map.fill(&sel(min, extent.map(|e| e / grid), grid), false);
 }
 
-pub fn write_anchor(map: &mut Map, vault: &Vault, record: &VSlotDelta) {
+pub fn write_anchor(map: &mut Map, vault: &Vault, record: &VSlotProps) {
     let (min, _) = vault.anchor_box();
     let s = sel(min, [1; 3], 1);
     map.fill(&s, true);
@@ -212,7 +212,7 @@ pub fn clear_shelf(map: &mut Map, vault: &Vault, geom: &TrapGeom) -> Option<Box3
 }
 
 /// Writes the whole vault from scratch: rock, cavity, anchor and every shelf.
-pub fn build(map: &mut Map, vault: &Vault, traps: &[Trap], record: &VSlotDelta) {
+pub fn build(map: &mut Map, vault: &Vault, traps: &[Trap], record: &VSlotProps) {
     fill_rock(map, vault.origin, vault.size);
     let (cmin, _) = cavity_rel(vault.size);
     clear(map, vault.abs(cmin), [vault.size / 2; 3], vault.size / 4);

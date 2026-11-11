@@ -284,41 +284,41 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                     for v in &mut vals {
                         *v = cursor.read_f32::<LittleEndian>()?;
                     }
-                    slot.params.push(VSlotParam {
+                    slot.props.params.push(VSlotParam {
                         name: CubeString::from_bytes(nbuf),
                         values: vals,
                     });
                 }
             }
             if changed & (1 << 1) != 0 {
-                slot.scale = Some(cursor.read_f32::<LittleEndian>()?);
+                slot.props.scale = Some(cursor.read_f32::<LittleEndian>()?);
             }
             if changed & (1 << 2) != 0 {
-                slot.rotation = Some(cursor.read_i32::<LittleEndian>()?);
+                slot.props.rotation = Some(cursor.read_i32::<LittleEndian>()?);
             }
             if changed & (1 << 3) != 0 {
-                slot.offset = Some((
+                slot.props.offset = Some((
                     cursor.read_i32::<LittleEndian>()?,
                     cursor.read_i32::<LittleEndian>()?,
                 ));
             }
             if changed & (1 << 4) != 0 {
-                slot.scroll = Some((
+                slot.props.scroll = Some((
                     cursor.read_f32::<LittleEndian>()?,
                     cursor.read_f32::<LittleEndian>()?,
                 ));
             }
             if changed & (1 << 5) != 0 {
-                slot.layer = Some(cursor.read_i32::<LittleEndian>()?);
+                slot.props.layer = Some(cursor.read_i32::<LittleEndian>()?);
             }
             if changed & (1 << 6) != 0 {
-                slot.alpha = Some((
+                slot.props.alpha = Some((
                     cursor.read_f32::<LittleEndian>()?,
                     cursor.read_f32::<LittleEndian>()?,
                 ));
             }
             if changed & (1 << 7) != 0 {
-                slot.color = Some((
+                slot.props.color = Some((
                     cursor.read_f32::<LittleEndian>()?,
                     cursor.read_f32::<LittleEndian>()?,
                     cursor.read_f32::<LittleEndian>()?,

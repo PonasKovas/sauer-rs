@@ -1,6 +1,8 @@
 use cube_string::CubeString;
 
-pub use sauer_core::{Clip, Entity, EntityType, ItemType, Material, VSlot, VSlotParam, Volume};
+pub use sauer_core::{
+    Clip, Entity, EntityType, ItemType, Material, VSlot, VSlotParam, VSlotProps, Volume,
+};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum MapConfig {

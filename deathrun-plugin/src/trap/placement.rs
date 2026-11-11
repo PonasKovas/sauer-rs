@@ -131,9 +131,9 @@ pub fn get_outer_faces_vslot_packets(
     orient: u8,
     color: [f32; 3],
 ) -> Vec<sauer_proto::channel1::EditVSlot> {
-    use sauer_proto::data::VSlotDelta;
+    use sauer_proto::data::VSlotProps;
 
-    let mut data_sides = VSlotDelta::default();
+    let mut data_sides = VSlotProps::default();
     data_sides.color = Some((color[0], color[1], color[2]));
     // Ignored by the engine unless the cube has alpha material, which buttons
     // only get on the client of whoever is aiming at them.

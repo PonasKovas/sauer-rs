@@ -10,7 +10,7 @@ use super::vault::{self, Item, Vault};
 use super::{Trap, TrapGeom};
 use crate::map_state::DeathrunState;
 use sauer_map::Map;
-use sauer_proto::data::{ClipboardPayload, VSlotDelta};
+use sauer_proto::data::{ClipboardPayload, VSlotProps};
 use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 use std::sync::Arc;
@@ -54,7 +54,7 @@ pub fn maps(state: &mut DeathrunState) -> Vec<&mut Map> {
         .collect()
 }
 
-fn record(vault: &Vault, traps: &[Trap], generation: u32) -> VSlotDelta {
+fn record(vault: &Vault, traps: &[Trap], generation: u32) -> VSlotProps {
     let rec = VaultRecord {
         origin: vault.origin,
         size: vault.size,
@@ -396,7 +396,7 @@ pub fn load(map: &Map) -> Loaded {
     let Some((generation, bytes)) = sauer_map::param_blob::find_latest(map, TAG) else {
         // Chunks of the pre-vault store had names starting with byte 1.
         let old_store = map.vslots.iter().flatten().any(|vs| {
-            vs.params
+            vs.props.params
                 .iter()
                 .any(|p| p.name.as_bytes().first() == Some(&1))
         });

@@ -48,7 +48,7 @@ fn main() {
         .vslots
         .iter()
         .flatten()
-        .flat_map(|vs| &vs.params)
+        .flat_map(|vs| &vs.props.params)
         .filter(|p| p.name.as_bytes().first() == Some(&1))
         .count();
     if old_params > 0 {
@@ -105,7 +105,7 @@ fn main() {
         println!("\n=== Processing Output ===");
         if args.strip_traps {
             for vs in map.vslots.iter_mut().flatten() {
-                vs.params.retain(|p| !is_trap_param(p.name.as_bytes()));
+                vs.props.params.retain(|p| !is_trap_param(p.name.as_bytes()));
             }
             println!("Stripped all trap data from all VSlots.");
         }

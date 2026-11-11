@@ -341,10 +341,11 @@ pub struct VSlotParam {
     pub values: [f32; 4],
 }
 
+/// What a vslot changes on top of its texture slot. Unset fields keep the
+/// slot's value; set ones are the engine's `changed` bits.
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct VSlot {
-    pub prev: i32,
+pub struct VSlotProps {
     pub params: Vec<VSlotParam>,
     pub scale: Option<f32>,
     pub rotation: Option<i32>,
@@ -354,6 +355,159 @@ pub struct VSlot {
     pub alpha: Option<(f32, f32)>,
     pub color: Option<(f32, f32, f32)>,
 }
+
+impl VSlotProps {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Applies the set fields of `src`, like the engine's `mergevslot`. With
+    /// `delta` they are added to (or multiplied with) the current values,
+    /// otherwise they replace them.
+    pub fn merge(&mut self, src: &VSlotProps, delta: bool) {
+        if !src.params.is_empty() {
+            if delta {
+                for sp in &src.params {
+                    match self.params.iter_mut().find(|p| p.name == sp.name) {
+                        Some(p) => p.values = sp.values,
+                        None => self.params.push(sp.clone()),
+                    }
+                }
+            } else {
+                self.params = src.params.clone();
+            }
+        }
+        if let Some(s) = src.scale {
+            self.scale = Some(match delta {
+                true => (self.scale.unwrap_or(1.0) * s).clamp(1.0 / 8.0, 8.0),
+                false => s,
+            });
+        }
+        if let Some(r) = src.rotation {
+            self.rotation = Some(match delta {
+                true => (self.rotation.unwrap_or(0) + r).clamp(0, 7),
+                false => r,
+            });
+        }
+        if let Some((x, y)) = src.offset {
+            self.offset = Some(match delta {
+                true => {
+                    let (cx, cy) = self.offset.unwrap_or((0, 0));
+                    (cx + x, cy + y)
+                }
+                false => (x, y),
+            });
+        }
+        if let Some((s, t)) = src.scroll {
+            self.scroll = Some(match delta {
+                true => {
+                    let (cs, ct) = self.scroll.unwrap_or((0.0, 0.0));
+                    (cs + s, ct + t)
+                }
+                false => (s, t),
+            });
+        }
+        if let Some(layer) = src.layer {
+            self.layer = Some(layer);
+        }
+        if let Some(alpha) = src.alpha {
+            self.alpha = Some(alpha);
+        }
+        if let Some((r, g, b)) = src.color {
+            self.color = Some(match delta {
+                true => {
+                    let (cr, cg, cb) = self.color.unwrap_or((1.0, 1.0, 1.0));
+                    (cr * r, cg * g, cb * b)
+                }
+                false => (r, g, b),
+            });
+        }
+    }
+}
+
+/// A changed vslot as a map stores it.
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VSlot {
+    /// The vslot this one was made from, ending at the slot's base vslot.
+    pub prev: i32,
+    pub props: VSlotProps,
+}
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{FromLua, UserData, UserDataFields};
+
+    impl UserData for VSlotParam {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("name", |_lua, this| Ok(this.name.clone()));
+            fields.add_field_method_get("values", |_lua, this| Ok(this.values.to_vec()));
+        }
+    }
+
+    impl FromLua for VSlotParam {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            let vals: Vec<f32> = table.get("values")?;
+            let mut values = [0.0; 4];
+            for (i, &v) in vals.iter().enumerate().take(4) {
+                values[i] = v;
+            }
+            Ok(Self {
+                name: table.get("name")?,
+                values,
+            })
+        }
+    }
+
+    impl UserData for VSlotProps {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("params", |_lua, this| Ok(this.params.clone()));
+            fields.add_field_method_get("scale", |_lua, this| Ok(this.scale));
+            fields.add_field_method_get("rotation", |_lua, this| Ok(this.rotation));
+            fields.add_field_method_get("offset", |_lua, this| {
+                Ok(this.offset.map(|o| vec![o.0, o.1]))
+            });
+            fields.add_field_method_get("scroll", |_lua, this| {
+                Ok(this.scroll.map(|s| vec![s.0, s.1]))
+            });
+            fields.add_field_method_get("layer", |_lua, this| Ok(this.layer));
+            fields
+                .add_field_method_get("alpha", |_lua, this| Ok(this.alpha.map(|a| vec![a.0, a.1])));
+            fields.add_field_method_get("color", |_lua, this| {
+                Ok(this.color.map(|c| vec![c.0, c.1, c.2]))
+            });
+        }
+    }
+
+    impl FromLua for VSlotProps {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            let pair = |key: &str| -> Option<(f32, f32)> {
+                let v: Vec<f32> = table.get(key).ok()?;
+                (v.len() >= 2).then(|| (v[0], v[1]))
+            };
+            let offset = table
+                .get::<Vec<i32>>("offset")
+                .ok()
+                .and_then(|v| (v.len() >= 2).then(|| (v[0], v[1])));
+            let color = table
+                .get::<Vec<f32>>("color")
+                .ok()
+                .and_then(|v| (v.len() >= 3).then(|| (v[0], v[1], v[2])));
+            Ok(Self {
+                params: table.get("params").unwrap_or_default(),
+                scale: table.get("scale").ok(),
+                rotation: table.get("rotation").ok(),
+                offset,
+                scroll: pair("scroll"),
+                layer: table.get("layer").ok(),
+                alpha: pair("alpha"),
+                color,
+            })
+        }
+    }
+};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, IntoPrimitive,

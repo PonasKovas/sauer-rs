@@ -4,7 +4,7 @@ use ogz_rs::OgzMap;
 use ogz_rs::data::VSlot;
 use ogz_rs::data::{Entity, Lightmap, MapConfig, Variable};
 use sauer_proto::channel1;
-use sauer_proto::data::{EditVarValue, VSlotDelta};
+use sauer_proto::data::{EditVarValue, VSlotProps};
 use std::collections::{HashMap, HashSet};
 
 /// Where [`Map::normalize_vslots`] puts variants: past the texture slots of
@@ -273,8 +273,8 @@ impl Map {
             if vs.prev >= 0 {
                 vs.prev = remap(vs.prev as usize) as i32;
             }
-            if let Some(layer) = vs.layer {
-                vs.layer = Some(remap(layer.max(0) as usize) as i32);
+            if let Some(layer) = vs.props.layer {
+                vs.props.layer = Some(remap(layer.max(0) as usize) as i32);
             }
             vslots[remap(i)] = Some(vs);
         }
@@ -371,7 +371,7 @@ impl Map {
         sel: &Selection,
         all_faces: bool,
         slot: u16,
-        ds: &VSlotDelta,
+        ds: &VSlotProps,
     ) -> u16 {
         let root = crate::vslot::root_of_slot(&self.vslots, slot);
         let idx = crate::vslot::resolve_vslot(&mut self.vslots, root, ds, false);
@@ -928,7 +928,7 @@ impl Map {
         }
     }
 
-    pub fn apply_vslots(&mut self, sel: &Selection, all_faces: bool, delta: bool, ds: &VSlotDelta) {
+    pub fn apply_vslots(&mut self, sel: &Selection, all_faces: bool, delta: bool, ds: &VSlotProps) {
         let orient = sel.orient as usize;
 
         fn crushededge(e: u8, dc: usize) -> bool {

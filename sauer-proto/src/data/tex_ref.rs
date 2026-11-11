@@ -1,6 +1,7 @@
 use crate::ParseError;
-use crate::data::VSlotDelta;
+use crate::internal::primitives::{read_extra_block, write_extra_block};
 use crate::internal::{SauerRead, SauerWrite};
+use sauer_core::VSlotProps;
 
 /// Wire values at or above this name a texture slot plus a packed vslot.
 const PACKED_TEX: i32 = 0x10000;
@@ -14,7 +15,7 @@ pub enum TexRef {
     Index(u16),
     /// Texture `slot` with changes on top. Sent this way because vslot
     /// indices of changed vslots differ between clients.
-    Variant { slot: u16, vslot: VSlotDelta },
+    Variant { slot: u16, vslot: VSlotProps },
 }
 
 impl TexRef {
@@ -38,7 +39,7 @@ pub(crate) fn read_index(reader: &mut &[u8]) -> Result<TexRef, ParseError> {
     match tex {
         PACKED_TEX.. => Ok(TexRef::Variant {
             slot: tex as u16,
-            vslot: VSlotDelta::default(),
+            vslot: VSlotProps::default(),
         }),
         0.. => Ok(TexRef::Index(tex as u16)),
         _ => Err(ParseError::ValueOutOfRange {
@@ -48,27 +49,24 @@ pub(crate) fn read_index(reader: &mut &[u8]) -> Result<TexRef, ParseError> {
     }
 }
 
-/// Writes the u16 length prefixed block holding the vslot of every
-/// [`TexRef::Variant`] in `texs`, in order.
+/// Writes the extra block holding the vslot of every [`TexRef::Variant`] in
+/// `texs`, in order.
 pub(crate) fn write_extra(texs: &[&TexRef], out: &mut Vec<u8>) {
-    let mut extra = Vec::new();
-    for tex in texs {
-        if let TexRef::Variant { vslot, .. } = tex {
-            vslot.sauer_write(&mut extra);
+    write_extra_block(out, |out| {
+        for tex in texs {
+            if let TexRef::Variant { vslot, .. } = tex {
+                vslot.sauer_write(out);
+            }
         }
-    }
-    out.extend_from_slice(&(extra.len() as u16).to_le_bytes());
-    out.extend_from_slice(&extra);
+    });
 }
 
 /// Reads the block [`write_extra`] writes into the variants of `texs`.
 pub(crate) fn read_extra(texs: &mut [&mut TexRef], reader: &mut &[u8]) -> Result<(), ParseError> {
-    let len = crate::internal::read_slice(reader, 2)?;
-    let len = u16::from_le_bytes([len[0], len[1]]) as usize;
-    let mut extra = crate::internal::read_slice(reader, len)?;
+    let mut extra = read_extra_block(reader)?;
     for tex in texs {
         if let TexRef::Variant { vslot, .. } = tex {
-            *vslot = VSlotDelta::sauer_read(&mut extra)?;
+            *vslot = VSlotProps::sauer_read(&mut extra)?;
         }
     }
     Ok(())

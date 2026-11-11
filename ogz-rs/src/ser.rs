@@ -97,37 +97,37 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
         } else {
             let slot = map.vslots[i].as_ref().unwrap();
             let mut changed = 0i32;
-            if !slot.params.is_empty() {
+            if !slot.props.params.is_empty() {
                 changed |= 1 << 0;
             }
-            if slot.scale.is_some() {
+            if slot.props.scale.is_some() {
                 changed |= 1 << 1;
             }
-            if slot.rotation.is_some() {
+            if slot.props.rotation.is_some() {
                 changed |= 1 << 2;
             }
-            if slot.offset.is_some() {
+            if slot.props.offset.is_some() {
                 changed |= 1 << 3;
             }
-            if slot.scroll.is_some() {
+            if slot.props.scroll.is_some() {
                 changed |= 1 << 4;
             }
-            if slot.layer.is_some() {
+            if slot.props.layer.is_some() {
                 changed |= 1 << 5;
             }
-            if slot.alpha.is_some() {
+            if slot.props.alpha.is_some() {
                 changed |= 1 << 6;
             }
-            if slot.color.is_some() {
+            if slot.props.color.is_some() {
                 changed |= 1 << 7;
             }
 
             encoder.write_i32::<LittleEndian>(changed)?;
             encoder.write_i32::<LittleEndian>(slot.prev)?;
 
-            if !slot.params.is_empty() {
-                encoder.write_u16::<LittleEndian>(slot.params.len() as u16)?;
-                for p in &slot.params {
+            if !slot.props.params.is_empty() {
+                encoder.write_u16::<LittleEndian>(slot.props.params.len() as u16)?;
+                for p in &slot.props.params {
                     encoder.write_u16::<LittleEndian>(p.name.len() as u16)?;
                     encoder.write_all(p.name.as_bytes())?;
                     for f in &p.values {
@@ -135,28 +135,28 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
                     }
                 }
             }
-            if let Some(s) = slot.scale {
+            if let Some(s) = slot.props.scale {
                 encoder.write_f32::<LittleEndian>(s)?;
             }
-            if let Some(r) = slot.rotation {
+            if let Some(r) = slot.props.rotation {
                 encoder.write_i32::<LittleEndian>(r)?;
             }
-            if let Some(o) = slot.offset {
+            if let Some(o) = slot.props.offset {
                 encoder.write_i32::<LittleEndian>(o.0)?;
                 encoder.write_i32::<LittleEndian>(o.1)?;
             }
-            if let Some(sc) = slot.scroll {
+            if let Some(sc) = slot.props.scroll {
                 encoder.write_f32::<LittleEndian>(sc.0)?;
                 encoder.write_f32::<LittleEndian>(sc.1)?;
             }
-            if let Some(l) = slot.layer {
+            if let Some(l) = slot.props.layer {
                 encoder.write_i32::<LittleEndian>(l)?;
             }
-            if let Some(a) = slot.alpha {
+            if let Some(a) = slot.props.alpha {
                 encoder.write_f32::<LittleEndian>(a.0)?;
                 encoder.write_f32::<LittleEndian>(a.1)?;
             }
-            if let Some(c) = slot.color {
+            if let Some(c) = slot.props.color {
                 encoder.write_f32::<LittleEndian>(c.0)?;
                 encoder.write_f32::<LittleEndian>(c.1)?;
                 encoder.write_f32::<LittleEndian>(c.2)?;

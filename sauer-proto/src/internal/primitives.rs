@@ -123,33 +123,26 @@ pub(crate) fn write_all_remaining(val: &Vec<u8>, out: &mut Vec<u8>) {
     out.extend_from_slice(val);
 }
 
-// u16 length prefixed bytes
-pub(crate) fn read_short_pref_data(reader: &mut &[u8]) -> Result<Vec<u8>, ParseError> {
+// u16 length prefixed block, the extra data of edit messages
+pub(crate) fn read_extra_block<'a>(reader: &mut &'a [u8]) -> Result<&'a [u8], ParseError> {
     let l = read_slice(reader, 2)?;
     let len = u16::from_le_bytes([l[0], l[1]]) as usize;
-
-    let data = read_slice(reader, len)?.to_vec();
-
-    Ok(data)
+    read_slice(reader, len)
 }
-pub(crate) fn write_short_pref_data(val: &Vec<u8>, out: &mut Vec<u8>) {
-    (val.len() as u8).sauer_write(out);
-    ((val.len() >> 8) as u8).sauer_write(out);
-    out.extend_from_slice(val);
-}
-
-pub(crate) fn read_short_pref_vslot_delta(
-    reader: &mut &[u8],
-) -> Result<crate::data::VSlotDelta, ParseError> {
-    let data = read_short_pref_data(reader)?;
-    let mut data_reader = data.as_slice();
-    crate::data::VSlotDelta::sauer_read(&mut data_reader)
+pub(crate) fn write_extra_block(out: &mut Vec<u8>, write: impl FnOnce(&mut Vec<u8>)) {
+    let start = out.len();
+    out.extend_from_slice(&[0, 0]);
+    write(out);
+    let len = (out.len() - start - 2) as u16;
+    out[start..start + 2].copy_from_slice(&len.to_le_bytes());
 }
 
-pub(crate) fn write_short_pref_vslot_delta(val: &crate::data::VSlotDelta, out: &mut Vec<u8>) {
-    let mut temp = Vec::new();
-    val.sauer_write(&mut temp);
-    write_short_pref_data(&temp, out);
+// A packed vslot alone in an extra block
+pub(crate) fn read_vslot_block(reader: &mut &[u8]) -> Result<sauer_core::VSlotProps, ParseError> {
+    sauer_core::VSlotProps::sauer_read(&mut read_extra_block(reader)?)
+}
+pub(crate) fn write_vslot_block(val: &sauer_core::VSlotProps, out: &mut Vec<u8>) {
+    write_extra_block(out, |out| val.sauer_write(out));
 }
 
 // -1 (or any negative number) terminated sequence

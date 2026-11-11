@@ -1,7 +1,7 @@
 use crate::ParseError;
 use crate::internal::{SauerRead, SauerWrite};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
-use sauer_core::{Cube, Entity, Node, Selection, VSlot, VSlotParam};
+use sauer_core::{Cube, Entity, Node, Selection, VSlotProps};
 use std::io::{Read, Write};
 
 pub fn pack_cube(node: &Node, out: &mut Vec<u8>) {
@@ -67,107 +67,6 @@ pub fn unpack_cube(bytes: &[u8], pos: &mut usize) -> Option<Node> {
     }
 }
 
-pub fn pack_vslot(out: &mut Vec<u8>, vs: &VSlot) {
-    use sauer_core::io::{putfloat, putint, putstring, putuint};
-    if !vs.params.is_empty() {
-        for p in &vs.params {
-            out.push(0);
-            putstring(out, p.name.as_bytes());
-            for i in 0..4 {
-                putfloat(out, p.values[i]);
-            }
-        }
-    }
-    if let Some(scale) = vs.scale {
-        out.push(1);
-        putfloat(out, scale);
-    }
-    if let Some(rotation) = vs.rotation {
-        out.push(2);
-        putint(out, rotation);
-    }
-    if let Some(offset) = vs.offset {
-        out.push(3);
-        putint(out, offset.0);
-        putint(out, offset.1);
-    }
-    if let Some(scroll) = vs.scroll {
-        out.push(4);
-        putfloat(out, scroll.0);
-        putfloat(out, scroll.1);
-    }
-    if let Some(layer) = vs.layer {
-        out.push(5);
-        putuint(out, layer);
-    }
-    if let Some(alpha) = vs.alpha {
-        out.push(6);
-        putfloat(out, alpha.0);
-        putfloat(out, alpha.1);
-    }
-    if let Some(color) = vs.color {
-        out.push(7);
-        putfloat(out, color.0);
-        putfloat(out, color.1);
-        putfloat(out, color.2);
-    }
-    out.push(0xFF);
-}
-
-pub fn unpack_vslot(bytes: &[u8], pos: &mut usize) -> Option<VSlot> {
-    use sauer_core::io::{getfloat, getint, getstring, getuint};
-    let mut vs = VSlot::default();
-    loop {
-        if *pos >= bytes.len() {
-            break;
-        }
-        let type_byte = bytes[*pos];
-        *pos += 1;
-        if type_byte == 0xFF {
-            break;
-        }
-
-        let mut slice = &bytes[*pos..];
-        match type_byte {
-            0 => {
-                let name = getstring(&mut slice)?;
-                let mut values = [0.0; 4];
-                for i in 0..4 {
-                    values[i] = getfloat(&mut slice)?;
-                }
-                vs.params.push(VSlotParam { name, values });
-            }
-            1 => vs.scale = Some(getfloat(&mut slice)?),
-            2 => vs.rotation = Some(getint(&mut slice)?),
-            3 => {
-                let x = getint(&mut slice)?;
-                let y = getint(&mut slice)?;
-                vs.offset = Some((x, y));
-            }
-            4 => {
-                let s = getfloat(&mut slice)?;
-                let t = getfloat(&mut slice)?;
-                vs.scroll = Some((s, t));
-            }
-            5 => vs.layer = Some(getuint(&mut slice)?),
-            6 => {
-                let f = getfloat(&mut slice)?;
-                let b = getfloat(&mut slice)?;
-                vs.alpha = Some((f, b));
-            }
-            7 => {
-                let r = getfloat(&mut slice)?;
-                let g = getfloat(&mut slice)?;
-                let b = getfloat(&mut slice)?;
-                vs.color = Some((r, g, b));
-            }
-            _ => return None,
-        }
-        *pos = bytes.len() - slice.len();
-    }
-    Some(vs)
-}
-
 pub fn pack_entity(ent: &Entity, out: &mut Vec<u8>) {
     out.extend_from_slice(&ent.position[0].to_le_bytes());
     out.extend_from_slice(&ent.position[1].to_le_bytes());
@@ -222,7 +121,7 @@ pub fn unpack_entity(bytes: &[u8], pos: &mut usize) -> Option<Entity> {
 pub struct VSlotData {
     pub index: u16,
     pub slot: u16,
-    pub vslot: VSlot,
+    pub vslot: VSlotProps,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,7 +155,7 @@ impl ClipboardPayload {
         for v in &self.vslots {
             uncompressed.extend_from_slice(&v.index.to_le_bytes());
             uncompressed.extend_from_slice(&v.slot.to_le_bytes());
-            pack_vslot(&mut uncompressed, &v.vslot);
+            v.vslot.sauer_write(&mut uncompressed);
         }
         uncompressed.extend_from_slice(&0u16.to_le_bytes());
         uncompressed.extend_from_slice(&0u16.to_le_bytes());
@@ -371,7 +270,7 @@ impl SauerRead for ClipboardPayload {
             if index == 0 {
                 break;
             }
-            let vs = unpack_vslot(&decompressed, &mut pos)
+            let vs = read_vslot_at(&decompressed, &mut pos)
                 .ok_or(ParseError::UnexpectedEof { expected: 1 })?;
             vslots.push(VSlotData {
                 index,
@@ -455,7 +354,7 @@ impl SauerWrite for UndoPayload {
                 for v in vslots {
                     uncompressed.extend_from_slice(&v.index.to_le_bytes());
                     uncompressed.extend_from_slice(&v.slot.to_le_bytes());
-                    pack_vslot(&mut uncompressed, &v.vslot);
+                    v.vslot.sauer_write(&mut uncompressed);
                 }
                 uncompressed.extend_from_slice(&0u16.to_le_bytes());
                 uncompressed.extend_from_slice(&0u16.to_le_bytes());
@@ -585,7 +484,7 @@ impl SauerRead for UndoPayload {
                 if index == 0 {
                     break;
                 }
-                let vs = unpack_vslot(&decompressed, &mut pos)
+                let vs = read_vslot_at(&decompressed, &mut pos)
                     .ok_or(ParseError::UnexpectedEof { expected: 1 })?;
                 vslots.push(VSlotData {
                     index,
@@ -638,3 +537,10 @@ const _: () = {
         }
     }
 };
+
+fn read_vslot_at(bytes: &[u8], pos: &mut usize) -> Option<VSlotProps> {
+    let mut r = &bytes[*pos..];
+    let vs = VSlotProps::sauer_read(&mut r).ok()?;
+    *pos = bytes.len() - r.len();
+    Some(vs)
+}

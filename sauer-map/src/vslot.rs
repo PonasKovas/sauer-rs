@@ -1,7 +1,7 @@
 use crate::Node;
-use ogz_rs::data::{VSlot, VSlotParam};
+use ogz_rs::data::{VSlot, VSlotProps};
 use sauer_proto::data::clipboard::VSlotData;
-use sauer_proto::data::{TexRef, VSlotDelta, VSlotDeltaParam};
+use sauer_proto::data::TexRef;
 use std::collections::HashMap;
 
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
@@ -76,7 +76,7 @@ pub fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
 pub fn resolve_vslot(
     vslots: &mut Vec<Option<VSlot>>,
     base_tex: u16,
-    ds: &VSlotDelta,
+    ds: &VSlotProps,
     delta: bool,
 ) -> u16 {
     lookup_vslot(vslots, base_tex, ds, delta, true).expect("inserting lookup always succeeds")
@@ -87,7 +87,7 @@ pub fn resolve_vslot(
 pub fn lookup_vslot(
     vslots: &mut Vec<Option<VSlot>>,
     base_tex: u16,
-    ds: &VSlotDelta,
+    ds: &VSlotProps,
     delta: bool,
     insert: bool,
 ) -> Option<u16> {
@@ -96,99 +96,16 @@ pub fn lookup_vslot(
     }
     let root = root_base_of(vslots, base_tex);
     let chain_tail = find_chain_tail(vslots, root);
-    let existing = vslots
-        .get(base_tex as usize)
-        .cloned()
-        .flatten()
-        .unwrap_or_default();
-    let mut new_vs = existing.clone();
-
-    new_vs.prev = chain_tail;
-
-    if !ds.params.is_empty() {
-        if delta {
-            for p_delta in &ds.params {
-                if let Some(p) = new_vs.params.iter_mut().find(|p| p.name == p_delta.name) {
-                    p.values = p_delta.values;
-                } else {
-                    new_vs.params.push(VSlotParam {
-                        name: p_delta.name.clone(),
-                        values: p_delta.values,
-                    });
-                }
-            }
-        } else {
-            new_vs.params = ds
-                .params
-                .iter()
-                .map(|p_delta| VSlotParam {
-                    name: p_delta.name.clone(),
-                    values: p_delta.values,
-                })
-                .collect();
-        }
-    }
-    if let Some(ds_scale) = ds.scale {
-        if delta {
-            let cur = new_vs.scale.unwrap_or(1.0);
-            new_vs.scale = Some((cur * ds_scale).clamp(1.0 / 8.0, 8.0));
-        } else {
-            new_vs.scale = Some(ds_scale);
-        }
-    }
-    if let Some(ds_rot) = ds.rotation {
-        if delta {
-            let cur = new_vs.rotation.unwrap_or(0);
-            new_vs.rotation = Some((cur + ds_rot).clamp(0, 7));
-        } else {
-            new_vs.rotation = Some(ds_rot);
-        }
-    }
-    if let Some(ds_offset) = ds.offset {
-        if delta {
-            let cur = new_vs.offset.unwrap_or((0, 0));
-            new_vs.offset = Some((cur.0 + ds_offset.0, cur.1 + ds_offset.1));
-        } else {
-            new_vs.offset = Some(ds_offset);
-        }
-    }
-    if let Some(ds_scroll) = ds.scroll {
-        if delta {
-            let cur = new_vs.scroll.unwrap_or((0.0, 0.0));
-            new_vs.scroll = Some((cur.0 + ds_scroll.0, cur.1 + ds_scroll.1));
-        } else {
-            new_vs.scroll = Some(ds_scroll);
-        }
-    }
-    if let Some(ds_layer) = ds.layer {
-        new_vs.layer = Some(ds_layer);
-    }
-    if let Some(ds_alpha) = ds.alpha {
-        new_vs.alpha = Some(ds_alpha);
-    }
-    if let Some(ds_color) = ds.color {
-        if delta {
-            let cur = new_vs.color.unwrap_or((1.0, 1.0, 1.0));
-            new_vs.color = Some((cur.0 * ds_color.0, cur.1 * ds_color.1, cur.2 * ds_color.2));
-        } else {
-            new_vs.color = Some(ds_color);
-        }
-    }
+    let mut props = match vslots.get(base_tex as usize) {
+        Some(Some(vs)) => vs.props.clone(),
+        _ => VSlotProps::default(),
+    };
+    props.merge(ds, delta);
 
     for (i, vs_opt) in vslots.iter().enumerate() {
         if let Some(vs) = vs_opt {
-            if root_base_of(vslots, i as u16) == root {
-                if vs.params == new_vs.params
-                    && vs.scale == new_vs.scale
-                    && vs.rotation == new_vs.rotation
-                    && vs.offset == new_vs.offset
-                    && vs.scroll == new_vs.scroll
-                    && vs.layer == new_vs.layer
-                    && vs.alpha == new_vs.alpha
-                    && vs.color == new_vs.color
-                {
-                    return Some(i as u16);
-                }
+            if root_base_of(vslots, i as u16) == root && vs.props == props {
+                return Some(i as u16);
             }
         }
     }
@@ -198,29 +115,11 @@ pub fn lookup_vslot(
 
     // Always at the end: an empty entry is some slot's base (see
     // `slot_of_root`), and filling it would shift every slot after it.
-    vslots.push(Some(new_vs));
+    vslots.push(Some(VSlot {
+        prev: chain_tail,
+        props,
+    }));
     Some((vslots.len() - 1) as u16)
-}
-
-/// The props of a vslot as a full (non-delta) description.
-pub fn to_delta(vs: &VSlot) -> VSlotDelta {
-    VSlotDelta {
-        params: vs
-            .params
-            .iter()
-            .map(|p| VSlotDeltaParam {
-                name: p.name.clone(),
-                values: p.values,
-            })
-            .collect(),
-        scale: vs.scale,
-        rotation: vs.rotation,
-        offset: vs.offset,
-        scroll: vs.scroll,
-        layer: vs.layer,
-        alpha: vs.alpha,
-        color: vs.color,
-    }
 }
 
 /// Resolves a texture a client sent (`N_EDITT`, `N_REPLACE`) to a local
@@ -258,7 +157,7 @@ pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &m
     for (vd, root) in incoming {
         map.insert(
             vd.index,
-            resolve_vslot(vslots, root, &to_delta(&vd.vslot), false),
+            resolve_vslot(vslots, root, &vd.vslot, false),
         );
     }
     if map.is_empty() {

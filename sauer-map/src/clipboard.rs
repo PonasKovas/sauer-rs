@@ -1,5 +1,5 @@
 use crate::{Map, Node};
-use ogz_rs::data::VSlot;
+use ogz_rs::data::{VSlot, VSlotProps};
 use sauer_proto::data::ClipboardPayload;
 use sauer_proto::data::clipboard::VSlotData;
 
@@ -32,9 +32,9 @@ pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VS
             continue;
         }
         let vslot = match vslots.get(idx) {
-            Some(Some(vs)) => vs.clone(),
+            Some(Some(vs)) => vs.props.clone(),
             _ if crate::vslot::slot_of_root(vslots, idx as i32) == idx as i32 => continue,
-            _ => VSlot::default(),
+            _ => VSlotProps::default(),
         };
         let root = crate::vslot::root_base_of(vslots, idx as u16);
         out.push(VSlotData {

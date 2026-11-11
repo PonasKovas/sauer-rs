@@ -10,9 +10,9 @@ use crate::internal::{
     SauerRead, SauerWrite, check_tag,
     constants::*,
     primitives::{
-        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_vslot_delta,
+        read_neg_term_seq, read_nonpos_term_seq, read_vslot_block,
         read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq,
-        write_short_pref_vslot_delta, write_varint_pref_seq,
+        write_vslot_block, write_varint_pref_seq,
     },
 };
 use crate::route::{C2S, Chan1, S2C};
@@ -508,7 +508,7 @@ make_struct!(
     sel: SelInfo,
     delta: bool,
     all_faces: bool,
-    vslot: data::VSlotDelta => write_short_pref_vslot_delta, read_short_pref_vslot_delta,
+    vslot: VSlotProps => write_vslot_block, read_vslot_block,
 });
 
 make_struct!(

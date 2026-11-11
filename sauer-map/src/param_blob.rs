@@ -13,14 +13,14 @@
 
 use crate::Map;
 use cube_string::CubeString;
-use sauer_proto::data::{VSlotDelta, VSlotDeltaParam};
+use sauer_proto::data::{VSlotParam, VSlotProps};
 use std::collections::BTreeMap;
 
 const CHUNK_CHARS: usize = 224;
 const HEADER_CHARS: usize = 8 + 4 + 4;
 
 /// Builds the vslot delta (params only) that carries `data`.
-pub fn encode(tag: &str, generation: u32, data: &[u8]) -> VSlotDelta {
+pub fn encode(tag: &str, generation: u32, data: &[u8]) -> VSlotProps {
     let text = base64_encode(data);
     let chunks: Vec<&[u8]> = text.as_bytes().chunks(CHUNK_CHARS).collect();
     let count = chunks.len().max(1);
@@ -31,12 +31,12 @@ pub fn encode(tag: &str, generation: u32, data: &[u8]) -> VSlotDelta {
         let chunk = chunks.get(i).copied().unwrap_or(&[]);
         let mut name = format!("~{tag}{generation:08x}{i:04x}{count:04x}").into_bytes();
         name.extend_from_slice(chunk);
-        params.push(VSlotDeltaParam {
+        params.push(VSlotParam {
             name: CubeString::from_bytes(name),
             values: [0.0; 4],
         });
     }
-    VSlotDelta {
+    VSlotProps {
         params,
         ..Default::default()
     }
@@ -49,7 +49,7 @@ pub fn find_latest(map: &Map, tag: &str) -> Option<(u32, Vec<u8>)> {
     let mut found: BTreeMap<u32, (usize, BTreeMap<usize, Vec<u8>>)> = BTreeMap::new();
 
     for vs in map.vslots.iter().flatten() {
-        for p in &vs.params {
+        for p in &vs.props.params {
             let name = p.name.as_bytes();
             let Some(rest) = name.strip_prefix(prefix.as_bytes()) else {
                 continue;
@@ -144,22 +144,17 @@ fn base64_decode(text: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ogz_rs::data::{VSlot, VSlotParam};
+    use ogz_rs::data::VSlot;
 
-    fn map_with(deltas: &[VSlotDelta]) -> Map {
+    fn map_with(deltas: &[VSlotProps]) -> Map {
         let mut map = Map::new_empty(1024);
         for d in deltas {
             map.vslots.push(Some(VSlot {
                 prev: 1,
-                params: d
-                    .params
-                    .iter()
-                    .map(|p| VSlotParam {
-                        name: p.name.clone(),
-                        values: p.values,
-                    })
-                    .collect(),
-                ..Default::default()
+                props: VSlotProps {
+                    params: d.params.clone(),
+                    ..Default::default()
+                },
             }));
         }
         map
