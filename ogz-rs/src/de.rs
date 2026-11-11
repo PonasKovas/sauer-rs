@@ -1,5 +1,5 @@
 use crate::error::OgzError;
-use crate::{data::*, OgzMap};
+use crate::{OgzMap, data::*};
 use byteorder::{LittleEndian, ReadBytesExt};
 use cube_string::CubeString;
 use flate2::read::MultiGzDecoder;
@@ -78,56 +78,16 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         return Err(OgzError::LimitExceeded("lightmaps"));
     }
 
-    let blendmap_res;
+    let has_blendmap;
     let map_vars;
     let mut map_vslots = 0;
 
-    let config = if version <= 28 {
-        let lightprecision = cursor.read_i32::<LittleEndian>()?;
-        let lighterror = cursor.read_i32::<LittleEndian>()?;
-        let lightlod = cursor.read_i32::<LittleEndian>()?;
-        let ambient = cursor.read_u8()?;
-        let mut watercolour = [0; 3];
-        cursor.read_exact(&mut watercolour)?;
-        let blendmap_mode = cursor.read_u8()?;
-
-        blendmap_res = blendmap_mode as i32;
-
-        let lerpangle = cursor.read_u8()?;
-        let lerpsubdiv = cursor.read_u8()?;
-        let lerpsubdivsize = cursor.read_u8()?;
-        let bumperror = cursor.read_u8()?;
-        let mut skylight = [0; 3];
-        cursor.read_exact(&mut skylight)?;
-        let mut lavacolour = [0; 3];
-        cursor.read_exact(&mut lavacolour)?;
-        let mut waterfallcolour = [0; 3];
-        cursor.read_exact(&mut waterfallcolour)?;
-
-        cursor.read_exact(&mut [0u8; 10])?; // Reserved
-
-        let mut maptitle_buf = [0u8; 128];
-        cursor.read_exact(&mut maptitle_buf)?;
-        let title_len = maptitle_buf.iter().position(|&c| c == 0).unwrap_or(128);
-
-        MapConfig::Legacy {
-            lightprecision,
-            lighterror,
-            lightlod,
-            ambient,
-            watercolour,
-            blendmap_mode,
-            lerpangle,
-            lerpsubdiv,
-            lerpsubdivsize,
-            bumperror,
-            skylight,
-            lavacolour,
-            waterfallcolour,
-            maptitle: CubeString::from_bytes(maptitle_buf[..title_len].to_vec()),
-        }
+    let variables = if version <= 28 {
+        let (variables, blendmap) = read_legacy_header(&mut cursor)?;
+        has_blendmap = blendmap != 0;
+        variables
     } else {
-        blendmap_res = cursor.read_i32::<LittleEndian>()?;
+        has_blendmap = cursor.read_i32::<LittleEndian>()? != 0;
         map_vars = cursor.read_i32::<LittleEndian>()?;
         if version >= 30 {
             map_vslots = cursor.read_i32::<LittleEndian>()?;
@@ -166,11 +126,12 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
                         value: CubeString::from_bytes(sbuf),
                     }
                 }
-                _ => Variable::Int { name, value: 0 },
+                // The engine skips a var of unknown type; it has no value.
+                _ => continue,
             };
             variables.push(var);
         }
-        MapConfig::Modern { variables }
+        variables
     };
 
     let mut game_type = None;
@@ -380,17 +341,17 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
     // The header field is only a "has blendmap" flag. The blendmap itself is a
     // quadtree (engine `loadblendmap`), kept here as its raw serialized bytes.
-    let mut blendmap_data = None;
-    if version >= 28 && blendmap_res > 0 {
+    let mut blendmap = None;
+    if version >= 28 && has_blendmap {
         let mut bdata = Vec::new();
         crate::blendmap::read_node(&mut cursor, &mut bdata, 0)?;
-        blendmap_data = Some(bdata);
+        blendmap = Some(bdata);
     }
 
     Ok(OgzMap {
         version,
         world_size,
-        config,
+        variables,
         game_type,
         eif,
         extra_game_data,
@@ -400,9 +361,72 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         octree,
         lightmaps: lm_vec,
         pvs: pvs_data,
-        blendmap_resolution: blendmap_res,
-        blendmap_data,
+        blendmap,
     })
+}
+
+/// The pre-v29 header, which held map settings as fixed fields. Returns them
+/// as the vars the engine sets from them on load (`load_world`), and the
+/// blendmap flag.
+fn read_legacy_header(cursor: &mut Cursor<&Vec<u8>>) -> Result<(Vec<Variable>, u8), OgzError> {
+    let rgb = |c: [u8; 3]| (i32::from(c[0]) << 16) | (i32::from(c[1]) << 8) | i32::from(c[2]);
+    let int = |name: &str, value: i32| Variable::Int {
+        name: CubeString::from_bytes(name.as_bytes().to_vec()),
+        value,
+    };
+
+    let lightprecision = cursor.read_i32::<LittleEndian>()?;
+    let lighterror = cursor.read_i32::<LittleEndian>()?;
+    let lightlod = cursor.read_i32::<LittleEndian>()?;
+    let ambient = cursor.read_u8()?;
+    let mut watercolour = [0; 3];
+    cursor.read_exact(&mut watercolour)?;
+    let blendmap = cursor.read_u8()?;
+    let lerpangle = cursor.read_u8()?;
+    let lerpsubdiv = cursor.read_u8()?;
+    let lerpsubdivsize = cursor.read_u8()?;
+    let bumperror = cursor.read_u8()?;
+    let mut skylight = [0; 3];
+    cursor.read_exact(&mut skylight)?;
+    let mut lavacolour = [0; 3];
+    cursor.read_exact(&mut lavacolour)?;
+    let mut waterfallcolour = [0; 3];
+    cursor.read_exact(&mut waterfallcolour)?;
+    cursor.read_exact(&mut [0u8; 10])?; // Reserved
+    let mut maptitle = [0u8; 128];
+    cursor.read_exact(&mut maptitle)?;
+    let title_len = maptitle.iter().position(|&c| c == 0).unwrap_or(128);
+
+    let mut vars = Vec::new();
+    if lightprecision != 0 {
+        vars.push(int("lightprecision", lightprecision));
+    }
+    if lighterror != 0 {
+        vars.push(int("lighterror", lighterror));
+    }
+    if bumperror != 0 {
+        vars.push(int("bumperror", bumperror.into()));
+    }
+    vars.push(int("lightlod", lightlod));
+    if ambient != 0 {
+        vars.push(int("ambient", ambient.into()));
+    }
+    vars.push(int("skylight", rgb(skylight)));
+    vars.push(int("watercolour", rgb(watercolour)));
+    vars.push(int("waterfallcolour", rgb(waterfallcolour)));
+    vars.push(int("lavacolour", rgb(lavacolour)));
+    if lerpsubdivsize != 0 || lerpangle != 0 {
+        vars.push(int("lerpangle", lerpangle.into()));
+    }
+    if lerpsubdivsize != 0 {
+        vars.push(int("lerpsubdiv", lerpsubdiv.into()));
+        vars.push(int("lerpsubdivsize", lerpsubdivsize.into()));
+    }
+    vars.push(Variable::String {
+        name: CubeString::from_bytes(b"maptitle".to_vec()),
+        value: CubeString::from_bytes(maptitle[..title_len].to_vec()),
+    });
+    Ok((vars, blendmap))
 }
 
 /// Reads the 8 children of a cube, each `size` wide.

@@ -1,9 +1,15 @@
 use crate::error::OgzError;
-use crate::{data::*, OgzMap};
+use crate::{OgzMap, data::*};
 use byteorder::{LittleEndian, WriteBytesExt};
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use std::io::{BufWriter, Write};
+
+/// A length that must fit the field the engine stores it in. A wrapped
+/// length would make the engine misread the rest of the file.
+fn checked<T: TryFrom<usize>>(len: usize, what: &'static str) -> Result<T, OgzError> {
+    T::try_from(len).map_err(|_| OgzError::LimitExceeded(what))
+}
 
 pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, OgzError> {
     let mut encoder = BufWriter::new(GzEncoder::new(Vec::new(), compression));
@@ -13,51 +19,41 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
     encoder.write_i32::<LittleEndian>(33)?; // Hardcoded version 33
     encoder.write_i32::<LittleEndian>(28)?; // headersize
     encoder.write_i32::<LittleEndian>(map.world_size)?;
-    encoder.write_i32::<LittleEndian>(map.entities.len() as i32)?;
-    encoder.write_i32::<LittleEndian>(map.pvs.len() as i32)?;
-    encoder.write_i32::<LittleEndian>(map.lightmaps.len() as i32)?;
+    encoder.write_i32::<LittleEndian>(checked(map.entities.len(), "numents")?)?;
+    encoder.write_i32::<LittleEndian>(checked(map.pvs.len(), "numpvs")?)?;
+    encoder.write_i32::<LittleEndian>(checked(map.lightmaps.len(), "lightmaps")?)?;
 
-    match &map.config {
-        MapConfig::Modern { variables } => {
-            encoder.write_i32::<LittleEndian>(map.blendmap_resolution)?;
-            encoder.write_i32::<LittleEndian>(variables.len() as i32)?;
+    // The engine only checks whether the blendmap field is set.
+    encoder.write_i32::<LittleEndian>(map.blendmap.is_some() as i32)?;
+    encoder.write_i32::<LittleEndian>(checked(map.variables.len(), "numvars")?)?;
+    encoder.write_i32::<LittleEndian>(checked(map.vslots.len(), "numvslots")?)?;
 
-            let vslots_count = map.vslots.len();
-            encoder.write_i32::<LittleEndian>(vslots_count as i32)?; // numvslots logically
-
-            for var in variables {
-                match var {
-                    Variable::Int { name, value } => {
-                        encoder.write_u8(0)?;
-                        encoder.write_u16::<LittleEndian>(name.len() as u16)?;
-                        encoder.write_all(name.as_bytes())?;
-                        encoder.write_i32::<LittleEndian>(*value)?;
-                    }
-                    Variable::Float { name, value } => {
-                        encoder.write_u8(1)?;
-                        encoder.write_u16::<LittleEndian>(name.len() as u16)?;
-                        encoder.write_all(name.as_bytes())?;
-                        encoder.write_f32::<LittleEndian>(*value)?;
-                    }
-                    Variable::String { name, value } => {
-                        encoder.write_u8(2)?;
-                        encoder.write_u16::<LittleEndian>(name.len() as u16)?;
-                        encoder.write_all(name.as_bytes())?;
-                        encoder.write_u16::<LittleEndian>(value.len() as u16)?;
-                        encoder.write_all(value.as_bytes())?;
-                    }
-                }
+    for var in &map.variables {
+        let (ty, name) = match var {
+            Variable::Int { name, .. } => (0, name),
+            Variable::Float { name, .. } => (1, name),
+            Variable::String { name, .. } => (2, name),
+        };
+        encoder.write_u8(ty)?;
+        encoder.write_u16::<LittleEndian>(checked(name.len(), "var name")?)?;
+        encoder.write_all(name.as_bytes())?;
+        match var {
+            Variable::Int { value, .. } => encoder.write_i32::<LittleEndian>(*value)?,
+            Variable::Float { value, .. } => encoder.write_f32::<LittleEndian>(*value)?,
+            Variable::String { value, .. } => {
+                encoder.write_u16::<LittleEndian>(checked(value.len(), "var value")?)?;
+                encoder.write_all(value.as_bytes())?;
             }
         }
-        MapConfig::Legacy { .. } => return Err(OgzError::CannotSerializeLegacy),
     }
 
     if let Some(ref gt) = map.game_type {
-        encoder.write_u8(gt.len() as u8)?;
+        encoder.write_u8(checked(gt.len(), "gametype")?)?;
         encoder.write_all(gt.as_bytes())?;
         encoder.write_u8(0)?; // Null terminator
         encoder.write_u16::<LittleEndian>(map.eif)?;
-        encoder.write_u16::<LittleEndian>(map.extra_game_data.len() as u16)?;
+        encoder
+            .write_u16::<LittleEndian>(checked(map.extra_game_data.len(), "extra game data")?)?;
         encoder.write_all(&map.extra_game_data)?;
     } else {
         encoder.write_u8(0)?; // fallback gametype logic or empty
@@ -66,7 +62,7 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
         encoder.write_u16::<LittleEndian>(0)?; // extrasize
     }
 
-    encoder.write_u16::<LittleEndian>(map.mru_textures.len() as u16)?;
+    encoder.write_u16::<LittleEndian>(checked(map.mru_textures.len(), "texture mru")?)?;
     for tex in &map.mru_textures {
         encoder.write_u16::<LittleEndian>(*tex)?;
     }
@@ -78,7 +74,7 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
         for a in &ent.attrs {
             encoder.write_i16::<LittleEndian>(*a)?;
         }
-        encoder.write_u8(i32::from(ent.ent_type) as u8)?;
+        encoder.write_u8(checked(i32::from(ent.ent_type) as usize, "entity type")?)?;
         encoder.write_u8(0)?; // reserved
         if map.eif > 0 {
             encoder.write_all(&ent.extra_data)?;
@@ -126,9 +122,11 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
             encoder.write_i32::<LittleEndian>(slot.prev)?;
 
             if !slot.props.params.is_empty() {
-                encoder.write_u16::<LittleEndian>(slot.props.params.len() as u16)?;
+                encoder
+                    .write_u16::<LittleEndian>(checked(slot.props.params.len(), "vslot params")?)?;
                 for p in &slot.props.params {
-                    encoder.write_u16::<LittleEndian>(p.name.len() as u16)?;
+                    encoder
+                        .write_u16::<LittleEndian>(checked(p.name.len(), "vslot param name")?)?;
                     encoder.write_all(p.name.as_bytes())?;
                     for f in &p.values {
                         encoder.write_f32::<LittleEndian>(*f)?;
@@ -193,7 +191,7 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
     if !map.pvs.is_empty() {
         encoder.write_all(&map.pvs)?;
     }
-    if let Some(ref bdata) = map.blendmap_data {
+    if let Some(ref bdata) = map.blendmap {
         encoder.write_all(bdata)?;
     }
 

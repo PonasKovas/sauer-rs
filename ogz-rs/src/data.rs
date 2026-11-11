@@ -5,29 +5,6 @@ pub use sauer_core::{
 };
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum MapConfig {
-    Modern {
-        variables: Vec<Variable>,
-    },
-    Legacy {
-        lightprecision: i32,
-        lighterror: i32,
-        lightlod: i32,
-        ambient: u8,
-        watercolour: [u8; 3],
-        blendmap_mode: u8,
-        lerpangle: u8,
-        lerpsubdiv: u8,
-        lerpsubdivsize: u8,
-        bumperror: u8,
-        skylight: [u8; 3],
-        lavacolour: [u8; 3],
-        waterfallcolour: [u8; 3],
-        maptitle: CubeString,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Variable {
     Int { name: CubeString, value: i32 },
     Float { name: CubeString, value: f32 },

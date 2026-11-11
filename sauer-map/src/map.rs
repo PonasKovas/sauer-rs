@@ -2,7 +2,7 @@ use crate::edit::{apply_region, fill, set_material, set_texture};
 use crate::{Cube, Node, Selection, ValidSel};
 use ogz_rs::OgzMap;
 use ogz_rs::data::VSlot;
-use ogz_rs::data::{Entity, Lightmap, MapConfig, Variable};
+use ogz_rs::data::{Entity, Variable};
 use sauer_core::Aabb;
 use sauer_proto::data::VSlotProps;
 use std::collections::{HashMap, HashSet};
@@ -36,11 +36,8 @@ pub struct Map {
     pub eif: u16,
     pub extra_game_data: Vec<u8>,
     pub mru_textures: Vec<u16>,
-    pub lightmaps: Vec<Lightmap>,
     pub pvs: Vec<u8>,
-    pub blendmap_resolution: i32,
-    pub blendmap_data: Option<Vec<u8>>,
-    pub config: MapConfig,
+    pub blendmap: Option<Vec<u8>>,
 }
 
 impl Map {
@@ -83,38 +80,28 @@ impl Map {
             eif: 0,
             extra_game_data: vec![],
             mru_textures: vec![],
-            lightmaps: vec![],
             pvs: vec![],
-            blendmap_resolution: 0,
-            blendmap_data: None,
-            config: MapConfig::Modern { variables: vec![] },
+            blendmap: None,
         }
     }
 
     /// Parses a live map state from raw `.ogz` file bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self, ogz_rs::OgzError> {
         let ogz = OgzMap::parse(data)?;
-        let vars = match &ogz.config {
-            MapConfig::Modern { variables } => variables.clone(),
-            _ => vec![],
-        };
-
         let mut map = Map {
             size: ogz.world_size,
             root: crate::octree::build_node(&ogz.octree),
             vslots: ogz.vslots,
             entities: ogz.entities,
-            vars,
+            vars: ogz.variables,
             version: ogz.version,
             game_type: ogz.game_type,
             eif: ogz.eif,
             extra_game_data: ogz.extra_game_data,
             mru_textures: ogz.mru_textures,
-            lightmaps: ogz.lightmaps,
+            // No lightmaps: `build_node` drops the surfaces that use them.
             pvs: ogz.pvs,
-            blendmap_resolution: ogz.blendmap_resolution,
-            blendmap_data: ogz.blendmap_data,
-            config: ogz.config,
+            blendmap: ogz.blendmap,
         };
 
         map.compact_vslots();
@@ -166,14 +153,10 @@ impl Map {
     ) -> Result<Vec<u8>, ogz_rs::OgzError> {
         let compacted_vslots = self.get_compacted_vslots();
 
-        let config = MapConfig::Modern {
-            variables: self.vars.clone(),
-        };
-
         let ogz = OgzMap {
             version: self.version,
             world_size: self.size,
-            config,
+            variables: self.vars.clone(),
             game_type: self.game_type.clone(),
             eif: self.eif,
             extra_game_data: self.extra_game_data.clone(),
@@ -181,16 +164,14 @@ impl Map {
             entities: self.entities.clone(),
             vslots: compacted_vslots,
             octree,
-            lightmaps: self.lightmaps.clone(),
+            lightmaps: vec![],
             pvs: self.pvs.clone(),
-            blendmap_resolution: self.blendmap_resolution,
-            blendmap_data: self.blendmap_data.clone(),
+            blendmap: self.blendmap.clone(),
         };
         ogz.serialize_with(compression)
     }
 
     pub fn invalidate_cache(&mut self) {
-        self.lightmaps.clear();
         self.pvs.clear();
     }
 
@@ -302,8 +283,8 @@ impl Map {
         children[0] = old_root;
         self.root = Node::Branch(Box::new(children));
         self.size *= 2;
-        if let Some(data) = &self.blendmap_data {
-            self.blendmap_data = Some(ogz_rs::blendmap::enlarged(data));
+        if let Some(data) = &self.blendmap {
+            self.blendmap = Some(ogz_rs::blendmap::enlarged(data));
         }
     }
 

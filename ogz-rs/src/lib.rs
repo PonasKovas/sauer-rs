@@ -18,7 +18,9 @@ use data::*;
 pub struct OgzMap {
     pub version: i32,
     pub world_size: i32,
-    pub config: MapConfig,
+    /// Map vars (`VARR` and friends). Old maps' header fields become vars too,
+    /// as the engine sets them on load.
+    pub variables: Vec<Variable>,
 
     // Game Extras
     pub game_type: Option<CubeString>,
@@ -33,8 +35,8 @@ pub struct OgzMap {
     pub lightmaps: Vec<Lightmap>,
     pub pvs: Vec<u8>,
 
-    pub blendmap_resolution: i32,
-    pub blendmap_data: Option<Vec<u8>>,
+    /// The blendmap quadtree as its raw serialized bytes, if the map has one.
+    pub blendmap: Option<Vec<u8>>,
 }
 
 impl OgzMap {
