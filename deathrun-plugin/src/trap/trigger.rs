@@ -134,8 +134,12 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     if tight_min[0] != i32::MAX {
         let t_min = std::array::from_fn(|i| tight_min[i].max(0));
         let t_max = std::array::from_fn(|i| tight_max[i].min(world_size));
-        let payloads =
-            sauer_map::chunking::chunk_region(state.map.as_ref().unwrap(), t_min, t_max, 4000);
+        let payloads = sauer_map::chunking::chunk_region(
+            state.map.as_ref().unwrap(),
+            t_min,
+            t_max,
+            usize::MAX,
+        );
 
         let s_clone = server.clone();
         tokio::spawn(async move {

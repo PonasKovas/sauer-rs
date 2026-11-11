@@ -234,8 +234,10 @@ pub struct ClipboardPayload {
     pub vslots: Vec<VSlotData>,
 }
 
-impl SauerWrite for ClipboardPayload {
-    fn sauer_write(&self, out: &mut Vec<u8>) {
+impl ClipboardPayload {
+    /// The bytes before zlib, whose length clients check against
+    /// [`MAX_CLIENT_UNPACK_LEN`].
+    pub fn uncompressed(&self) -> Vec<u8> {
         let mut uncompressed = Vec::new();
 
         uncompressed.extend_from_slice(&self.sel.o.x.to_le_bytes());
@@ -258,6 +260,23 @@ impl SauerWrite for ClipboardPayload {
         }
         uncompressed.extend_from_slice(&0u16.to_le_bytes());
         uncompressed.extend_from_slice(&0u16.to_le_bytes());
+        uncompressed
+    }
+}
+
+/// Clients drop a clipboard when zlib's `compressBound` of its unpacked
+/// length is over 1 MB (`uncompresseditinfo` in octaedit.cpp).
+pub const MAX_CLIENT_UNPACK_LEN: usize = {
+    let mut n = 1 << 20;
+    while n + (n >> 12) + (n >> 14) + (n >> 25) + 13 > 1 << 20 {
+        n -= 1;
+    }
+    n
+};
+
+impl SauerWrite for ClipboardPayload {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        let uncompressed = self.uncompressed();
 
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
         encoder.write_all(&uncompressed).unwrap();
