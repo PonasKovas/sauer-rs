@@ -27,7 +27,7 @@ make_packet_enum!(
     [N_PAUSEGAME] PauseGameServer,
     [N_GAMESPEED] GameSpeedServer,
     [N_SAYTEAM] SayTeamServer,
-    [N_MAPCHANGE] MapChange [UPDATE_SESSION |session: &mut Session, packet: &MapChange| session.is_hold_mode = packet.mode == GameMode::Hold],
+    [N_MAPCHANGE] MapChange [UPDATE_SESSION |session: &mut Session, packet: &MapChange| session.is_hold_mode = packet.mode.is_hold()],
     [N_FORCEDEATH] ForceDeath,
     [N_ITEMLIST] ItemList,
     [N_INITCLIENT] InitClient,

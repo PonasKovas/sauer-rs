@@ -156,6 +156,10 @@ impl GameMode {
         ]
         .contains(self)
     }
+    /// The engine's `m_hold`: hold the flag, in any of its variants.
+    pub fn is_hold(&self) -> bool {
+        [Self::Hold, Self::InstaHold, Self::EfficHold].contains(self)
+    }
 }
 
 make_enum!(
