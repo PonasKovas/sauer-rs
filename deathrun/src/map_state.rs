@@ -4,11 +4,7 @@ use sauer_server::plugin::Context;
 
 pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
     let items = map.entities.iter().enumerate().filter_map(|(i, ent)| {
-        let ogz_rs::data::EntityType::GameSpecific(n) = ent.ent_type else {
-            return None;
-        };
-        let proto_type = sauer_proto::data::EntityType::try_from(n as i32).ok()?;
-        let item_type = sauer_proto::data::ItemType::try_from(proto_type).ok()?;
+        let item_type = sauer_proto::data::ItemType::try_from(ent.ent_type).ok()?;
         Some((i, item_type))
     });
     let num_players = server.client_count();
