@@ -8,15 +8,12 @@ parking_lot.workspace = true
 lenet.workspace = true
 lenet-tokio.workspace = true
 sauer-proto.workspace = true
-ogz-rs.workspace = true
 cube-string.workspace = true
-sauer-map.workspace = true
 
 tokio.workspace = true
 tokio.features = ["full"]
 
 anyhow.workspace = true
-glam.workspace = true
 tracing-subscriber.workspace = true
 tracing-subscriber.features = ["env-filter"]
 tracing.workspace = true

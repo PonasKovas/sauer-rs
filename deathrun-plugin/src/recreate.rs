@@ -3,6 +3,21 @@ use sauer_proto::data::SelInfo;
 use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 
+/// Map vars each client has, so a rebuild only sends the ones that differ.
+#[derive(Default)]
+pub struct KnownVars(
+    dashmap::DashMap<
+        u64,
+        std::collections::HashMap<cube_string::CubeString, ogz_rs::data::Variable>,
+    >,
+);
+
+impl KnownVars {
+    pub fn forget(&self, id: u64) {
+        self.0.remove(&id);
+    }
+}
+
 pub async fn visual_rebuild_map<F>(
     server: &Server,
     target_ids: &[u64],
@@ -18,17 +33,21 @@ pub async fn visual_rebuild_map<F>(
         return;
     }
 
-    println!("world_size: {}", map.size);
+    let known = server
+        .extra
+        .get::<KnownVars>()
+        .expect("DeathrunPlay::init sets up KnownVars");
     let clear_size = map.size.max(1024);
 
     for &id in target_ids {
         if send_newmap {
             // The client resets all map vars to defaults on a new map.
-            server.players.with_mut(id, |p| {
-                p.known_vars = sauer_map::map_vars::new_map_vars()
+            known.0.insert(
+                id,
+                sauer_map::map_vars::new_map_vars()
                     .map(|var| (var_name(&var).clone(), var))
-                    .collect()
-            });
+                    .collect(),
+            );
             let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
             server.send(
                 id,
@@ -68,12 +87,13 @@ pub async fn visual_rebuild_map<F>(
             }
 
             // Only vars the client doesn't already have go out.
-            let send = server
-                .players
-                .with_mut(id, |p| {
-                    p.known_vars.insert(name.clone(), var.clone()).as_ref() != Some(var)
-                })
-                .unwrap_or(true);
+            let send = known
+                .0
+                .entry(id)
+                .or_default()
+                .insert(name.clone(), var.clone())
+                .as_ref()
+                != Some(var);
 
             if send {
                 let val = match var {

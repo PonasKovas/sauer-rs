@@ -749,9 +749,13 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
 impl Plugin for DeathrunPlay {
     async fn init(&self, server: &mut Server) {
         self.notes.install(server);
-        server.game.write().map_name = "".lossy_cubestring();
-        server.game.write().mode = GameMode::TeamPlay;
-        server.game.write().master_mode = MasterMode::Veto;
+        {
+            let game = server.game.get_mut();
+            game.map_name = "".lossy_cubestring();
+            game.mode = GameMode::TeamPlay;
+            game.master_mode = MasterMode::Veto;
+        }
+        server.extra.insert(crate::recreate::KnownVars::default());
         // Rounds set the master mode, so it must not snap back to open.
         server.config.write().reopen_when_masterless = false;
         assert!(
@@ -1323,6 +1327,9 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.write().remove_player_afk(id);
+        if let Some(known) = server.extra.get::<crate::recreate::KnownVars>() {
+            known.forget(id);
+        }
         self.trap_highlights.remove(&id);
         crate::trap::placement::forget_seethrough(server, id);
 
