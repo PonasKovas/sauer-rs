@@ -23,6 +23,10 @@ pub async fn visual_rebuild_map<F>(
 
     for &id in target_ids {
         if send_newmap {
+            // The client resets all map vars to defaults on a new map.
+            if let Some(mut p) = server.players.try_get_mut(id) {
+                p.known_vars.clear();
+            }
             let cn = server.get_cn(id).unwrap_or(0) as i32;
             server.send_chan1(
                 id,
