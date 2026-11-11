@@ -4,6 +4,7 @@ use std::path::Path;
 
 mod lua_docs;
 mod proto_docs;
+mod rust_src;
 
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();

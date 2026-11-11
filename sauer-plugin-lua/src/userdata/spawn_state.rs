@@ -29,14 +29,14 @@ impl UserData for SpawnStateUD {
             Ok(())
         });
 
-        /// Armour type: `"None"`, `"Green"`, `"Yellow"`, or `"Blue"`. (read/write)
+        /// Armour type, see `ArmourType`. (read/write)
         fields.add_field_method_get("armour_type", |_, this| Ok(this.0.armour_type));
         fields.add_field_method_set("armour_type", |_, this, val: ArmourType| {
             this.0.armour_type = val;
             Ok(())
         });
 
-        /// Currently selected gun (e.g. `"Pistol"`, `"Shotgun"`). (read/write)
+        /// Currently selected gun, see `Gun`. (read/write)
         fields.add_field_method_get("gun_select", |_, this| Ok(this.0.gun_select));
         fields.add_field_method_set("gun_select", |_, this, val: Gun| {
             this.0.gun_select = val;
