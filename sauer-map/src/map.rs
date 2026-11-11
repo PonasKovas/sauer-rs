@@ -9,6 +9,9 @@ use std::collections::{HashMap, HashSet};
 
 /// Where [`Map::normalize_vslots`] puts variants: past the texture slots of
 /// any client (Sauerbraten installs have about 1700).
+/// Engine `MAXENTS`: clients ignore entities past it.
+pub const MAX_ENTS: usize = 10_000;
+
 pub const MIN_VARIANT_INDEX: usize = 4096;
 
 /// Represents the complete, live state of a Sauerbraten map.
@@ -372,11 +375,11 @@ impl Map {
         all_faces: bool,
         slot: u16,
         ds: &VSlotProps,
-    ) -> u16 {
+    ) -> Option<u16> {
         let root = crate::vslot::root_of_slot(&self.vslots, slot);
-        let idx = crate::vslot::resolve_vslot(&mut self.vslots, root, ds, false);
+        let idx = crate::vslot::resolve_vslot(&mut self.vslots, root, ds, false)?;
         self.set_texture(sel, idx, all_faces);
-        idx
+        Some(idx)
     }
 
     // --- Packet Consumers ---
@@ -412,6 +415,13 @@ impl Map {
 
     /// Modifies a global map variable.
     pub fn apply_edit_var(&mut self, packet: &channel1::EditVar) {
+        let name_ok = packet
+            .name
+            .as_str()
+            .is_some_and(|n| crate::map_vars::accepts(n, &packet.val));
+        if !name_ok {
+            return;
+        }
         let ogz_var = match &packet.val {
             EditVarValue::Int(v) => Variable::Int {
                 name: packet.name.clone(),
@@ -448,8 +458,10 @@ impl Map {
         if self.is_protected(min, max) {
             return false;
         }
-        let tex = crate::vslot::resolve_tex(&mut self.vslots, &packet.tex, true)
-            .expect("inserting lookup always succeeds");
+        // Like the engine, a full vslot table leaves the faces as they are.
+        let Some(tex) = crate::vslot::resolve_tex(&mut self.vslots, &packet.tex, true) else {
+            return true;
+        };
         self.set_texture(&sel, tex, packet.all_faces);
         self.invalidate_cache();
         true
@@ -576,8 +588,10 @@ impl Map {
         else {
             return true;
         };
-        let new_tex = crate::vslot::resolve_tex(&mut self.vslots, &packet.new_tex, true)
-            .expect("inserting lookup always succeeds");
+        let Some(new_tex) = crate::vslot::resolve_tex(&mut self.vslots, &packet.new_tex, true)
+        else {
+            return true;
+        };
         self.replace_texture(sel.as_ref(), old_tex, new_tex);
         self.invalidate_cache();
         true
@@ -611,6 +625,9 @@ impl Map {
         }
 
         let id = packet.ent_id as usize;
+        if id >= MAX_ENTS {
+            return true;
+        }
         if id < self.entities.len() {
             let ent = &mut self.entities[id];
             ent.position = pos;
@@ -710,6 +727,9 @@ impl Map {
                 // Safely restore the entity state
                 for ue in ents {
                     let id = ue.index as usize;
+                    if id >= MAX_ENTS {
+                        continue;
+                    }
                     if id >= self.entities.len() {
                         self.entities.resize(
                             id + 1,
@@ -1053,13 +1073,14 @@ impl Map {
             }
         }
 
+        // Textures with no room for a new variant stay as they are.
         let tex_remap: HashMap<u16, u16> = ordered_textures
             .iter()
-            .map(|&t| {
-                (
+            .filter_map(|&t| {
+                Some((
                     t,
-                    crate::vslot::resolve_vslot(&mut self.vslots, t, ds, delta),
-                )
+                    crate::vslot::resolve_vslot(&mut self.vslots, t, ds, delta)?,
+                ))
             })
             .collect();
         self.edit_sel(sel, |node, _| {

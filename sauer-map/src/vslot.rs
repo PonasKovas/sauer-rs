@@ -4,6 +4,9 @@ use sauer_proto::data::TexRef;
 use sauer_proto::data::VSlotData;
 use std::collections::HashMap;
 
+/// How many vslots a map can have: indices are 16 bits on the wire.
+pub const MAX_VSLOTS: usize = 0x10000;
+
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
     let mut current = idx as i32;
     let mut fuel = 10000;
@@ -73,13 +76,15 @@ pub fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
     root
 }
 
+/// Finds or adds the variant of `base_tex` with `ds` applied. `None` once
+/// the table is full (engine `editvslot`): vslot indices are 16 bits.
 pub fn resolve_vslot(
     vslots: &mut Vec<Option<VSlot>>,
     base_tex: u16,
     ds: &VSlotProps,
     delta: bool,
-) -> u16 {
-    lookup_vslot(vslots, base_tex, ds, delta, true).expect("inserting lookup always succeeds")
+) -> Option<u16> {
+    lookup_vslot(vslots, base_tex, ds, delta, true)
 }
 
 /// Like [`resolve_vslot`], but with `insert == false` only finds an existing
@@ -109,7 +114,7 @@ pub fn lookup_vslot(
             }
         }
     }
-    if !insert {
+    if !insert || vslots.len() >= MAX_VSLOTS {
         return None;
     }
 
@@ -162,7 +167,11 @@ pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &m
     }
     let mut map = HashMap::new();
     for (vd, root) in incoming {
-        map.insert(vd.index, resolve_vslot(vslots, root, &vd.vslot, false));
+        // With the table full, the face gets the plain texture.
+        map.insert(
+            vd.index,
+            resolve_vslot(vslots, root, &vd.vslot, false).unwrap_or(root),
+        );
     }
     if map.is_empty() {
         return;
@@ -194,7 +203,7 @@ mod tests {
             color: Some((1.0, 0.0, 0.0)),
             ..Default::default()
         };
-        let variant = resolve_vslot(&mut vslots, 10, &color, false);
+        let variant = resolve_vslot(&mut vslots, 10, &color, false).unwrap();
         assert_eq!(slot_of_root(&vslots, 300), 300);
         assert_eq!(slot_of_root(&vslots, root_base_of(&vslots, variant)), 10);
     }

@@ -11,7 +11,7 @@ const MAX_ENTITIES: i32 = 1_000_000;
 const MAX_LIGHTMAPS: i32 = 16_384;
 const MAX_PVS_BYTES: i32 = 256 * 1024 * 1024; // 256 MB
 const MAX_VARS: i32 = 65_536;
-const MAX_VSLOTS: i32 = 1_000_000;
+const MAX_VSLOTS: i32 = 0x10000; // indices are 16 bits
 const MAX_WORLD_SIZE: i32 = 1 << 16;
 
 /// Leniently decompresses an .ogz file, handling concatenated GZIP streams

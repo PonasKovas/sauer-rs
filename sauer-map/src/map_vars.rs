@@ -150,3 +150,20 @@ pub fn new_map_vars() -> impl Iterator<Item = Variable> {
         }
     })
 }
+
+/// Whether a client may set `name` to a value of this kind. Clients only
+/// apply edits to map vars they have, of the right type, that aren't
+/// read-only (`N_EDITVAR` in the engine's client.cpp).
+pub fn accepts(name: &str, value: &sauer_proto::data::EditVarValue) -> bool {
+    use sauer_proto::data::EditVarValue;
+    !is_read_only(name)
+        && DEFAULTS.iter().any(|(n, default)| {
+            *n == name
+                && matches!(
+                    (default, value),
+                    (I(_), EditVarValue::Int(_))
+                        | (F(_), EditVarValue::Float(_))
+                        | (S(_), EditVarValue::String(_))
+                )
+        })
+}
