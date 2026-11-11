@@ -25,10 +25,6 @@ use crate::raw::COLOR_ESCAPE;
 use crate::str::CubeStr;
 use core::ops::Deref;
 
-fn cube_str_from_bytes(bytes: &[u8]) -> &CubeStr {
-    zerocopy::transmute_ref!(bytes)
-}
-
 /// A segment of text with an associated color.
 ///
 /// This represents a contiguous block of text that shares the same color.
@@ -52,35 +48,35 @@ impl<'a> ColorSegment<'a> {
     }
 }
 
-/// Decoded meaning of a color-escape sequence (the byte after `COLOR_ESCAPE`).
-enum EscapeCode {
-    /// `\x0C0`–`\x0C8`: switch to the given color.
-    SetColor(Color),
-    /// `\x0Cs` (save) or `\x0Cr` (restore): ignored by the segment iterator.
-    SaveRestore,
+/// The color a `\x0C0`–`\x0C8` escape sets.
+fn escape_color(code: u8) -> Option<Color> {
+    Some(match code {
+        b'0' => Color::Green,
+        b'1' => Color::Blue,
+        b'2' => Color::Yellow,
+        b'3' => Color::Red,
+        b'4' => Color::Gray,
+        b'5' => Color::Magenta,
+        b'6' => Color::Orange,
+        b'7' => Color::White,
+        b'8' => Color::Cyan,
+        _ => return None,
+    })
 }
 
-/// Decode the byte that follows a `COLOR_ESCAPE`, if it forms a valid escape.
-fn parse_escape(code: u8) -> Option<EscapeCode> {
-    match code {
-        b's' | b'r' => Some(EscapeCode::SaveRestore),
-        b'0' => Some(EscapeCode::SetColor(Color::Green)),
-        b'1' => Some(EscapeCode::SetColor(Color::Blue)),
-        b'2' => Some(EscapeCode::SetColor(Color::Yellow)),
-        b'3' => Some(EscapeCode::SetColor(Color::Red)),
-        b'4' => Some(EscapeCode::SetColor(Color::Gray)),
-        b'5' => Some(EscapeCode::SetColor(Color::Magenta)),
-        b'6' => Some(EscapeCode::SetColor(Color::Orange)),
-        b'7' => Some(EscapeCode::SetColor(Color::White)),
-        b'8' => Some(EscapeCode::SetColor(Color::Cyan)),
-        _ => None,
-    }
-}
+/// Depth of the engine's color stack (`colorstack` in `rendertext.cpp`).
+const STACK_SIZE: usize = 10;
 
 /// An iterator over the color segments of a cube string.
+///
+/// Colors carry over from one segment to the next, `\x0Cs` saves the
+/// current color and `\x0Cr` restores it, like the engine draws text. Other
+/// escapes are skipped.
 pub struct ColorSegments<'a> {
     bytes: &'a [u8],
     pos: usize,
+    stack: [Option<Color>; STACK_SIZE],
+    sp: usize,
 }
 
 impl<'a> ColorSegments<'a> {
@@ -89,6 +85,26 @@ impl<'a> ColorSegments<'a> {
         Self {
             bytes: cube_str.deref(),
             pos: 0,
+            stack: [None; STACK_SIZE],
+            sp: 0,
+        }
+    }
+
+    /// Engine `text_color`.
+    fn apply_escape(&mut self, code: u8) {
+        match code {
+            b's' => {
+                if self.sp < STACK_SIZE - 1 {
+                    self.stack[self.sp + 1] = self.stack[self.sp];
+                    self.sp += 1;
+                }
+            }
+            b'r' => self.sp = self.sp.saturating_sub(1),
+            _ => {
+                if let Some(color) = escape_color(code) {
+                    self.stack[self.sp] = Some(color);
+                }
+            }
         }
     }
 }
@@ -97,54 +113,59 @@ impl<'a> Iterator for ColorSegments<'a> {
     type Item = ColorSegment<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut current_color = None;
-
-        while self.pos < self.bytes.len() {
-            if self.bytes[self.pos] == COLOR_ESCAPE {
-                if self.pos + 1 < self.bytes.len() {
-                    match parse_escape(self.bytes[self.pos + 1]) {
-                        Some(EscapeCode::SetColor(c)) => {
-                            current_color = Some(c);
-                            self.pos += 2;
-                            continue;
-                        }
-                        Some(EscapeCode::SaveRestore) => {
-                            self.pos += 2;
-                            continue;
-                        }
-                        None => {}
-                    }
-                } else {
+        loop {
+            let rest = &self.bytes[self.pos..];
+            match *rest {
+                [] => return None,
+                // A trailing escape with no code.
+                [COLOR_ESCAPE] => {
                     self.pos += 1;
-                    break;
+                    return None;
+                }
+                [COLOR_ESCAPE, code, ..] => {
+                    self.apply_escape(code);
+                    self.pos += 2;
+                }
+                _ => {
+                    let len = rest
+                        .iter()
+                        .position(|&b| b == COLOR_ESCAPE)
+                        .unwrap_or(rest.len());
+                    self.pos += len;
+                    return Some(ColorSegment {
+                        color: self.stack[self.sp],
+                        text: CubeStr::from_bytes(&rest[..len]),
+                    });
                 }
             }
-            break;
         }
+    }
+}
 
-        if self.pos >= self.bytes.len() {
-            return None;
-        }
+#[cfg(test)]
+mod tests {
+    use crate::{Color, CubeString};
+    use alloc::vec::Vec;
 
-        let text_start = self.pos;
+    fn segments(bytes: &[u8]) -> Vec<(Option<Color>, Vec<u8>)> {
+        CubeString::from_bytes(bytes.to_vec())
+            .color_segments()
+            .map(|s| (s.color, s.as_bytes().to_vec()))
+            .collect()
+    }
 
-        let mut i = text_start;
-        while i < self.bytes.len() && self.bytes[i] != COLOR_ESCAPE {
-            i += 1;
-        }
-
-        let text_end = i;
-        self.pos = text_end;
-
-        if text_start >= self.bytes.len() || text_start == text_end {
-            return None;
-        }
-
-        let text = &self.bytes[text_start..text_end];
-
-        Some(ColorSegment {
-            color: current_color,
-            text: cube_str_from_bytes(text),
-        })
+    #[test]
+    fn colors_carry_over_and_unknown_escapes_are_skipped() {
+        assert_eq!(
+            segments(b"a\x0c3red\x0csmore\x0cZstill\x0c1blue\x0crred"),
+            [
+                (None, b"a".to_vec()),
+                (Some(Color::Red), b"red".to_vec()),
+                (Some(Color::Red), b"more".to_vec()),
+                (Some(Color::Red), b"still".to_vec()),
+                (Some(Color::Blue), b"blue".to_vec()),
+                (Some(Color::Red), b"red".to_vec()),
+            ]
+        );
     }
 }

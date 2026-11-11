@@ -99,12 +99,12 @@ impl CubeStr {
 
     /// Creates a `CubeStr` from a byte slice.
     pub fn from_bytes(bytes: &[u8]) -> &Self {
-        cube_str_from_bytes(bytes)
+        zerocopy::transmute_ref!(bytes)
     }
 
     pub fn try_from_utf8(s: &str) -> Option<&Self> {
         if s.is_ascii() {
-            Some(cube_str_from_bytes(s.as_bytes()))
+            Some(CubeStr::from_bytes(s.as_bytes()))
         } else {
             None
         }
@@ -259,10 +259,6 @@ impl CubeStr {
     }
 }
 
-fn cube_str_from_bytes(bytes: &[u8]) -> &CubeStr {
-    zerocopy::transmute_ref!(bytes)
-}
-
 impl fmt::Display for CubeStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_utf8())
@@ -326,21 +322,21 @@ impl Index<RangeFull> for CubeStr {
 impl Index<Range<usize>> for CubeStr {
     type Output = CubeStr;
     fn index(&self, index: Range<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.0[index])
+        CubeStr::from_bytes(&self.0[index])
     }
 }
 
 impl Index<RangeTo<usize>> for CubeStr {
     type Output = CubeStr;
     fn index(&self, index: RangeTo<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.0[index])
+        CubeStr::from_bytes(&self.0[index])
     }
 }
 
 impl Index<RangeFrom<usize>> for CubeStr {
     type Output = CubeStr;
     fn index(&self, index: RangeFrom<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.0[index.start..])
+        CubeStr::from_bytes(&self.0[index.start..])
     }
 }
 
@@ -349,14 +345,14 @@ impl Index<RangeInclusive<usize>> for CubeStr {
     fn index(&self, index: RangeInclusive<usize>) -> &CubeStr {
         let start = *index.start();
         let end = *index.end() + 1;
-        cube_str_from_bytes(&self.0[start..end])
+        CubeStr::from_bytes(&self.0[start..end])
     }
 }
 
 impl Index<RangeToInclusive<usize>> for CubeStr {
     type Output = CubeStr;
     fn index(&self, index: RangeToInclusive<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.0[0..=index.end])
+        CubeStr::from_bytes(&self.0[0..=index.end])
     }
 }
 

@@ -26,10 +26,6 @@ use crate::raw::{self, COLOR_ESCAPE};
 use crate::str::CubeStr;
 use crate::{CubeStringBuilder, CubeStringFromUtf8Error};
 
-fn cube_str_from_bytes(bytes: &[u8]) -> &CubeStr {
-    zerocopy::transmute_ref!(bytes)
-}
-
 /// A mutable string for cube engine character encoding.
 ///
 /// `CubeString` provides a growable string type that stores text in the cube
@@ -189,7 +185,7 @@ impl CubeString {
     }
 
     fn as_cube_str(&self) -> &CubeStr {
-        cube_str_from_bytes(&self.buf)
+        CubeStr::from_bytes(&self.buf)
     }
 }
 
@@ -348,21 +344,21 @@ impl Index<RangeFull> for CubeString {
 impl Index<Range<usize>> for CubeString {
     type Output = CubeStr;
     fn index(&self, index: Range<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.buf[index])
+        CubeStr::from_bytes(&self.buf[index])
     }
 }
 
 impl Index<RangeTo<usize>> for CubeString {
     type Output = CubeStr;
     fn index(&self, index: RangeTo<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.buf[index])
+        CubeStr::from_bytes(&self.buf[index])
     }
 }
 
 impl Index<RangeFrom<usize>> for CubeString {
     type Output = CubeStr;
     fn index(&self, index: RangeFrom<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.buf[index.start..])
+        CubeStr::from_bytes(&self.buf[index.start..])
     }
 }
 
@@ -371,14 +367,14 @@ impl Index<RangeInclusive<usize>> for CubeString {
     fn index(&self, index: RangeInclusive<usize>) -> &CubeStr {
         let start = *index.start();
         let end = *index.end() + 1;
-        cube_str_from_bytes(&self.buf[start..end])
+        CubeStr::from_bytes(&self.buf[start..end])
     }
 }
 
 impl Index<RangeToInclusive<usize>> for CubeString {
     type Output = CubeStr;
     fn index(&self, index: RangeToInclusive<usize>) -> &CubeStr {
-        cube_str_from_bytes(&self.buf[0..=index.end])
+        CubeStr::from_bytes(&self.buf[0..=index.end])
     }
 }
 
