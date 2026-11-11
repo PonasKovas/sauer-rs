@@ -2,6 +2,7 @@
 //! (`packeditinfo` and `packundo` in octaedit.cpp).
 
 use crate::ParseError;
+use crate::error::EnumConvertResultExt;
 use crate::internal::{SauerRead, SauerWrite, read_slice};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use sauer_core::{Cube, Entity, EntityType, Material, Node, Orient, Selection, VSlotProps, Vec3};
@@ -254,12 +255,16 @@ fn read_block(reader: &mut &[u8]) -> Result<(Selection, Vec<Node>), ParseError> 
             max: 1 << 12,
         });
     }
-    let orient = int()?;
-    let orient = Orient::try_from(orient).map_err(|_| ParseError::InvalidEnumValue {
-        value: orient,
-        enum_name: "Orient",
-    })?;
+    let orient = Orient::try_from(int()?).in_enum("Orient")?;
 
+    // A client only copies a real box. The engine checks just the product,
+    // which two negative sizes would pass.
+    if let Some(&bad) = [s.x, s.y, s.z].iter().find(|&&v| v <= 0) {
+        return Err(ParseError::ValueOutOfRange {
+            value: bad,
+            max: i32::MAX,
+        });
+    }
     let count = s.x as i64 * s.y as i64 * s.z as i64;
     // Every cube takes at least one byte.
     let max = MAX_BLOCK_CUBES.min(reader.len() as i64);
