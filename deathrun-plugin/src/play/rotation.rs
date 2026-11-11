@@ -54,9 +54,7 @@ impl LoadedMap {
     /// holding the `PlayMaps` lock, then [`PlayMaps::insert`] the result.
     pub fn parse(name: &str, data: &[u8]) -> Result<Self, String> {
         let mut state = Map::from_bytes(data).map_err(|e| e.to_string())?;
-        sauer_kit::virt_ents::strip(&mut state.entities);
-
-        let loaded = crate::trap::persist::load(&state);
+        let loaded = crate::trap::persist::ingest(&mut state);
         for w in &loaded.warnings {
             tracing::warn!("map '{name}': {w}");
         }
@@ -70,7 +68,6 @@ impl LoadedMap {
             crate::trap::vault::erase(&mut state, &v);
         }
 
-        crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
         Ok(Self { state, traps })
     }
 }

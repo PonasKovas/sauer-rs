@@ -377,6 +377,29 @@ pub struct Loaded {
     pub warnings: Vec<String>,
 }
 
+/// Gets a map file just loaded ready for traps: drops the fake entities a
+/// client saved into it, reads its traps and rebuilds their buttons.
+pub fn ingest(map: &mut Map) -> Loaded {
+    sauer_kit::virt_ents::strip(&mut map.entities);
+    let loaded = load(map);
+    super::placement::rebuild_all_trap_buttons(map, &loaded.traps);
+    loaded
+}
+
+impl Loaded {
+    /// What edits may not touch: the trap buttons and the vault.
+    pub fn protected(&self) -> sauer_kit::coop_edit::Protected {
+        let mut p = sauer_kit::coop_edit::Protected::default();
+        for trap in &self.traps {
+            p.protect(trap.button_box());
+        }
+        if let Some(v) = self.vault {
+            p.protect(v.bounds());
+        }
+        p
+    }
+}
+
 /// Reads the trap record and shelves out of a freshly loaded map.
 pub fn load(map: &Map) -> Loaded {
     let mut out = Loaded {

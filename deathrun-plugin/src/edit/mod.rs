@@ -1,7 +1,8 @@
+mod indicators;
+mod upload;
+
 use crate::aim::Aim;
-use crate::map_state::{
-    DeathrunState, get_server_state, is_waiting_for_map, update_server_items, with_map_state_mut,
-};
+use crate::map_state::{DeathrunState, get_server_state, is_waiting_for_map, with_map_state_mut};
 use crate::trap::frame;
 use crate::trap::{commands::Command, guard};
 use crate::ui;
@@ -15,18 +16,13 @@ use sauer_map::Map;
 use sauer_proto::{
     Client, channel0,
     channel1::{self, EditMode},
-    data::{Direction, EntityType, GameMode, MasterMode, PlayerState, Privilege},
+    data::{Direction, GameMode, MasterMode, PlayerState, Privilege},
 };
 use sauer_server::{
     Flow, Server, Status,
     plugin::{Context, Plugin},
 };
-use tracing::{info, warn};
-
-pub const TRAP_EDIT_PARTICLE_ATTRS: [i32; 5] = [34, 100, 100, 0, 0];
-pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
-pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
-pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
+use tracing::info;
 
 /// Where a joining player is in the map load sequence. The info wall is held
 /// back until the map is loaded so the client's own map output doesn't bury it.
@@ -60,74 +56,6 @@ impl DeathrunEdit {
     pub fn with_notes(mut self, notes: Vec<String>) -> Self {
         self.notes = crate::ServerNotes::from_strings(notes);
         self
-    }
-
-    /// The particle beside the view of everyone while a trap is being edited,
-    /// so they see their edits go into the trap. Moves at most every 100 ms.
-    fn update_edit_particle(
-        &self,
-        server: &Server,
-        id: u64,
-        aim: &Aim,
-        dir: Direction,
-        editing: bool,
-    ) {
-        if !editing {
-            if self.last_particle_update.remove(&id).is_some() {
-                let mut state = get_server_state(server).write();
-                state
-                    .virt
-                    .clear(id, "edit_particle")
-                    .send(server, id, crate::SERVER_BOT_CN);
-            }
-            return;
-        }
-        let now = tokio::time::Instant::now();
-        match self.last_particle_update.get_mut(&id) {
-            Some(last) if now.duration_since(*last).as_millis() < 100 => return,
-            Some(mut last) => *last = now,
-            None => {
-                self.last_particle_update.insert(id, now);
-            }
-        }
-
-        // Off to the side of the view ray, a bit in front of whatever is there.
-        let [f, r, u] = crate::aim::view_basis(dir.yaw as f32, dir.pitch as f32);
-        let local = crate::aim::forward(
-            TRAP_EDIT_PARTICLE_YAW_OFFSET,
-            TRAP_EDIT_PARTICLE_PITCH_OFFSET,
-        );
-        let dir: [f32; 3] =
-            std::array::from_fn(|i| r[i] * local[0] + f[i] * local[1] + u[i] * local[2]);
-        let side = Aim {
-            origin: aim.origin,
-            forward: dir,
-        };
-        let dist = {
-            let state = get_server_state(server).read();
-            state
-                .map
-                .as_ref()
-                .and_then(|map| {
-                    sauer_map::raycast::raycast_with_filter(
-                        map,
-                        side.origin,
-                        side.forward,
-                        TRAP_EDIT_PARTICLE_MAX_DIST,
-                        |c| !c.is_empty() || c.material != sauer_core::Material::default(),
-                    )
-                })
-                .map_or(TRAP_EDIT_PARTICLE_MAX_DIST, |hit| (hit.dist - 1.0).max(1.0))
-        };
-        let particle = sauer_kit::virt_ents::FakeEnt {
-            ent_type: EntityType::Particles,
-            position: side.at(dist),
-            attrs: TRAP_EDIT_PARTICLE_ATTRS,
-        };
-        let mut state = get_server_state(server).write();
-        state
-            .show_virt(id, "edit_particle", vec![particle])
-            .send(server, id, crate::SERVER_BOT_CN);
     }
 }
 
@@ -375,165 +303,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map(&self, ctx: &mut Context, data: &Bytes) -> Flow {
-        let id = ctx.id();
-
-        let busy = get_server_state(ctx.server()).read().mode.busy_reason();
-        if let Some(why) = busy {
-            ui::send_warn(
-                ctx.server(),
-                id,
-                &format!("Cannot upload a map while {why}."),
-            );
-            return Flow::Cancel;
-        }
-        let server = ctx.server();
-
-        let is_spectator = server
-            .players
-            .with(id, |p| p.status == Status::Spectator)
-            .unwrap_or(false);
-        let is_master = server.get_privilege(id) >= Privilege::Master;
-
-        if is_spectator && !is_master {
-            ui::send_warn(server, id, "You must be unspectated to upload a map.");
-            return Flow::Cancel;
-        }
-
-        let size_kb = data.len() / 1024;
-        let player_name = crate::ui::player_name(server, id);
-
-        server.broadcast(&sauer_proto::channel1::ServMsg {
-            text: format!(
-                "\x0C1[MAP] \x0C7Receiving map from \x0C5{}\x0C7 ({} KB). Processing...",
-                player_name, size_kb
-            )
-            .lossy_cubestring(),
-        });
-
-        let data_clone = data.clone();
-        let server_clone = std::sync::Arc::clone(server);
-        let total_bytes = data.len();
-
-        tokio::spawn(async move {
-            let _start_time = std::time::Instant::now();
-            let parse_result = tokio::task::spawn_blocking(
-                move || -> Result<(DeathrunState, Vec<String>, Vec<u8>, i32), String> {
-                    let t_start = std::time::Instant::now();
-
-                    let mut map = Map::from_bytes(&data_clone)
-                        .map_err(|e: ogz_rs::OgzError| e.to_string())?;
-                    let t_parsed = t_start.elapsed();
-
-                    sauer_kit::virt_ents::strip(&mut map.entities);
-
-                    let loaded = crate::trap::persist::load(&map);
-                    crate::trap::placement::rebuild_all_trap_buttons(&mut map, &loaded.traps);
-                    let mut protected = sauer_kit::coop_edit::Protected::default();
-                    for trap in &loaded.traps {
-                        protected.protect(trap.button_box());
-                    }
-                    if let Some(v) = loaded.vault {
-                        protected.protect(v.bounds());
-                    }
-
-                    let mut state = DeathrunState {
-                        map: Some(map),
-                        protected,
-                        traps: loaded.traps,
-                        vault: loaded.vault,
-                        record_generation: loaded.generation,
-                        ..Default::default()
-                    };
-                    let mut warnings = loaded.warnings;
-                    // Entity links dropped while loading, or a vault left behind by an
-                    // offline /mapenlarge: write the fixed-up state back into the map.
-                    let mut sync = crate::trap::persist::Sync::default();
-                    let fixed = crate::trap::persist::relocate_if_needed(&mut state, &mut sync)
-                        .and_then(|()| {
-                            if warnings.is_empty() && sync.is_empty() {
-                                Ok(())
-                            } else {
-                                crate::trap::persist::save(&mut state, &mut sync)
-                            }
-                        });
-                    if let Err(e) = fixed {
-                        warnings.push(format!("Could not update the trap vault: {e}"));
-                    }
-
-                    let map = state.map.as_ref().unwrap();
-                    let world_size = map.size;
-                    let out_bytes = map
-                        .to_ogz_bytes_merged(flate2::Compression::fast())
-                        .map_err(|e: ogz_rs::OgzError| e.to_string())?;
-
-                    tracing::info!(
-                        "Map loaded: [Parse: {:?}] [Total: {:?}]",
-                        t_parsed,
-                        t_start.elapsed()
-                    );
-                    Ok((state, warnings, out_bytes, world_size))
-                },
-            )
-            .await
-            .expect("Map parsing panicked");
-
-            match parse_result {
-                Ok((loaded, warnings, out_bytes, world_size)) => {
-                    let loaded_traps_len = loaded.traps.len();
-
-                    let uploading_map_name = {
-                        let mut s = get_server_state(&server_clone).write();
-                        // Someone started editing or placing while the map was parsed.
-                        if let Some(why) = s.mode.busy_reason() {
-                            drop(s);
-                            ui::send_warn(
-                                &server_clone,
-                                id,
-                                &format!("Map upload dropped: {why}. Send it again later."),
-                            );
-                            return;
-                        }
-                        update_server_items(loaded.map.as_ref().unwrap(), &server_clone);
-                        let name = s
-                            .uploading_map_name
-                            .take()
-                            .unwrap_or_else(|| "untitled".lossy_cubestring());
-                        *s = loaded;
-                        name
-                    };
-                    info!("id {id} uploaded a map (world_size={world_size}); state loaded");
-
-                    {
-                        let mut game = server_clone.game.write();
-                        game.map_name = uploading_map_name.clone();
-                        game.mode = GameMode::CoopEdit;
-                    }
-
-                    server_clone.broadcast(&sauer_proto::channel1::ServMsg {
-                        text: format!(
-                            "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps ({} KB map).",
-                            loaded_traps_len,
-                            total_bytes / 1024
-                        )
-                        .lossy_cubestring(),
-                    });
-                    for w in warnings {
-                        server_clone.broadcast(&sauer_proto::channel1::ServMsg {
-                            text: format!("\x0C6[TRAP]\x0C7 {w}").lossy_cubestring(),
-                        });
-                    }
-
-                    let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
-                    for client_id in server_clone.client_ids() {
-                        server_clone.send(client_id, &pkt);
-                    }
-
-                    ui::send(&server_clone, id, ui::body("Map successfully uploaded!"));
-                }
-                Err(e) => warn!("id {id} sent an invalid map: {e}"),
-            }
-        });
-        Flow::Cancel
+        upload::receive(ctx.server(), ctx.id(), data)
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
@@ -743,45 +513,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) -> Flow {
-        let id = ctx.id();
-
-        let busy = get_server_state(ctx.server()).read().mode.busy_reason();
-        if let Some(why) = busy {
-            ui::send_warn(
-                ctx.server(),
-                id,
-                &format!("Cannot vote for a map while {why}."),
-            );
-            return Flow::Cancel;
-        }
-        if packet.mode != GameMode::CoopEdit {
-            return Flow::Cancel;
-        }
-
-        let server = ctx.server();
-
-        let mut state = get_server_state(server).write();
-        state.waiting_for_map = true;
-        state.uploading_map_name = Some(packet.map_name.clone());
-        drop(state);
-
-        for client_id in server.client_ids() {
-            server.set_spectator(client_id, true);
-        }
-
-        server.send(
-            id,
-            &channel1::MapChange {
-                map_name: packet.map_name.clone(),
-                mode: packet.mode,
-                has_items: false,
-            },
-        );
-
-        let player_name = crate::ui::player_name(server, id);
-        let map_str = packet.map_name.strip_colors().to_utf8();
-        ui::broadcast_map_changed(server, &player_name, &map_str);
-        Flow::Cancel
+        upload::vote(ctx.server(), ctx.id(), packet)
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) -> Flow {
