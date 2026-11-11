@@ -1403,6 +1403,12 @@ impl Plugin for DeathrunPlay {
         if target_team.is_some() && target_team == actor_team {
             ctx.cancel();
         }
+
+        // The terrorist can only kill with traps, never by shooting.
+        let actor_is_evil = self.maps.read().unwrap().evil_id == Some(actor_id);
+        if actor_is_evil && target_id != actor_id {
+            ctx.cancel();
+        }
     }
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
