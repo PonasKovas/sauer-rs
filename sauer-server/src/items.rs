@@ -1,4 +1,4 @@
-use sauer_proto::data::{ArmourType, ItemSpawn, ItemType, PlayerState};
+use sauer_proto::data::{ArmourType, Gun, ItemSpawn, ItemType, PlayerState};
 
 /// Engine `MAXENTS`: no map has more entities, so no item index is past it.
 pub const MAX_ENTS: usize = 10000;
@@ -202,86 +202,82 @@ pub fn delay_spawn(item_type: ItemType) -> bool {
     )
 }
 
-/// Returns (add, max) ammo stats for ammo-type items.
-pub fn ammo_stats(item_type: ItemType) -> (i32, i32) {
-    match item_type {
-        ItemType::Shells => (10, 30),
-        ItemType::Bullets => (20, 60),
-        ItemType::Rockets => (5, 15),
-        ItemType::Rounds => (5, 15),
-        ItemType::Grenades => (10, 30),
-        ItemType::Cartridges => (30, 120),
-        _ => (0, 0),
-    }
+/// What picking up an item does (engine `itemstats`).
+enum Effect {
+    Health,
+    Boost,
+    GreenArmour,
+    YellowArmour,
+    Quad,
+    /// Adds `add` ammo to `gun`, up to `max`.
+    Ammo {
+        gun: Gun,
+        add: i32,
+        max: i32,
+    },
 }
 
-pub fn ammo_current(state: &PlayerState, item_type: ItemType) -> i32 {
+fn effect(item_type: ItemType) -> Effect {
+    let ammo = |gun, add, max| Effect::Ammo { gun, add, max };
     match item_type {
-        ItemType::Shells => state.ammo.shotgun,
-        ItemType::Bullets => state.ammo.chaingun,
-        ItemType::Rockets => state.ammo.rocket_launcher,
-        ItemType::Rounds => state.ammo.rifle,
-        ItemType::Grenades => state.ammo.grenade_launcher,
-        ItemType::Cartridges => state.ammo.pistol,
-        _ => 0,
-    }
-}
-
-pub fn ammo_current_mut(state: &mut PlayerState, item_type: ItemType) -> &mut i32 {
-    match item_type {
-        ItemType::Shells => &mut state.ammo.shotgun,
-        ItemType::Bullets => &mut state.ammo.chaingun,
-        ItemType::Rockets => &mut state.ammo.rocket_launcher,
-        ItemType::Rounds => &mut state.ammo.rifle,
-        ItemType::Grenades => &mut state.ammo.grenade_launcher,
-        ItemType::Cartridges => &mut state.ammo.pistol,
-        _ => unreachable!("ammo_current_mut called for non-ammo item"),
+        ItemType::Shells => ammo(Gun::Sg, 10, 30),
+        ItemType::Bullets => ammo(Gun::Cg, 20, 60),
+        ItemType::Rockets => ammo(Gun::Rl, 5, 15),
+        ItemType::Rounds => ammo(Gun::Rifle, 5, 15),
+        ItemType::Grenades => ammo(Gun::Gl, 10, 30),
+        ItemType::Cartridges => ammo(Gun::Pistol, 30, 120),
+        ItemType::Health => Effect::Health,
+        ItemType::Boost => Effect::Boost,
+        ItemType::GreenArmour => Effect::GreenArmour,
+        ItemType::YellowArmour => Effect::YellowArmour,
+        ItemType::Quad => Effect::Quad,
     }
 }
 
 /// Mirrors C++ `fpsstate::canpickup` — returns whether the player's current
 /// state allows picking up the given item.
 pub fn canpickup(state: &PlayerState, quad_millis: i32, item_type: ItemType) -> bool {
-    match item_type {
-        ItemType::Boost => state.max_health < 200 || state.health < state.max_health,
-        ItemType::Health => state.health < state.max_health,
-        ItemType::GreenArmour => {
+    match effect(item_type) {
+        Effect::Boost => state.max_health < 200 || state.health < state.max_health,
+        Effect::Health => state.health < state.max_health,
+        Effect::GreenArmour => {
             if state.armour_type == ArmourType::Yellow && state.armour >= 100 {
                 return false;
             }
             state.armour_type == ArmourType::Blue || state.armour < 100
         }
-        ItemType::YellowArmour => state.armour_type == ArmourType::Blue || state.armour < 200,
-        ItemType::Quad => quad_millis < 30000,
-        item => ammo_current(state, item) < ammo_stats(item).1,
+        Effect::YellowArmour => state.armour_type == ArmourType::Blue || state.armour < 200,
+        Effect::Quad => quad_millis < 30000,
+        Effect::Ammo { gun, max, .. } => state.ammo.of(gun).is_some_and(|a| a < max),
     }
 }
 
 /// Mirrors C++ `fpsstate::pickup` — applies the stat changes from picking up
 /// the given item to the player's state and quad timer.
 pub fn apply_pickup(state: &mut PlayerState, quad_millis: &mut i32, item_type: ItemType) {
-    match item_type {
-        ItemType::Boost => {
+    match effect(item_type) {
+        Effect::Boost => {
             state.max_health = (state.max_health + 50).min(200);
             state.health = (state.health + 100).min(state.max_health);
         }
-        ItemType::Health => {
+        Effect::Health => {
             state.health = (state.health + 25).min(state.max_health);
         }
-        ItemType::GreenArmour => {
+        Effect::GreenArmour => {
             state.armour = (state.armour + 100).min(100);
             state.armour_type = ArmourType::Green;
         }
-        ItemType::YellowArmour => {
+        Effect::YellowArmour => {
             state.armour = (state.armour + 200).min(200);
             state.armour_type = ArmourType::Yellow;
         }
-        ItemType::Quad => {
+        Effect::Quad => {
             *quad_millis = (*quad_millis + 20000).min(30000);
         }
-        item => {
-            let (add, max) = ammo_stats(item);
-            *ammo_current_mut(state, item) = (ammo_current(state, item) + add).min(max);
+        Effect::Ammo { gun, add, max } => {
+            if let Some(a) = state.ammo.of_mut(gun) {
+                *a = (*a + add).min(max);
+            }
         }
     }
 }

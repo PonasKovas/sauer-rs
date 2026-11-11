@@ -329,6 +329,26 @@ PlayerAmmo {
     pistol: i32,
 });
 
+impl PlayerAmmo {
+    /// The ammo of `gun`, or `None` for the fist.
+    pub fn of(&self, gun: Gun) -> Option<i32> {
+        self.clone().of_mut(gun).copied()
+    }
+
+    /// The ammo of `gun`, or `None` for the fist, which needs none.
+    pub fn of_mut(&mut self, gun: Gun) -> Option<&mut i32> {
+        Some(match gun {
+            Gun::Fist => return None,
+            Gun::Sg => &mut self.shotgun,
+            Gun::Cg => &mut self.chaingun,
+            Gun::Rl => &mut self.rocket_launcher,
+            Gun::Rifle => &mut self.rifle,
+            Gun::Gl => &mut self.grenade_launcher,
+            Gun::Pistol => &mut self.pistol,
+        })
+    }
+}
+
 make_struct!(
 /// Represents the game state of a player/client.
 PlayerState {

@@ -482,16 +482,12 @@ impl<P: Plugin> Plugin for Base<P> {
             if p.status != Status::Alive {
                 return false;
             }
-            if let Some(state) = p.state.as_mut() {
-                match packet.gun {
-                    sauer_proto::data::Gun::Fist => {}
-                    sauer_proto::data::Gun::Sg => state.ammo.shotgun -= 1,
-                    sauer_proto::data::Gun::Cg => state.ammo.chaingun -= 1,
-                    sauer_proto::data::Gun::Rl => state.ammo.rocket_launcher -= 1,
-                    sauer_proto::data::Gun::Rifle => state.ammo.rifle -= 1,
-                    sauer_proto::data::Gun::Gl => state.ammo.grenade_launcher -= 1,
-                    sauer_proto::data::Gun::Pistol => state.ammo.pistol -= 1,
+            // Like the engine, an empty gun doesn't fire. The fist needs no ammo.
+            if let Some(ammo) = p.state.as_mut().and_then(|s| s.ammo.of_mut(packet.gun)) {
+                if *ammo <= 0 {
+                    return false;
                 }
+                *ammo -= 1;
             }
             true
         });
