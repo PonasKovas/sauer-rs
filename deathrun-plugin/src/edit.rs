@@ -86,20 +86,9 @@ impl Plugin for DeathrunEdit {
         crate::trap::place::cancel_for(ctx.server(), id, "the player left");
 
         let mut state_w = get_server_state(ctx.server()).write();
-        if let Some(map) = state_w.map.as_mut() {
-            let up = map.clear_all_virt_ents_for_player(id);
-            let cn = crate::SERVER_BOT_CN;
-            if !up.global_broadcast.is_empty() {
-                ctx.server().broadcast(
-                    up.global_broadcast
-                        .into_iter()
-                        .map(|p| Client {
-                            client_num: cn,
-                            packet: p,
-                        })
-                        .collect::<Vec<_>>(),
-                );
-            }
+        {
+            let up = state_w.virt.clear_player(id);
+            up.send(ctx.server(), id, crate::SERVER_BOT_CN);
         }
     }
 
@@ -304,32 +293,9 @@ impl Plugin for DeathrunEdit {
 
         if clear_highlight {
             let mut state_w = get_server_state(server).write();
-            if let Some(map) = state_w.map.as_mut() {
-                let up = map.clear_virt_ents(id, "highlight");
-                let cn = crate::SERVER_BOT_CN;
-                if !up.global_broadcast.is_empty() {
-                    server.broadcast(
-                        up.global_broadcast
-                            .into_iter()
-                            .map(|p| Client {
-                                client_num: cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                if !up.personal.is_empty() {
-                    server.send(
-                        id,
-                        up.personal
-                            .into_iter()
-                            .map(|p| Client {
-                                client_num: cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
+            {
+                let up = state_w.virt.clear(id, "highlight");
+                up.send(server, id, crate::SERVER_BOT_CN);
             }
             hl_state_clone.active = false;
         }
@@ -338,69 +304,23 @@ impl Plugin for DeathrunEdit {
             if let Some(edges) = edges_to_draw {
                 let mut fake_ents = Vec::new();
                 for edge in &edges {
-                    fake_ents.push(sauer_map::virt_ents::FakeEnt {
+                    fake_ents.push(sauer_kit::virt_ents::FakeEnt {
                         ent_type: EntityType::Particles,
                         position: [edge.0 as f32, edge.1 as f32, edge.2 as f32],
                         attrs: [7, edge.3, edge.4, guard::GEOMETRY_COLOR, 0],
                     });
                 }
                 let mut state_w = get_server_state(server).write();
-                if let Some(map) = state_w.map.as_mut() {
-                    let up = map.update_virt_ents(id, "highlight", fake_ents);
-                    let cn = crate::SERVER_BOT_CN;
-                    if !up.global_broadcast.is_empty() {
-                        server.broadcast(
-                            up.global_broadcast
-                                .into_iter()
-                                .map(|p| Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                    if !up.personal.is_empty() {
-                        server.send(
-                            id,
-                            up.personal
-                                .into_iter()
-                                .map(|p| Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
+                {
+                    let up = state_w.show_virt(id, "highlight", fake_ents);
+                    up.send(server, id, crate::SERVER_BOT_CN);
                 }
                 hl_state_clone.active = true;
             } else if hl_state_clone.active {
                 let mut state_w = get_server_state(server).write();
-                if let Some(map) = state_w.map.as_mut() {
-                    let up = map.clear_virt_ents(id, "highlight");
-                    let cn = crate::SERVER_BOT_CN;
-                    if !up.global_broadcast.is_empty() {
-                        server.broadcast(
-                            up.global_broadcast
-                                .into_iter()
-                                .map(|p| Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                    if !up.personal.is_empty() {
-                        server.send(
-                            id,
-                            up.personal
-                                .into_iter()
-                                .map(|p| Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
+                {
+                    let up = state_w.virt.clear(id, "highlight");
+                    up.send(server, id, crate::SERVER_BOT_CN);
                 }
                 hl_state_clone.active = false;
             }
@@ -413,23 +333,9 @@ impl Plugin for DeathrunEdit {
         // Frames around entities the trap deletes (red) or creates (green).
         if update_highlight || target_changed {
             let mut state_w = get_server_state(server).write();
-            if let Some(map) = state_w.map.as_mut() {
-                let up = map.update_virt_ents(id, "trap_ents", entity_frames);
-                let cn = crate::SERVER_BOT_CN;
-                let wrap = |pkts: Vec<channel1::EditEnt>| {
-                    pkts.into_iter()
-                        .map(|p| Client {
-                            client_num: cn,
-                            packet: p,
-                        })
-                        .collect::<Vec<_>>()
-                };
-                if !up.global_broadcast.is_empty() {
-                    server.broadcast(wrap(up.global_broadcast));
-                }
-                if !up.personal.is_empty() {
-                    server.send(id, wrap(up.personal));
-                }
+            {
+                let up = state_w.show_virt(id, "trap_ents", entity_frames);
+                up.send(server, id, crate::SERVER_BOT_CN);
             }
         }
 
@@ -455,32 +361,9 @@ impl Plugin for DeathrunEdit {
         // --- WRITE PHASE 2: Update Particle Virt Ents ---
         if clear_particle {
             let mut state_w = get_server_state(server).write();
-            if let Some(map) = state_w.map.as_mut() {
-                let up = map.clear_virt_ents(id, "edit_particle");
-                let cn = crate::SERVER_BOT_CN;
-                if !up.global_broadcast.is_empty() {
-                    server.broadcast(
-                        up.global_broadcast
-                            .into_iter()
-                            .map(|p| Client {
-                                client_num: cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                if !up.personal.is_empty() {
-                    server.send(
-                        id,
-                        up.personal
-                            .into_iter()
-                            .map(|p| Client {
-                                client_num: cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
+            {
+                let up = state_w.virt.clear(id, "edit_particle");
+                up.send(server, id, crate::SERVER_BOT_CN);
             }
         }
 
@@ -535,7 +418,7 @@ impl Plugin for DeathrunEdit {
                 }
             } // Read Lock 2 Dropped
 
-            let fake_ent = sauer_map::virt_ents::FakeEnt {
+            let fake_ent = sauer_kit::virt_ents::FakeEnt {
                 ent_type: EntityType::Particles,
                 position: [
                     origin[0] + forward_edit[0] * dist_edit,
@@ -546,32 +429,9 @@ impl Plugin for DeathrunEdit {
             };
 
             let mut state_w = get_server_state(server).write();
-            if let Some(map) = state_w.map.as_mut() {
-                let up = map.update_virt_ents(id, "edit_particle", vec![fake_ent]);
-                let cn = crate::SERVER_BOT_CN;
-                if !up.global_broadcast.is_empty() {
-                    server.broadcast(
-                        up.global_broadcast
-                            .into_iter()
-                            .map(|p| Client {
-                                client_num: cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                if !up.personal.is_empty() {
-                    server.send(
-                        id,
-                        up.personal
-                            .into_iter()
-                            .map(|p| Client {
-                                client_num: cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
+            {
+                let up = state_w.show_virt(id, "edit_particle", vec![fake_ent]);
+                up.send(server, id, crate::SERVER_BOT_CN);
             }
         }
         Flow::Continue
@@ -851,7 +711,7 @@ impl Plugin for DeathrunEdit {
                         .map_err(|e: ogz_rs::OgzError| e.to_string())?;
                     let t_parsed = t_start.elapsed();
 
-                    map.strip_virtual_entities();
+                    sauer_kit::virt_ents::strip(&mut map.entities);
 
                     let loaded = crate::trap::persist::load(&map);
                     crate::trap::placement::rebuild_all_trap_buttons(&mut map, &loaded.traps);

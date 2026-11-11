@@ -45,8 +45,6 @@ pub struct Map {
     pub blendmap_resolution: i32,
     pub blendmap_data: Option<Vec<u8>>,
     pub config: MapConfig,
-
-    pub virt_state: crate::virt_ents::VirtEntState,
 }
 
 impl Map {
@@ -95,7 +93,6 @@ impl Map {
             blendmap_data: None,
             config: MapConfig::Modern { variables: vec![] },
             protected_regions: vec![],
-            virt_state: Default::default(),
         }
     }
 
@@ -124,7 +121,6 @@ impl Map {
             blendmap_data: ogz.blendmap_data,
             config: ogz.config,
             protected_regions: vec![],
-            virt_state: Default::default(),
         };
 
         map.compact_vslots();
@@ -399,13 +395,6 @@ impl Map {
     /// Removes an exact bounding box from the protected regions list.
     pub fn unprotect_region(&mut self, b: Aabb) {
         self.protected_regions.retain(|&p| p != b);
-    }
-
-    /// Generates optimal network payload chunks to restore a region's geometry back to reality.
-    /// This keeps networking out of `sauer-map`, allowing the caller to broadcast `DelCube`
-    /// and `PasteServer` sequences using these payloads.
-    pub fn generate_restore_packets(&self, b: Aabb) -> Vec<sauer_proto::data::ClipboardPayload> {
-        crate::chunking::chunk_region(self, b, 4000)
     }
 
     /// Modifies a global map variable.
@@ -726,7 +715,6 @@ impl Map {
                     }
                     self.entities[id] = ue.ent.clone();
                 }
-                self.reconcile_virtual_entities();
                 true
             }
         }

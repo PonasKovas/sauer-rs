@@ -29,6 +29,8 @@ pub struct DeathrunState {
     pub base_map: Option<Box<sauer_map::Map>>,
     /// Traps whose active state is in the map, oldest first.
     pub active_trap_stack: Vec<crate::trap::TrapId>,
+    /// Per-player fake entities in `map`.
+    pub virt: sauer_kit::virt_ents::VirtEnts,
     /// Where trap geometry and the trap record live in the map, once created.
     pub vault: Option<crate::trap::vault::Vault>,
     /// Generation of the last trap record written to the anchor.
@@ -46,6 +48,19 @@ impl DeathrunState {
 
     pub fn trap_mut(&mut self, id: crate::trap::TrapId) -> Option<&mut Trap> {
         self.traps.iter_mut().find(|t| t.id == id)
+    }
+
+    /// Shows `player` the fake entities `ents` under `namespace`.
+    pub fn show_virt(
+        &mut self,
+        player: u64,
+        namespace: &str,
+        ents: Vec<sauer_kit::virt_ents::FakeEnt>,
+    ) -> sauer_kit::virt_ents::VirtEntUpdates {
+        match self.map.as_mut() {
+            Some(map) => self.virt.update(&mut map.entities, player, namespace, ents),
+            None => Default::default(),
+        }
     }
 
     /// The trap whose button is at `hit_pt`, give or take half a unit.
@@ -74,6 +89,7 @@ impl Default for DeathrunState {
             mode: Default::default(),
             base_map: None,
             active_trap_stack: Vec::new(),
+            virt: Default::default(),
             vault: None,
             record_generation: 0,
         }

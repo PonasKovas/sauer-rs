@@ -98,7 +98,7 @@ pub fn generate_clipboard_for_region(
 /// The grid-aligned box a region is copied as: the region clipped to the
 /// world, padded out to a grid coarse enough that it spans at most 8 cubes
 /// and doesn't split a shaped leaf. Returns `(origin, size in cubes, grid)`.
-pub(crate) fn region_layout(map: &Map, min: [i32; 3], max: [i32; 3]) -> ([i32; 3], [i32; 3], i32) {
+pub fn region_layout(map: &Map, min: [i32; 3], max: [i32; 3]) -> ([i32; 3], [i32; 3], i32) {
     let min = min.map(|v| v.clamp(0, map.size));
     let max: [i32; 3] = std::array::from_fn(|i| max[i].clamp(min[i], map.size));
     let max_span = (0..3).map(|i| max[i] - min[i]).max().unwrap_or(1).max(1);

@@ -96,7 +96,7 @@ impl LoadedMap {
     /// holding the `PlayMaps` lock, then [`PlayMaps::insert`] the result.
     pub fn parse(name: &str, data: &[u8]) -> Result<Self, String> {
         let mut state = Map::from_bytes(data).map_err(|e| e.to_string())?;
-        state.strip_virtual_entities();
+        sauer_kit::virt_ents::strip(&mut state.entities);
 
         let loaded = crate::trap::persist::load(&state);
         for w in &loaded.warnings {
@@ -1041,32 +1041,9 @@ impl Plugin for DeathrunPlay {
 
             if clear_highlight {
                 let mut state_w = crate::map_state::get_server_state(server).write();
-                if let Some(map) = state_w.map.as_mut() {
-                    let up = map.clear_virt_ents(id, "highlight");
-                    let cn = crate::SERVER_BOT_CN;
-                    if !up.global_broadcast.is_empty() {
-                        server.broadcast(
-                            up.global_broadcast
-                                .into_iter()
-                                .map(|p| sauer_proto::Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                    if !up.personal.is_empty() {
-                        server.send(
-                            id,
-                            up.personal
-                                .into_iter()
-                                .map(|p| sauer_proto::Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
+                {
+                    let up = state_w.virt.clear(id, "highlight");
+                    up.send(server, id, crate::SERVER_BOT_CN);
                 }
                 hl_state_clone.active = false;
             }
@@ -1094,39 +1071,16 @@ impl Plugin for DeathrunPlay {
 
                     let mut fake_ents = Vec::new();
                     for edge in &edges {
-                        fake_ents.push(sauer_map::virt_ents::FakeEnt {
+                        fake_ents.push(sauer_kit::virt_ents::FakeEnt {
                             ent_type: sauer_proto::data::EntityType::Particles,
                             position: [edge.0 as f32, edge.1 as f32, edge.2 as f32],
                             attrs: [7, edge.3, edge.4, color_int, 0],
                         });
                     }
                     let mut state_w = crate::map_state::get_server_state(server).write();
-                    if let Some(map) = state_w.map.as_mut() {
-                        let up = map.update_virt_ents(id, "highlight", fake_ents);
-                        let cn = crate::SERVER_BOT_CN;
-                        if !up.global_broadcast.is_empty() {
-                            server.broadcast(
-                                up.global_broadcast
-                                    .into_iter()
-                                    .map(|p| sauer_proto::Client {
-                                        client_num: cn,
-                                        packet: p,
-                                    })
-                                    .collect::<Vec<_>>(),
-                            );
-                        }
-                        if !up.personal.is_empty() {
-                            server.send(
-                                id,
-                                up.personal
-                                    .into_iter()
-                                    .map(|p| sauer_proto::Client {
-                                        client_num: cn,
-                                        packet: p,
-                                    })
-                                    .collect::<Vec<_>>(),
-                            );
-                        }
+                    {
+                        let up = state_w.show_virt(id, "highlight", fake_ents);
+                        up.send(server, id, crate::SERVER_BOT_CN);
                     }
                     hl_state_clone.active = true;
                 }
@@ -1148,32 +1102,9 @@ impl Plugin for DeathrunPlay {
             }
             if clear_highlight {
                 let mut state_w = crate::map_state::get_server_state(server).write();
-                if let Some(map) = state_w.map.as_mut() {
-                    let up = map.clear_virt_ents(id, "highlight");
-                    let cn = crate::SERVER_BOT_CN;
-                    if !up.global_broadcast.is_empty() {
-                        server.broadcast(
-                            up.global_broadcast
-                                .into_iter()
-                                .map(|p| sauer_proto::Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                    if !up.personal.is_empty() {
-                        server.send(
-                            id,
-                            up.personal
-                                .into_iter()
-                                .map(|p| sauer_proto::Client {
-                                    client_num: cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
+                {
+                    let up = state_w.virt.clear(id, "highlight");
+                    up.send(server, id, crate::SERVER_BOT_CN);
                 }
             }
         }
@@ -1348,20 +1279,9 @@ impl Plugin for DeathrunPlay {
         crate::trap::placement::forget_seethrough(server, id);
 
         let mut state_w = crate::map_state::get_server_state(server).write();
-        if let Some(map) = state_w.map.as_mut() {
-            let up = map.clear_all_virt_ents_for_player(id);
-            let cn = crate::SERVER_BOT_CN;
-            if !up.global_broadcast.is_empty() {
-                server.broadcast(
-                    up.global_broadcast
-                        .into_iter()
-                        .map(|p| sauer_proto::Client {
-                            client_num: cn,
-                            packet: p,
-                        })
-                        .collect::<Vec<_>>(),
-                );
-            }
+        {
+            let up = state_w.virt.clear_player(id);
+            up.send(server, id, crate::SERVER_BOT_CN);
         }
         drop(state_w);
 

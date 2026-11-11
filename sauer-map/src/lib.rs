@@ -2,9 +2,7 @@ mod edit;
 mod geom;
 pub mod map;
 pub mod octree;
-pub mod virt_ents;
 
-pub mod chunking;
 pub mod clipboard;
 pub mod facemerge;
 pub mod map_vars;

@@ -29,7 +29,6 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         None => return, // Nothing to recompose
     };
 
-    let virt_state = std::mem::take(&mut state.map.as_mut().unwrap().virt_state);
     let old_map = state.map.clone().unwrap();
     let mut new_map = *base_map;
 
@@ -39,7 +38,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         .iter()
         .filter_map(|&id| state.trap(id))
     {
-        apply_active_state(&mut new_map, trap, &virt_state.global_pool);
+        apply_active_state(&mut new_map, trap, state.virt.slots());
     }
 
     // A trap's geometry can cover other traps' buttons and paste them back as
@@ -86,9 +85,9 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         extra_data: vec![],
     };
     for i in 0..new_map.entities.len().max(old_map.entities.len()) {
-        if virt_state.global_pool.contains(&i) {
+        if state.virt.is_virtual(i) {
             continue;
-        } // Ignore virtual entities
+        }
         let c = new_map.entities.get(i).unwrap_or(&empty_ent);
         let o = old_map.entities.get(i).unwrap_or(&empty_ent);
         if c != o {
@@ -96,8 +95,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         }
     }
 
-    new_map.virt_state = virt_state;
-    new_map.reconcile_virtual_entities();
+    state.virt.reconcile(&mut new_map.entities);
     state.map = Some(new_map);
     crate::map_state::update_server_items(state.map.as_ref().unwrap(), server);
 
@@ -139,7 +137,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         let map = state.map.as_ref().unwrap();
         let payloads = changed
             .into_iter()
-            .flat_map(|b| sauer_map::chunking::chunk_region(map, b, usize::MAX))
+            .flat_map(|b| sauer_kit::paste::chunk_region(map, b, usize::MAX))
             .collect();
 
         let s_clone = server.clone();
@@ -308,10 +306,10 @@ fn progress_bar_pos(pos: ButtonPos, size: i32, orient: u8) -> [f32; 3] {
 }
 
 /// The progress bar: a particle meter, green when full, red when empty.
-fn progress_ent(pos: [f32; 3], progress: i32) -> sauer_map::virt_ents::FakeEnt {
+fn progress_ent(pos: [f32; 3], progress: i32) -> sauer_kit::virt_ents::FakeEnt {
     let g = (progress * 15 / 100).clamp(0, 15);
     let r = ((100 - progress) * 15 / 100).clamp(0, 15);
-    sauer_map::virt_ents::FakeEnt {
+    sauer_kit::virt_ents::FakeEnt {
         ent_type: sauer_proto::data::EntityType::Particles,
         position: pos,
         attrs: [5, progress, (r << 8) | (g << 4), 1337, 7331],
@@ -323,20 +321,17 @@ fn show_progress(
     server: &Server,
     targets: &[u64],
     namespace: &str,
-    ents: Vec<sauer_map::virt_ents::FakeEnt>,
+    ents: Vec<sauer_kit::virt_ents::FakeEnt>,
 ) {
     let updates: Vec<_> = {
         let mut state = get_server_state(server).write();
-        let Some(map) = state.map.as_mut() else {
-            return;
-        };
         targets
             .iter()
-            .map(|&id| (id, map.update_virt_ents(id, namespace, ents.clone())))
+            .map(|&id| (id, state.show_virt(id, namespace, ents.clone())))
             .collect()
     };
     for (id, up) in updates {
-        super::place::send_virt(server, id, up);
+        up.send(server, id, crate::SERVER_BOT_CN);
     }
 }
 

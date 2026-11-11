@@ -382,6 +382,7 @@ dependencies = [
  "parking_lot",
  "rand",
  "sauer-core",
+ "sauer-kit",
  "sauer-map",
  "sauer-plugin-lua",
  "sauer-proto",
@@ -1659,6 +1660,18 @@ dependencies = [
  "mlua",
  "num_enum",
  "serde",
+]
+
+[[package]]
+name = "sauer-kit"
+version = "0.1.0"
+dependencies = [
+ "ogz-rs",
+ "sauer-core",
+ "sauer-map",
+ "sauer-proto",
+ "sauer-server",
+ "tokio",
 ]
 
 [[package]]

@@ -16,10 +16,10 @@ use super::placement::{
 use super::{BUTTON_SIZE, Trap, TrapGeom, TrapId, TrapMode, TrapPhase, persist};
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
+use sauer_kit::virt_ents::FakeEnt;
 use sauer_map::Map;
-use sauer_map::virt_ents::{FakeEnt, VirtEntUpdates};
+use sauer_proto::channel1;
 use sauer_proto::data::{ClipboardPayload, EntityType};
-use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 use std::sync::Arc;
 
@@ -227,7 +227,7 @@ fn ghost(map: &mut Map, target: Target) -> Vec<ClipboardPayload> {
     let cell = cell_box(key);
     let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, cell);
     build_button(map, pos, size, orient, verdict.color(), true);
-    let out = map.generate_restore_packets(cell);
+    let out = sauer_kit::paste::restore_payloads(map, cell);
     if let Some(sel) = super::vault::sel(map, o, s, grid) {
         map.apply_block(&sel, saved.nodes, false);
     }
@@ -237,7 +237,7 @@ fn ghost(map: &mut Map, target: Target) -> Vec<ClipboardPayload> {
 /// Paste packets putting the server's version back where `target` was drawn.
 fn unghost(map: &Map, target: Target) -> Vec<ClipboardPayload> {
     match target {
-        Target::Cell(key, _) => map.generate_restore_packets(cell_box(key)),
+        Target::Cell(key, _) => sauer_kit::paste::restore_payloads(map, cell_box(key)),
         _ => Vec::new(),
     }
 }
@@ -257,32 +257,11 @@ fn frames(state: &DeathrunState, target: Target) -> Vec<FakeEnt> {
         .collect()
 }
 
-pub(crate) fn send_virt(server: &Server, id: u64, up: VirtEntUpdates) {
-    let cn = crate::SERVER_BOT_CN;
-    let wrap = |pkts: Vec<channel1::EditEnt>| {
-        pkts.into_iter()
-            .map(|p| Client {
-                client_num: cn,
-                packet: p,
-            })
-            .collect::<Vec<_>>()
-    };
-    if !up.global_broadcast.is_empty() {
-        server.broadcast(wrap(up.global_broadcast));
-    }
-    if !up.personal.is_empty() {
-        server.send(id, wrap(up.personal));
-    }
-}
-
 fn send_frames(server: &Server, state: &mut DeathrunState, target: Target) {
     let ents = frames(state, target);
-    let Some(map) = state.map.as_mut() else {
-        return;
-    };
     for id in server.client_ids() {
-        let up = map.update_virt_ents(id, FRAMES, ents.clone());
-        send_virt(server, id, up);
+        let up = state.show_virt(id, FRAMES, ents.clone());
+        up.send(server, id, crate::SERVER_BOT_CN);
     }
 }
 
@@ -317,9 +296,9 @@ pub fn reshow_for(server: &Server, id: u64) {
         let Some(target) = state.mode.placing().map(|p| p.target) else {
             return;
         };
-        if let Some(map) = state.map.as_mut() {
-            let up = map.clear_virt_ents(id, FRAMES);
-            send_virt(server, id, up);
+        {
+            let up = state.virt.clear(id, FRAMES);
+            up.send(server, id, crate::SERVER_BOT_CN);
         }
         send_frames(server, &mut state, target);
     }

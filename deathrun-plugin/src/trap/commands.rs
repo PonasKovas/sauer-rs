@@ -370,15 +370,15 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
 
     let original_map = Box::new(state.map.clone().unwrap());
     let trap = state.traps[trap_idx].clone();
+    let pool = state.virt.slots().to_vec();
     let map = state.map.as_mut().unwrap();
-    let pool = map.virt_state.global_pool.clone();
     let touched = super::trigger::apply_active_state(map, &trap, &pool);
     map.invalidate_cache();
     crate::map_state::update_server_items(map, server);
 
     broadcast_ents(server, map, touched);
     let payloads = match &trap.geom {
-        Some(g) => map.generate_restore_packets(g.clip_box()),
+        Some(g) => sauer_kit::paste::restore_payloads(map, g.clip_box()),
         None => Vec::new(),
     };
     state.mode = TrapMode::Editing(TrapEditState {
@@ -401,28 +401,14 @@ fn end_edit(
         return;
     };
 
-    if let Some(map) = state.map.as_mut() {
-        let up = map.clear_virt_ents(id, "edit_particle");
-        let cn = crate::SERVER_BOT_CN;
-        let wrap = |pkts: Vec<channel1::EditEnt>| {
-            pkts.into_iter()
-                .map(|p| Client {
-                    client_num: cn,
-                    packet: p,
-                })
-                .collect::<Vec<_>>()
-        };
-        if !up.global_broadcast.is_empty() {
-            server.broadcast(wrap(up.global_broadcast));
-        }
-        if !up.personal.is_empty() {
-            server.send(id, wrap(up.personal));
-        }
+    {
+        let up = state.virt.clear(id, "edit_particle");
+        up.send(server, id, crate::SERVER_BOT_CN);
     }
 
     let current_map = state.map.as_ref().unwrap();
     let original = &edit_state.original_map;
-    let pool = current_map.virt_state.global_pool.clone();
+    let pool = state.virt.slots().to_vec();
     let old_geom = state.trap(edit_state.trap).and_then(|t| t.geom.clone());
 
     let geom_bounds = geometry_bounds(original, current_map, old_geom.as_ref());
@@ -439,14 +425,13 @@ fn end_edit(
     // Back to the base state. Keep vslots created during the edit: the new
     // geometry may reference them.
     let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
-    let virt_state = std::mem::take(&mut state.map.as_mut().unwrap().virt_state);
     state.map = Some(*edit_state.original_map.clone());
-    if let Some(map) = state.map.as_mut() {
+    let crate::map_state::DeathrunState { map, virt, .. } = &mut *state;
+    if let Some(map) = map.as_mut() {
         if merged_vslots.len() > map.vslots.len() {
             map.vslots = merged_vslots;
         }
-        map.virt_state = virt_state;
-        map.reconcile_virtual_entities();
+        virt.reconcile(&mut map.entities);
         crate::map_state::update_server_items(map, server);
     }
 
@@ -464,7 +449,7 @@ fn end_edit(
     }
     let out = persist::packets(&state, sync);
     let restore = geom_bounds
-        .map(|b| state.map.as_ref().unwrap().generate_restore_packets(b))
+        .map(|b| sauer_kit::paste::restore_payloads(state.map.as_ref().unwrap(), b))
         .unwrap_or_default();
     let map_snapshot = state.map.as_ref().unwrap();
     broadcast_ents(server, map_snapshot, changed_ent_ids);

@@ -6,8 +6,8 @@ use super::ents::{self, EntChange};
 use super::persist;
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
+use sauer_kit::virt_ents::FakeEnt;
 use sauer_map::Map;
-use sauer_map::virt_ents::FakeEnt;
 use sauer_proto::{Client, channel1, data::EntityType};
 use sauer_server::plugin::Context;
 
@@ -25,7 +25,7 @@ pub fn reject(ctx: &Context, bounds: Aabb, msg: &str) {
         state
             .map
             .as_ref()
-            .map(|m| m.generate_restore_packets(bounds))
+            .map(|m| sauer_kit::paste::restore_payloads(m, bounds))
             .unwrap_or_default()
     };
     tokio::spawn(async move {
@@ -97,21 +97,17 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
 
     // Virtual entities (frames, progress bars) are server-drawn and personal.
     // Someone grabbed one: undo it for everyone and keep it out of the map.
-    let virt: Vec<usize> = match state.map.as_ref() {
-        Some(m) => ids
-            .iter()
-            .copied()
-            .filter(|i| m.virt_state.global_pool.contains(i))
-            .collect(),
-        None => Vec::new(),
-    };
+    let virt: Vec<usize> = ids
+        .iter()
+        .copied()
+        .filter(|&i| state.virt.is_virtual(i))
+        .collect();
     if !virt.is_empty() {
-        let map = state.map.as_ref().unwrap();
         let cn = crate::SERVER_BOT_CN;
         for client in server.client_ids() {
             let fixes: Vec<_> = virt
                 .iter()
-                .filter_map(|&i| map.virt_ent_view(client, i))
+                .filter_map(|&i| state.virt.view(client, i))
                 .map(|packet| Client {
                     client_num: cn,
                     packet,
@@ -161,6 +157,16 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
         if let (Some(e), Some(m)) = (base, state.base_map.as_mut()) {
             m.entities[i] = e;
         }
+    }
+    // An undo can bring back entities from before a virtual slot was taken.
+    let DeathrunState {
+        map,
+        base_map,
+        virt,
+        ..
+    } = &mut *state;
+    for m in map.iter_mut().chain(base_map.as_deref_mut()) {
+        virt.reconcile(&mut m.entities);
     }
     if !ok {
         // The edit was already relayed: put the server's entities back everywhere.
@@ -249,7 +255,7 @@ pub fn trap_ent_changes(state: &DeathrunState, trap: super::TrapId) -> Vec<EntCh
         (Some(edit), Some(map)) if edit.trap == trap => ents::diff(
             &edit.original_map.entities,
             &map.entities,
-            &map.virt_state.global_pool,
+            state.virt.slots(),
         ),
         _ => state.trap(trap).map(|t| t.ents.clone()).unwrap_or_default(),
     }

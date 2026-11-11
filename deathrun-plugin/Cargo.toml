@@ -9,6 +9,7 @@ sauer-server.workspace = true
 dashmap.workspace = true
 sauer-proto = { workspace = true, features = ["serde"] }
 sauer-map.workspace = true
+sauer-kit.workspace = true
 sauer-core.workspace = true
 ogz-rs.workspace = true
 cube-string.workspace = true

@@ -331,7 +331,7 @@ pub fn packets(state: &DeathrunState, sync: Sync) -> (u32, Vec<ClipboardPayload>
     }
     let payloads = boxes
         .into_iter()
-        .flat_map(|b| map.generate_restore_packets(b))
+        .flat_map(|b| sauer_kit::paste::restore_payloads(map, b))
         .collect();
     (sync.enlarges, payloads)
 }
