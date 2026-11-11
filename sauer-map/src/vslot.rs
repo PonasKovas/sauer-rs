@@ -114,7 +114,14 @@ pub fn lookup_vslot(
     }
 
     // Always at the end: an empty entry is some slot's base (see
-    // `slot_of_root`), and filling it would shift every slot after it.
+    // `slot_of_root`), and filling it would shift every slot after it. And
+    // never below `MIN_VARIANT_INDEX`: there it would sit below the bases of
+    // later slots and shift them too, like `Map::normalize_vslots` fixes on
+    // load. A new map starts with no entries, so its first variant would
+    // land right after the base it was made from.
+    if vslots.len() < crate::map::MIN_VARIANT_INDEX {
+        vslots.resize(crate::map::MIN_VARIANT_INDEX, None);
+    }
     vslots.push(Some(VSlot {
         prev: chain_tail,
         props,
@@ -173,4 +180,22 @@ pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &m
         }
     }
     nodes.iter_mut().for_each(|n| remap(n, &map));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_variant_keeps_later_slots() {
+        // A new map: no entries until the first edit.
+        let mut vslots = Vec::new();
+        let color = VSlotProps {
+            color: Some((1.0, 0.0, 0.0)),
+            ..Default::default()
+        };
+        let variant = resolve_vslot(&mut vslots, 10, &color, false);
+        assert_eq!(slot_of_root(&vslots, 300), 300);
+        assert_eq!(slot_of_root(&vslots, root_base_of(&vslots, variant)), 10);
+    }
 }
