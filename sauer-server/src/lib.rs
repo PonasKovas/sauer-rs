@@ -27,7 +27,9 @@ pub mod utils;
 mod welcome;
 
 pub use builder::ServerBuilder;
-pub use items::{Items, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime};
+pub use items::{
+    ItemState, Items, MAX_ENTS, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
+};
 pub use players::{ClipboardData, PlayerData, Players};
 
 /// Stands in for a client id in cn slots taken with `Server::reserve_cn`.

@@ -3,7 +3,7 @@
 
 use crate::{
     Server,
-    items::{ServerItem, apply_pickup, canpickup, spawntime},
+    items::{apply_pickup, canpickup},
     players::combat::{explosion_damage, gun_damage_per_ray},
     players::{ClipboardData, clear_player, init_player},
     plugin::{Context, Plugin},
@@ -99,6 +99,7 @@ fn do_map_change(server: &Server, map_name: cube_string::CubeString, mode: GameM
     *server.map_name.write() = map_name.clone();
     *server.game_mode.write() = mode;
     server.map_votes.write().clear();
+    server.items.write().await_list();
     server.broadcast_chan1(&MapChange {
         map_name,
         mode,
@@ -148,29 +149,8 @@ impl<P: Plugin> Plugin for Base<P> {
                     }
                 });
 
-                let spawning: Vec<usize> = {
-                    let mut items = server.items.write();
-                    if items.notgotitems {
-                        continue;
-                    }
-                    items
-                        .list
-                        .iter_mut()
-                        .enumerate()
-                        .filter(|(_, item)| item.spawn_time_ms > 0)
-                        .filter_map(|(i, item)| {
-                            item.spawn_time_ms -= 100;
-                            if item.spawn_time_ms <= 0 {
-                                item.spawn_time_ms = 0;
-                                item.spawned = true;
-                                Some(i)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect()
-                };
-                for i in spawning {
+                let spawned = server.items.write().tick(100);
+                for i in spawned {
                     server.broadcast_chan1(&ItemSpawn {
                         item_index: i as i32,
                     });
@@ -973,39 +953,10 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         let idx = packet.ent_id as usize;
-        let new_item = {
-            let mut items = server.items.write();
-            match ItemType::try_from(packet.type_) {
-                Ok(item_type) => {
-                    if items.list.len() <= idx {
-                        items.list.resize_with(idx + 1, || ServerItem {
-                            item_type,
-                            spawned: false,
-                            spawn_time_ms: 0,
-                        });
-                        true
-                    } else {
-                        let item = &mut items.list[idx];
-                        if item.item_type != item_type || (!item.spawned && item.spawn_time_ms == 0)
-                        {
-                            item.item_type = item_type;
-                            item.spawned = false;
-                            item.spawn_time_ms = 0;
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                }
-                Err(_) => {
-                    if let Some(item) = items.list.get_mut(idx) {
-                        item.spawned = false;
-                        item.spawn_time_ms = 0;
-                    }
-                    false
-                }
-            }
-        };
+        let new_item = server
+            .items
+            .write()
+            .edit(idx, ItemType::try_from(packet.type_).ok());
 
         if let Some(cn) = server.get_cn(id) {
             server.broadcast_except_chan1(
@@ -1018,7 +969,6 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         if new_item {
-            server.items.write().list[idx].spawned = true;
             server.broadcast_chan1(&ItemSpawn {
                 item_index: idx as i32,
             });
@@ -1027,9 +977,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
         if packet.size >= 0 {
-            let mut items = ctx.server().items.write();
-            items.reset();
-            items.notgotitems = false;
+            ctx.server().items.write().clear();
         }
         relay_coop(ctx.server(), ctx.id(), packet);
     }
@@ -1043,30 +991,18 @@ impl<P: Plugin> Plugin for Base<P> {
             .with(id, |p| p.client_state == ClientState::Spectator)
             .unwrap_or(false);
 
+        let num_players = server.client_count();
         let mut items = server.items.write();
-        if !items.notgotitems || is_spectator {
+        if !items.is_awaiting_list() || is_spectator {
             return;
         }
-        let num_players = server.client_count();
-        for item in &packet.items {
-            let idx = item.item_index as usize;
-            while items.list.len() <= idx {
-                items.list.push(ServerItem {
-                    item_type: item.item_type,
-                    spawned: false,
-                    spawn_time_ms: 0,
-                });
-            }
-            items.list[idx].item_type = item.item_type;
-            if crate::items::delay_spawn(item.item_type) {
-                items.list[idx].spawn_time_ms = spawntime(item.item_type, num_players);
-                items.list[idx].spawned = false;
-            } else {
-                items.list[idx].spawned = true;
-                items.list[idx].spawn_time_ms = 0;
-            }
-        }
-        items.notgotitems = false;
+        items.load(
+            packet
+                .items
+                .iter()
+                .map(|item| (item.item_index as usize, item.item_type)),
+            num_players,
+        );
     }
 
     async fn item_pickup(&self, ctx: &mut Context, packet: &channel1::ItemPickup) {
@@ -1082,17 +1018,14 @@ impl<P: Plugin> Plugin for Base<P> {
                 return None;
             }
             let state = p.state.as_mut()?;
-            let mut items = server.items.write();
-            let Some(item) = items
-                .list
-                .get_mut(idx)
-                .filter(|item| item.spawned && canpickup(state, p.quad_millis, item.item_type))
-            else {
+            let quad_millis = p.quad_millis;
+            let taken = server.items.write().take(idx, num_players, |item_type| {
+                canpickup(state, quad_millis, item_type)
+            });
+            let Some(item_type) = taken else {
                 return Some(false);
             };
-            item.spawned = false;
-            item.spawn_time_ms = spawntime(item.item_type, num_players);
-            apply_pickup(state, &mut p.quad_millis, item.item_type);
+            apply_pickup(state, &mut p.quad_millis, item_type);
             Some(true)
         });
 

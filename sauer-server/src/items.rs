@@ -1,23 +1,51 @@
 use sauer_proto::data::{ArmourType, ItemSpawn, ItemType, PlayerState};
 
-pub struct ServerItem {
-    pub item_type: ItemType,
-    pub spawned: bool,
-    /// Countdown in milliseconds until this item respawns. 0 = not counting.
-    pub spawn_time_ms: i32,
+/// Engine `MAXENTS`: no map has more entities, so no item index is past it.
+pub const MAX_ENTS: usize = 10000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ItemState {
+    Spawned,
+    /// Picked up or not out yet; comes back once the countdown runs out.
+    Respawning {
+        ms_left: i32,
+    },
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ServerItem {
+    pub item_type: ItemType,
+    pub state: ItemState,
+}
+
+impl ServerItem {
+    /// An item as it first appears on a map: armour, boost and quad wait a
+    /// while, the rest is out right away (engine `delayspawn`).
+    fn fresh(item_type: ItemType, num_players: usize) -> Self {
+        let state = if delay_spawn(item_type) {
+            ItemState::Respawning {
+                ms_left: spawntime(item_type, num_players),
+            }
+        } else {
+            ItemState::Spawned
+        };
+        Self { item_type, state }
+    }
+}
+
+/// The current map's items, indexed by entity id.
 pub struct Items {
-    pub list: Vec<ServerItem>,
-    /// True while waiting for a client to send the initial N_ITEMLIST.
-    pub notgotitems: bool,
+    /// `None` for entities that aren't items.
+    slots: Vec<Option<ServerItem>>,
+    /// Waiting for a client to send the map's `N_ITEMLIST`.
+    awaiting_list: bool,
 }
 
 impl Default for Items {
     fn default() -> Self {
         Self {
-            list: Vec::new(),
-            notgotitems: true,
+            slots: Vec::new(),
+            awaiting_list: true,
         }
     }
 }
@@ -27,21 +55,115 @@ impl Items {
         Self::default()
     }
 
-    pub fn reset(&mut self) {
-        self.list.clear();
-        self.notgotitems = true;
+    /// Forgets all items and waits for a client to send the new map's list.
+    pub fn await_list(&mut self) {
+        self.slots.clear();
+        self.awaiting_list = true;
+    }
+
+    /// Forgets all items: the map is empty (engine `N_NEWMAP`).
+    pub fn clear(&mut self) {
+        self.slots.clear();
+        self.awaiting_list = false;
+    }
+
+    pub fn is_awaiting_list(&self) -> bool {
+        self.awaiting_list
+    }
+
+    /// Replaces all items with a new map's. Indexes past [`MAX_ENTS`] are dropped.
+    pub fn load(&mut self, items: impl IntoIterator<Item = (usize, ItemType)>, num_players: usize) {
+        self.clear();
+        for (idx, item_type) in items {
+            if let Some(slot) = self.slot_mut(idx) {
+                *slot = Some(ServerItem::fresh(item_type, num_players));
+            }
+        }
+    }
+
+    /// Sets entity `idx` to `item_type`, or to no item, after a coop edit.
+    /// Returns true if a new item appeared there, which goes out as spawned.
+    pub fn edit(&mut self, idx: usize, item_type: Option<ItemType>) -> bool {
+        let Some(slot) = self.slot_mut(idx) else {
+            return false;
+        };
+        match item_type {
+            Some(t) if !matches!(slot, Some(item) if item.item_type == t) => {
+                *slot = Some(ServerItem {
+                    item_type: t,
+                    state: ItemState::Spawned,
+                });
+                true
+            }
+            Some(_) => false,
+            None => {
+                *slot = None;
+                false
+            }
+        }
+    }
+
+    /// Takes the spawned item at `idx` if `can_take` allows its type, and
+    /// starts its respawn countdown. Returns its type.
+    pub fn take(
+        &mut self,
+        idx: usize,
+        num_players: usize,
+        can_take: impl FnOnce(ItemType) -> bool,
+    ) -> Option<ItemType> {
+        let item = self.slots.get_mut(idx)?.as_mut()?;
+        if item.state != ItemState::Spawned || !can_take(item.item_type) {
+            return None;
+        }
+        item.state = ItemState::Respawning {
+            ms_left: spawntime(item.item_type, num_players),
+        };
+        Some(item.item_type)
+    }
+
+    /// Runs the respawn countdowns forward. Returns the items that came back.
+    pub fn tick(&mut self, ms: i32) -> Vec<usize> {
+        if self.awaiting_list {
+            return Vec::new();
+        }
+        let mut spawned = Vec::new();
+        for (idx, item) in self.slots.iter_mut().enumerate() {
+            if let Some(item) = item
+                && let ItemState::Respawning { ms_left } = &mut item.state
+            {
+                *ms_left -= ms;
+                if *ms_left <= 0 {
+                    item.state = ItemState::Spawned;
+                    spawned.push(idx);
+                }
+            }
+        }
+        spawned
     }
 
     pub fn spawned_items(&self) -> Vec<ItemSpawn> {
-        self.list
+        self.slots
             .iter()
             .enumerate()
-            .filter(|(_, item)| item.spawned)
-            .map(|(i, item)| ItemSpawn {
-                item_index: i as i32,
-                item_type: item.item_type,
+            .filter_map(|(i, slot)| {
+                let item = slot.as_ref()?;
+                (item.state == ItemState::Spawned).then_some(ItemSpawn {
+                    item_index: i as i32,
+                    item_type: item.item_type,
+                })
             })
             .collect()
+    }
+
+    /// The slot for entity `idx`, growing the list to reach it. `None` past [`MAX_ENTS`].
+    fn slot_mut(&mut self, idx: usize) -> Option<&mut Option<ServerItem>> {
+        if idx >= MAX_ENTS {
+            return None;
+        }
+        if self.slots.len() <= idx {
+            self.slots.resize(idx + 1, None);
+        }
+        Some(&mut self.slots[idx])
     }
 }
 

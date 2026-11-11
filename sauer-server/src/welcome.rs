@@ -19,7 +19,7 @@ impl Server {
         // Extract map/item state while holding both locks, then release before sending.
         let (map_name, mode, notgotitems, spawned_items) = {
             let items = self.items.read();
-            let notgotitems = items.notgotitems;
+            let notgotitems = items.is_awaiting_list();
             let spawned = (!notgotitems).then(|| items.spawned_items());
             (
                 self.map_name.read().clone(),

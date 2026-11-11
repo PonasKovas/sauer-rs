@@ -1,39 +1,20 @@
 use parking_lot::RwLock;
 use sauer_proto::channel2;
+use sauer_server::Server;
 use sauer_server::plugin::Context;
-use sauer_server::{Server, ServerItem, delay_spawn, spawntime};
 use tracing::error;
 
 pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
+    let items = map.entities.iter().enumerate().filter_map(|(i, ent)| {
+        let ogz_rs::data::EntityType::GameSpecific(n) = ent.ent_type else {
+            return None;
+        };
+        let proto_type = sauer_proto::data::EntityType::try_from(n as i32).ok()?;
+        let item_type = sauer_proto::data::ItemType::try_from(proto_type).ok()?;
+        Some((i, item_type))
+    });
     let num_players = server.client_count();
-    let mut items = server.items.write();
-    items.reset();
-
-    for (i, ent) in map.entities.iter().enumerate() {
-        if let ogz_rs::data::EntityType::GameSpecific(n) = ent.ent_type {
-            let Ok(proto_type) = sauer_proto::data::EntityType::try_from(n as i32) else {
-                continue;
-            };
-            if let Ok(item_type) = sauer_proto::data::ItemType::try_from(proto_type) {
-                if items.list.len() <= i {
-                    items.list.resize_with(i + 1, || ServerItem {
-                        item_type,
-                        spawned: false,
-                        spawn_time_ms: 0,
-                    });
-                }
-                items.list[i].item_type = item_type;
-                if delay_spawn(item_type) {
-                    items.list[i].spawned = false;
-                    items.list[i].spawn_time_ms = spawntime(item_type, num_players);
-                } else {
-                    items.list[i].spawned = true;
-                    items.list[i].spawn_time_ms = 0;
-                }
-            }
-        }
-    }
-    items.notgotitems = false;
+    server.items.write().load(items, num_players);
 }
 
 pub use crate::trap::Trap;
