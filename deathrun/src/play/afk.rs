@@ -1,6 +1,6 @@
 //! Spectating players who stand still too long.
 
-use super::{PlayMaps, RoundState, round::check_win_conditions};
+use super::{PlayMaps, round::check_win_conditions};
 use crate::ui;
 
 use parking_lot::RwLock;
@@ -55,7 +55,7 @@ pub(super) fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, time
     let mut to_warn = Vec::new();
     {
         let lock = maps.read();
-        if lock.round_state != RoundState::Playing {
+        if !lock.round_state.is_playing() {
             return;
         }
         let ids = server.joined_ids();

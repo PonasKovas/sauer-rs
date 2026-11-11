@@ -6,7 +6,7 @@ use sauer_map::Map;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 use tracing::info;
 
 pub struct LoadedMap {
@@ -24,7 +24,6 @@ pub struct PlayMaps {
     pub round_epoch: u64,
     pub round_task: Option<tokio::task::JoinHandle<()>>,
     pub spawned_this_round: HashSet<u64>,
-    pub round_start_time: Option<Instant>,
     pub finished_players: Vec<(u64, Duration)>,
     /// Its own lock: every position packet updates it.
     pub afk: parking_lot::Mutex<Afk>,
@@ -42,7 +41,6 @@ impl Default for PlayMaps {
             round_epoch: 0,
             round_task: None,
             spawned_this_round: HashSet::new(),
-            round_start_time: None,
             finished_players: Vec::new(),
             afk: Default::default(),
         }

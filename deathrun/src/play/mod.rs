@@ -132,12 +132,12 @@ impl Plugin for DeathrunPlay {
 
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read();
-            let is_first = server.client_count() == 1;
-            let is_solo_round = (lock.round_state == RoundState::Playing
+            let is_first = server.joined_count() == 1;
+            let is_solo_round = (lock.round_state.is_playing()
                 || lock.round_state == RoundState::MapLoading)
                 && lock.evil_id.is_none();
             let is_waiting =
-                lock.round_state == RoundState::NotStarted && server.client_count() > 1;
+                lock.round_state == RoundState::NotStarted && server.joined_count() > 1;
             (is_first, is_solo_round, is_waiting)
         };
 
@@ -170,10 +170,10 @@ impl Plugin for DeathrunPlay {
         let (is_playing, is_evil, finished, round_start) = {
             let lock = maps.read();
             (
-                lock.round_state == RoundState::Playing,
+                lock.round_state.is_playing(),
                 lock.evil_id == Some(id),
                 lock.finished_players.iter().any(|(f_id, _)| *f_id == id),
-                lock.round_start_time,
+                lock.round_state.started(),
             )
         };
 
@@ -283,7 +283,7 @@ impl Plugin for DeathrunPlay {
         {
             let mut lock = maps.write();
             match lock.round_state {
-                RoundState::Playing => {
+                RoundState::Playing { .. } => {
                     let solo = lock.evil_id.is_none();
                     if !solo && lock.spawned_this_round.contains(&id) {
                         cancel = true; // One life only in multiplayer!
@@ -343,7 +343,7 @@ impl Plugin for DeathrunPlay {
         let round_state = maps.read().round_state;
 
         // Prevent self-unspectating during the game (even for masters to prevent cheating the 1-life limit).
-        if round_state == RoundState::Playing || round_state == RoundState::MapLoading {
+        if round_state.is_playing() || round_state == RoundState::MapLoading {
             if !packet.val {
                 return Flow::Cancel;
             }

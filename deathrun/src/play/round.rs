@@ -19,8 +19,22 @@ use tokio::time::{Duration, Instant, sleep};
 pub enum RoundState {
     NotStarted,
     MapLoading,
-    Playing,
+    Playing { started: Instant },
     Ended,
+}
+
+impl RoundState {
+    pub fn is_playing(self) -> bool {
+        matches!(self, RoundState::Playing { .. })
+    }
+
+    /// When the running round started; `None` outside a round.
+    pub fn started(self) -> Option<Instant> {
+        match self {
+            RoundState::Playing { started } => Some(started),
+            _ => None,
+        }
+    }
 }
 
 pub(super) fn start_round_sequence(
@@ -111,8 +125,9 @@ pub(super) fn start_round_sequence(
             if lock.round_epoch != my_epoch {
                 return;
             }
-            lock.round_state = RoundState::Playing;
-            lock.round_start_time = Some(Instant::now());
+            lock.round_state = RoundState::Playing {
+                started: Instant::now(),
+            };
             current_evil = lock.evil_id;
         }
 
@@ -173,7 +188,7 @@ pub(super) fn check_win_conditions(
     disconnecting_id: Option<u64>,
 ) {
     let mut lock = maps.write();
-    if lock.round_state != RoundState::Playing {
+    if !lock.round_state.is_playing() {
         return;
     }
 
@@ -278,7 +293,7 @@ fn end_if_decided_at_start(
     evil: Option<u64>,
 ) -> bool {
     let mut lock = maps.write();
-    if lock.round_epoch != epoch || lock.round_state != RoundState::Playing {
+    if lock.round_epoch != epoch || !lock.round_state.is_playing() {
         return false;
     }
     let here = |id: u64| server.players.contains(id);
