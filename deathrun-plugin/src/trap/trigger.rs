@@ -183,7 +183,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
     let trap_time = state.traps[trap_idx].time;
     let trap_timeout = state.traps[trap_idx].timeout;
 
-    let is_edit_mode = *server.game_mode.read() == sauer_proto::data::GameMode::CoopEdit;
+    let is_edit_mode = server.game.read().mode == sauer_proto::data::GameMode::CoopEdit;
     let effective_timeout = if is_edit_mode || trap_timeout == 0 {
         trap_time
     } else {
@@ -220,7 +220,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
         let target_ids = {
             let is_play_mode =
-                *server_clone.game_mode.read() != sauer_proto::data::GameMode::CoopEdit;
+                server_clone.game.read().mode != sauer_proto::data::GameMode::CoopEdit;
             if is_play_mode {
                 let maps = server_clone
                     .extra

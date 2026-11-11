@@ -56,7 +56,7 @@ impl Server {
         if hash.is_empty() {
             return false;
         }
-        let pass = self.admin_pass.read();
+        let pass = self.config.read().admin_pass.clone();
         let (Some(cn), Some(session_id)) =
             (self.get_cn(id), self.players.with(id, |p| p.session_id))
         else {

@@ -750,11 +750,11 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
 impl Plugin for DeathrunPlay {
     async fn init(&self, server: &mut Server) {
         self.notes.install(server);
-        *server.map_name.write() = "".lossy_cubestring();
-        *server.game_mode.write() = GameMode::TeamPlay;
-        *server.master_mode.write() = MasterMode::Veto;
+        server.game.write().map_name = "".lossy_cubestring();
+        server.game.write().mode = GameMode::TeamPlay;
+        server.game.write().master_mode = MasterMode::Veto;
         // Rounds set the master mode, so it must not snap back to open.
-        *server.reopen_when_masterless.write() = false;
+        server.config.write().reopen_when_masterless = false;
         assert!(
             server.reserve_cn(crate::SERVER_BOT_CN),
             "the server bot cn is already taken"

@@ -6,12 +6,12 @@ use sauer_proto::{
 
 impl Server {
     pub fn master_mode(&self) -> MasterMode {
-        *self.master_mode.read()
+        self.game.read().master_mode
     }
 
     /// Sets the master mode and broadcasts the updated master state to everyone.
     pub fn set_master_mode(&self, mode: MasterMode) {
-        *self.master_mode.write() = mode;
+        self.game.write().master_mode = mode;
         self.broadcast_current_master();
     }
 

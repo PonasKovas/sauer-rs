@@ -1,20 +1,20 @@
-use bytes::Bytes;
-use cube_string::{CubeString, IntoCubeStringLossy};
+use cube_string::CubeString;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use peer::Peer;
 use sauer_proto::{
     PacketDescriptor, PacketSequence,
-    data::{Cn, GameMode, MasterMode},
+    data::Cn,
     route::{Chan0, Chan1, Chan2, S2C},
 };
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 use std::{fmt::Debug, sync::Arc};
 
 mod bans;
 mod base;
 mod builder;
 pub mod command;
+mod game;
 mod handle_client;
 pub mod items;
 mod packet_log;
@@ -27,6 +27,7 @@ pub mod utils;
 mod welcome;
 
 pub use builder::ServerBuilder;
+pub use game::{Config, Game};
 pub use items::{
     ItemState, Items, MAX_ENTS, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
 };
@@ -43,35 +44,16 @@ pub struct Server {
     /// Extension point for external plugins to store their own state.
     pub extra: anymap::Map<dyn anymap::any::Any + Send + Sync>,
 
-    // ── Per-client game state ─────────────────────────────────────────────────
     pub players: Players,
-    pub items: RwLock<Items>,
-    /// Raw bytes of the last map uploaded via channel 2.
-    pub map_data: RwLock<Option<Bytes>>,
-
-    // ── Server configuration (freely readable; use setter methods when a change
-    // must be synced to all clients automatically) ────────────────────────────
-    pub server_desc: RwLock<CubeString>,
-    pub server_auth: RwLock<CubeString>,
-    pub has_password: RwLock<bool>,
-    pub update_master: RwLock<bool>,
-    pub master_name: RwLock<String>,
-    pub master_port: u16,
-    pub map_name: RwLock<CubeString>,
-    pub game_mode: RwLock<GameMode>,
-    pub master_mode: RwLock<MasterMode>,
-    /// Tracks each player's current map vote (id → map name). Cleared on map change.
-    pub map_votes: RwLock<HashMap<u64, CubeString>>,
-    pub commands: RwLock<Vec<command::CommandInfo>>,
+    /// Don't hold this while calling into `players`: a player closure may take it.
+    pub game: RwLock<Game>,
+    /// Use setter methods when a change must reach the clients.
+    pub config: RwLock<Config>,
+    pub(crate) commands: RwLock<Vec<command::CommandInfo>>,
     /// Extra lines shown at the end of `#help`, below the command list.
-    pub help_lines: RwLock<Vec<CubeString>>,
-    /// Password for claiming admin with `/setmaster PASSWORD`. Empty disables it.
-    pub admin_pass: RwLock<String>,
+    pub(crate) help_lines: RwLock<Vec<CubeString>>,
     /// IPs kicked with `/kick`, and when each ban runs out.
-    pub bans: RwLock<Vec<(std::net::IpAddr, std::time::Instant)>>,
-    /// Whether the master mode goes back to open once nobody holds master
-    /// (engine behavior). Off for servers whose plugin sets the mode itself.
-    pub reopen_when_masterless: RwLock<bool>,
+    bans: RwLock<Vec<(std::net::IpAddr, std::time::Instant)>>,
 }
 
 impl Server {
@@ -83,27 +65,15 @@ impl Server {
             cns: RwLock::new([CnSlot::Free; 256]),
             extra: anymap::Map::new(),
             players: Players::new(),
-            items: RwLock::new(Items::new()),
-            map_data: RwLock::new(None),
-            server_desc: RwLock::new("sauer-rs".lossy_cubestring()),
-            server_auth: RwLock::new(CubeString::new()),
-            has_password: RwLock::new(false),
-            update_master: RwLock::new(true),
-            master_name: RwLock::new("master.sauerbraten.org".to_string()),
-            master_port: 28787,
-            map_name: RwLock::new("complex".lossy_cubestring()),
-            game_mode: RwLock::new(GameMode::Ffa),
-            master_mode: RwLock::new(MasterMode::Open),
-            map_votes: RwLock::new(HashMap::new()),
+            game: RwLock::new(Game::default()),
+            config: RwLock::new(Config::default()),
             commands: RwLock::new(vec![command::CommandInfo {
                 name: "#help".to_string(),
                 desc: "list all server commands".to_string(),
                 usage: "".to_string(),
             }]),
             help_lines: RwLock::new(Vec::new()),
-            admin_pass: RwLock::new(String::new()),
             bans: RwLock::new(Vec::new()),
-            reopen_when_masterless: RwLock::new(true),
         }
     }
 

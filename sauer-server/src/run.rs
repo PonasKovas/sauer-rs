@@ -72,13 +72,13 @@ pub(crate) async fn run<P: Plugin>(
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
         loop {
-            if !*master_server.update_master.read() {
+            if !master_server.config.read().update_master {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 continue;
             }
 
-            let host = master_server.master_name.read().clone();
-            let port = master_server.master_port;
+            let host = master_server.config.read().master_name.clone();
+            let port = master_server.config.read().master_port;
 
             match tokio::net::TcpStream::connect((host.as_str(), port)).await {
                 Ok(mut stream) => {
@@ -94,7 +94,7 @@ pub(crate) async fn run<P: Plugin>(
                         let mut last_reg = tokio::time::Instant::now();
 
                         loop {
-                            if !*master_server.update_master.read() {
+                            if !master_server.config.read().update_master {
                                 break; // disconnect
                             }
 

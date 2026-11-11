@@ -27,7 +27,7 @@ pub(crate) fn make_spawn_state(insta: bool, life_sequence: i32) -> PlayerState {
 impl Server {
     /// Initialises the player's spawn state when first welcomed. Only call from `welcome()`.
     pub(crate) fn set_initial_state(&self, id: u64) {
-        let insta = self.game_mode.read().is_insta();
+        let insta = self.game.read().mode.is_insta();
         self.players
             .with_mut(id, |p| p.state = Some(make_spawn_state(insta, 0)));
     }
@@ -35,7 +35,7 @@ impl Server {
     /// Computes the new spawn state for `id` without applying any side effects.
     /// Returns `None` if the player is not in `Dead` state or hasn't been initialised yet.
     pub fn compute_spawn_state(&self, id: u64) -> Option<PlayerState> {
-        let insta = self.game_mode.read().is_insta();
+        let insta = self.game.read().mode.is_insta();
         let old_seq = self.players.with(id, |p| {
             (p.status == Status::Dead)
                 .then(|| p.state.as_ref().map(|s| s.life_sequence))

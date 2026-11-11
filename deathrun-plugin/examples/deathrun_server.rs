@@ -123,15 +123,15 @@ impl Default for BaseConfig {
 
 impl Plugin for BaseConfig {
     async fn init(&self, server: &mut Server) {
-        *server.server_desc.write() = self.server_desc.as_str().lossy_cubestring();
-        *server.server_auth.write() = self.server_auth.as_str().lossy_cubestring();
-        *server.has_password.write() = self.has_password;
-        *server.admin_pass.write() = self.admin_pass.clone();
+        server.config.write().desc = self.server_desc.as_str().lossy_cubestring();
+        server.config.write().auth = self.server_auth.as_str().lossy_cubestring();
+        server.config.write().has_password = self.has_password;
+        server.config.write().admin_pass = self.admin_pass.clone();
         if self.admin_pass.is_empty() {
             tracing::info!("admin password not set, /setmaster PASSWORD is off");
         }
-        *server.master_mode.write() = self.master_mode;
-        *server.update_master.write() = self.updatemaster;
+        server.game.write().master_mode = self.master_mode;
+        server.config.write().update_master = self.updatemaster;
     }
 }
 

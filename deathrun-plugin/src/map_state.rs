@@ -14,7 +14,7 @@ pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
         Some((i, item_type))
     });
     let num_players = server.client_count();
-    server.items.write().load(items, num_players);
+    server.game.write().items.load(items, num_players);
 }
 
 pub use crate::trap::Trap;

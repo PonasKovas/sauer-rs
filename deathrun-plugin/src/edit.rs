@@ -105,8 +105,8 @@ impl Plugin for DeathrunEdit {
 
     async fn init(&self, server: &mut Server) {
         self.notes.install(server);
-        *server.map_name.write() = "".lossy_cubestring();
-        *server.game_mode.write() = GameMode::CoopEdit;
+        server.game.write().map_name = "".lossy_cubestring();
+        server.game.write().mode = GameMode::CoopEdit;
         assert!(
             server.reserve_cn(crate::SERVER_BOT_CN),
             "the server bot cn is already taken"
@@ -927,8 +927,8 @@ impl Plugin for DeathrunEdit {
                     };
                     info!("id {id} uploaded a map (world_size={world_size}); state loaded");
 
-                    *server_clone.map_name.write() = uploading_map_name.clone();
-                    *server_clone.game_mode.write() = GameMode::CoopEdit;
+                    server_clone.game.write().map_name = uploading_map_name.clone();
+                    server_clone.game.write().mode = GameMode::CoopEdit;
 
                     server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
                         text: format!(
@@ -1104,7 +1104,7 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        if *server.game_mode.read() != GameMode::CoopEdit {
+        if server.game.read().mode != GameMode::CoopEdit {
             return;
         }
 

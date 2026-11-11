@@ -17,17 +17,11 @@ impl Server {
 
         self.send_chan1(id, &Welcome {});
 
-        // Extract map/item state while holding both locks, then release before sending.
         let (map_name, mode, notgotitems, spawned_items) = {
-            let items = self.items.read();
-            let notgotitems = items.is_awaiting_list();
-            let spawned = (!notgotitems).then(|| items.spawned_items());
-            (
-                self.map_name.read().clone(),
-                *self.game_mode.read(),
-                notgotitems,
-                spawned,
-            )
+            let game = self.game.read();
+            let notgotitems = game.items.is_awaiting_list();
+            let spawned = (!notgotitems).then(|| game.items.spawned_items());
+            (game.map_name.clone(), game.mode, notgotitems, spawned)
         };
 
         let mapchange = MapChange {
