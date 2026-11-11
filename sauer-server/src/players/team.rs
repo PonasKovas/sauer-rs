@@ -26,7 +26,7 @@ impl Server {
     pub fn set_team(&self, id: u64, team: CubeString, reason: SetTeamReason) {
         if let Some(cn) = self.get_cn(id) {
             let pkt = SetTeamServer {
-                client_num: cn as i32,
+                client_num: cn,
                 team,
                 reason,
             };

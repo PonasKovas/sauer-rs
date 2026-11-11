@@ -87,7 +87,7 @@ impl Plugin for DeathrunEdit {
         let mut state_w = get_server_state(ctx.server()).write();
         if let Some(map) = state_w.map.as_mut() {
             let up = map.clear_all_virt_ents_for_player(id);
-            let cn = crate::SERVER_BOT_CN as i32;
+            let cn = crate::SERVER_BOT_CN;
             if !up.global_broadcast.is_empty() {
                 ctx.server().broadcast_chan1(
                     up.global_broadcast
@@ -106,7 +106,10 @@ impl Plugin for DeathrunEdit {
         self.notes.install(server);
         *server.map_name.write() = "".lossy_cubestring();
         *server.game_mode.write() = GameMode::CoopEdit;
-        server.reserve_cn(crate::SERVER_BOT_CN);
+        assert!(
+            server.reserve_cn(crate::SERVER_BOT_CN),
+            "the server bot cn is already taken"
+        );
         let state = DeathrunState {
             map: Some(Map::default_empty()),
             ..Default::default()
@@ -296,7 +299,7 @@ impl Plugin for DeathrunEdit {
             let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.clear_virt_ents(id, "highlight");
-                let cn = crate::SERVER_BOT_CN as i32;
+                let cn = crate::SERVER_BOT_CN;
                 if !up.global_broadcast.is_empty() {
                     server.broadcast_chan1(
                         up.global_broadcast
@@ -337,7 +340,7 @@ impl Plugin for DeathrunEdit {
                 let mut state_w = get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.update_virt_ents(id, "highlight", fake_ents);
-                    let cn = crate::SERVER_BOT_CN as i32;
+                    let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
                         server.broadcast_chan1(
                             up.global_broadcast
@@ -367,7 +370,7 @@ impl Plugin for DeathrunEdit {
                 let mut state_w = get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.clear_virt_ents(id, "highlight");
-                    let cn = crate::SERVER_BOT_CN as i32;
+                    let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
                         server.broadcast_chan1(
                             up.global_broadcast
@@ -405,7 +408,7 @@ impl Plugin for DeathrunEdit {
             let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.update_virt_ents(id, "trap_ents", entity_frames);
-                let cn = crate::SERVER_BOT_CN as i32;
+                let cn = crate::SERVER_BOT_CN;
                 let wrap = |pkts: Vec<channel1::EditEnt>| {
                     pkts.into_iter()
                         .map(|p| Client {
@@ -447,7 +450,7 @@ impl Plugin for DeathrunEdit {
             let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.clear_virt_ents(id, "edit_particle");
-                let cn = crate::SERVER_BOT_CN as i32;
+                let cn = crate::SERVER_BOT_CN;
                 if !up.global_broadcast.is_empty() {
                     server.broadcast_chan1(
                         up.global_broadcast
@@ -538,7 +541,7 @@ impl Plugin for DeathrunEdit {
             let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.update_virt_ents(id, "edit_particle", vec![fake_ent]);
-                let cn = crate::SERVER_BOT_CN as i32;
+                let cn = crate::SERVER_BOT_CN;
                 if !up.global_broadcast.is_empty() {
                     server.broadcast_chan1(
                         up.global_broadcast
@@ -765,7 +768,7 @@ impl Plugin for DeathrunEdit {
 
     async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
         let id = ctx.id();
-        let cn = ctx.server().get_cn(id).unwrap_or(0) as i32;
+        let cn = ctx.server().get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
         if is_waiting_for_map(ctx.server()) {
             ctx.server().send_chan1(
                 id,
@@ -964,7 +967,7 @@ impl Plugin for DeathrunEdit {
         server.send_chan1(
             id,
             &sauer_proto::channel1::InitClient {
-                client_num: crate::SERVER_BOT_CN as i32,
+                client_num: crate::SERVER_BOT_CN,
                 name: "Server".lossy_cubestring(),
                 player_model: sauer_proto::data::PlayerModel::MrFixit,
                 team: "".lossy_cubestring(),
@@ -973,7 +976,7 @@ impl Plugin for DeathrunEdit {
         server.send_chan1(
             id,
             &sauer_proto::channel1::SpectatorServer {
-                client_num: crate::SERVER_BOT_CN as i32,
+                client_num: crate::SERVER_BOT_CN,
                 is_spectator: true,
             },
         );
@@ -1118,7 +1121,7 @@ impl Plugin for DeathrunEdit {
         }
 
         ctx.cancel();
-        let cn = server.get_cn(id).unwrap_or(0) as i32;
+        let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
         server.broadcast_except_chan1(
             id,
             &sauer_proto::Client {

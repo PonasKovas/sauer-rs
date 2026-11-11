@@ -11,7 +11,7 @@ impl Server {
     pub fn set_model(&self, id: u64, model: PlayerModel) {
         if let Some(cn) = self.get_cn(id) {
             let pkt = Client {
-                client_num: cn as i32,
+                client_num: cn,
                 packet: SwitchModel { model },
             };
             self.broadcast_chan1(&pkt);

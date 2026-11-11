@@ -183,7 +183,7 @@ make_packet_enum!(
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Client<T> {
-    pub client_num: i32,
+    pub client_num: Cn,
     pub packet: T,
 }
 
@@ -560,7 +560,7 @@ make_struct!(
 make_struct!(
 /// `N_SERVINFO` Initial server information sent when a client starts connecting.
 [N_SERVINFO] ServInfo {
-    client_num: i32,
+    client_num: Cn,
     protocol: i32,
     session_id: i32,
     has_password: bool,
@@ -577,20 +577,20 @@ make_struct!(
 /// `N_PAUSEGAME` Sets or removes the paused state of the game.
 [N_PAUSEGAME] PauseGameServer {
     is_paused: bool,
-    client_num: i32,
+    client_num: Option<Cn>,
 });
 
 make_struct!(
 /// `N_GAMESPEED` Modifies the speed of the game.
 [N_GAMESPEED] GameSpeedServer {
     speed: i32,
-    client_num: i32,
+    client_num: Option<Cn>,
 });
 
 make_struct!(
 /// `N_SAYTEAM` Emits a team chat message.
 [N_SAYTEAM] SayTeamServer {
-    client_num: i32,
+    client_num: Cn,
     text: CubeString,
 });
 
@@ -605,13 +605,13 @@ make_struct!(
 make_struct!(
 /// `N_FORCEDEATH` Forces a client to die instantly.
 [N_FORCEDEATH] ForceDeath {
-    client_num: i32,
+    client_num: Cn,
 });
 
 make_struct!(
 /// `N_INITCLIENT` A new client has connected.
 [N_INITCLIENT] InitClient {
-    client_num: i32,
+    client_num: Cn,
     name: CubeString,
     team: CubeString,
     player_model: PlayerModel,
@@ -620,20 +620,20 @@ make_struct!(
 make_struct!(
 /// `N_CDIS` A client has fully disconnected.
 [N_CDIS] ClientDisconnected {
-    client_num: i32,
+    client_num: Cn,
 });
 
 make_struct!(
 /// `N_SPAWNSTATE` Confirms the specific state (health, ammo, etc.) of a client who just spawned.
 [N_SPAWNSTATE] SpawnState {
-    client_num: i32,
+    client_num: Cn,
     state: PlayerState,
 });
 
 make_struct!(
 /// `N_SHOTFX` Replicates weapon firing effects across clients.
 [N_SHOTFX] ShotFx {
-    client_num: i32,
+    client_num: Cn,
     gun: Gun,
     id: i32,
     from: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
@@ -643,7 +643,7 @@ make_struct!(
 make_struct!(
 /// `N_EXPLODEFX` Replicates projectile explosion effects across clients.
 [N_EXPLODEFX] ExplodeFx {
-    client_num: i32,
+    client_num: Cn,
     gun: Gun,
     id: i32,
 });
@@ -651,8 +651,8 @@ make_struct!(
 make_struct!(
 /// `N_DAMAGE` Applies damage to a target client.
 [N_DAMAGE] Damage {
-    target_cn: i32,
-    actor_cn: i32,
+    target_cn: Cn,
+    actor_cn: Cn,
     damage: i32,
     armour: i32,
     health: i32,
@@ -661,7 +661,7 @@ make_struct!(
 make_struct!(
 /// `N_HITPUSH` Applies physical knockback from weapon hits to a client.
 [N_HITPUSH] HitPush {
-    target_cn: i32,
+    target_cn: Cn,
     gun: Gun,
     damage: i32,
     dir: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
@@ -670,8 +670,8 @@ make_struct!(
 make_struct!(
 /// `N_DIED` Notifies that a player was killed by an actor.
 [N_DIED] Died {
-    victim_cn: i32,
-    actor_cn: i32,
+    victim_cn: Cn,
+    actor_cn: Cn,
     actor_frags: i32,
     team_frags: i32,
 });
@@ -698,28 +698,28 @@ make_struct!(
 /// `N_ITEMACC` Acknowledges an item pickup.
 [N_ITEMACC] ItemAck {
     item_index: i32,
-    client_num: i32,
+    client_num: Option<Cn>,
 });
 
 make_struct!(
 /// `N_CLIPBOARD` Pushes a client's clipboard (for cooperative editing) to the others.
 /// `None` clears it.
 [N_CLIPBOARD] ClipboardServer {
-    client_num: i32,
+    client_num: Cn,
     payload: Option<ClipboardPayload>,
 });
 
 make_struct!(
 /// `N_UNDO` Sends geometry undo data to the client.
 [N_UNDO] UndoServer {
-    client_num: i32,
+    client_num: Cn,
     payload: UndoPayload,
 });
 
 make_struct!(
 /// `N_REDO` Sends geometry redo data to the client.
 [N_REDO] RedoServer {
-    client_num: i32,
+    client_num: Cn,
     payload: UndoPayload,
 });
 
@@ -751,7 +751,7 @@ make_struct!(
 /// `N_DEMOPLAYBACK` Informs the client that the server has started or stopped demo playback.
 [N_DEMOPLAYBACK] DemoPlayback {
     is_on: bool,
-    client_num: i32,
+    client_num: Option<Cn>,
 });
 
 make_struct!(
@@ -770,14 +770,14 @@ make_struct!(
 make_struct!(
 /// `N_SPECTATOR` Forces a player into or out of Spectator Mode.
 [N_SPECTATOR] SpectatorServer {
-    client_num: i32,
+    client_num: Cn,
     is_spectator: bool,
 });
 
 make_struct!(
 /// `N_SETTEAM` Moves a player to a specific team.
 [N_SETTEAM] SetTeamServer {
-    client_num: i32,
+    client_num: Cn,
     team: CubeString,
     reason: SetTeamReason,
 });
@@ -805,8 +805,8 @@ make_struct!(
 make_struct!(
 /// `N_INITAI` Spawns a server-side AI Bot into the client's game world.
 [N_INITAI] InitAi {
-    bot_cn: i32,
-    owner_cn: i32,
+    bot_cn: Cn,
+    owner_cn: Option<Cn>,
     ai_type: AiType,
     skill: i32,
     player_model: PlayerModel,
@@ -841,14 +841,14 @@ make_struct!(
 make_struct!(
 /// `N_REPAMMO` Replenishes a player's ammo (Regen Capture).
 [N_REPAMMO] RepAmmoServer {
-    client_num: i32,
+    client_num: Cn,
     ammotype: ItemType,
 });
 
 make_struct!(
 /// `N_BASEREGEN` Regenerates a player's health and armour at a capture base.
 [N_BASEREGEN] BaseRegen {
-    client_num: i32,
+    client_num: Cn,
     health: i32,
     armour: i32,
     ammotype: ItemType,
@@ -993,7 +993,7 @@ const _: () = {
 make_struct!(
 /// `N_DROPFLAG` A player dropped a flag.
 [N_DROPFLAG] DropFlag {
-    client_num: i32,
+    client_num: Cn,
     flag: i32,
     version: i32,
     drop_loc: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
@@ -1002,7 +1002,7 @@ make_struct!(
 make_struct!(
 /// `N_SCOREFLAG` A player scored with a flag.
 [N_SCOREFLAG] ScoreFlag {
-    client_num: i32,
+    client_num: Cn,
     relay_flag: i32,
     relay_version: i32,
     goal_flag: i32,
@@ -1016,7 +1016,7 @@ make_struct!(
 make_struct!(
 /// `N_RETURNFLAG` A player returned a flag to its base.
 [N_RETURNFLAG] ReturnFlag {
-    client_num: i32,
+    client_num: Cn,
     flag: i32,
     version: i32,
 });
@@ -1024,7 +1024,7 @@ make_struct!(
 make_struct!(
 /// `N_TAKEFLAG` A player picked up a flag.
 [N_TAKEFLAG] TakeFlagServer {
-    client_num: i32,
+    client_num: Cn,
     flag: i32,
     version: i32,
 });
@@ -1057,7 +1057,7 @@ make_struct!(
 make_struct!(
 /// `N_TAKETOKEN` A player collected a token.
 [N_TAKETOKEN] TakeTokenServer {
-    client_num: i32,
+    client_num: Cn,
     id: i32,
     total: i32,
 });
@@ -1071,7 +1071,7 @@ make_struct!(
 make_struct!(
 /// `N_DROPTOKENS` A player dropped their held tokens.
 [N_DROPTOKENS] DropTokens {
-    client_num: i32,
+    client_num: Cn,
     drop_loc: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
     tokens: Vec<DroppedToken> => write_neg_term_seq, read_neg_term_seq,
 });
@@ -1079,7 +1079,7 @@ make_struct!(
 make_struct!(
 /// `N_STEALTOKENS` A player stole tokens from the enemy team.
 [N_STEALTOKENS] StealTokens {
-    client_num: i32,
+    client_num: Cn,
     team: i32,
     basenum: i32,
     enemy_team: i32,
@@ -1091,7 +1091,7 @@ make_struct!(
 make_struct!(
 /// `N_DEPOSITTOKENS` A player deposited tokens at a base.
 [N_DEPOSITTOKENS] DepositTokensServer {
-    client_num: i32,
+    client_num: Cn,
     base: i32,
     deposited: i32,
     team: i32,
@@ -1157,7 +1157,7 @@ make_struct!(
 make_struct!(
 /// `N_FROMAI` Alters the context of subsequent messages in the packet to act as if they came from the specified AI bot.
 [N_FROMAI] FromAi {
-    qcn: i32,
+    qcn: Cn,
 });
 
 make_struct!(
@@ -1247,21 +1247,21 @@ make_struct!(
 make_struct!(
 /// `N_KICK` Requests to kick a player.
 [N_KICK] Kick {
-    victim_cn: i32,
+    victim_cn: Cn,
     reason: CubeString,
 });
 
 make_struct!(
 /// `N_SPECTATOR` Requests to move someone (or self) to/from the spectator team.
 [N_SPECTATOR] SpectatorClient {
-    spectator_cn: i32,
+    spectator_cn: Cn,
     val: bool,
 });
 
 make_struct!(
 /// `N_SETTEAM` Requests to force someone to a specific team.
 [N_SETTEAM] SetTeamClient {
-    client_num: i32,
+    client_num: Cn,
     team: CubeString,
 });
 
@@ -1307,7 +1307,7 @@ make_struct!(
 make_struct!(
 /// `N_SETMASTER` Requests to set master privileges using a password hash.
 [N_SETMASTER] SetMaster {
-    client_num: i32,
+    client_num: Cn,
     val: bool,
     hash: CubeString,
 });
@@ -1347,7 +1347,7 @@ make_struct!(
 [N_AUTHKICK] AuthKick {
     desc: CubeString,
     name: CubeString,
-    victim_cn: i32,
+    victim_cn: Cn,
     reason: CubeString,
 });
 

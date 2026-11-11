@@ -42,7 +42,7 @@ fn say(server: &Server, id: u64, text: String) {
 /// Compressed size of a payload as it goes over the wire, i.e. what firing the trap costs.
 pub fn payload_size(payload: &ClipboardPayload) -> usize {
     let packet = channel1::ClipboardServer {
-        client_num: 0,
+        client_num: sauer_proto::data::Cn(0),
         payload: Some(payload.clone()),
     };
     let mut buf = Vec::new();
@@ -100,7 +100,7 @@ pub fn edit_size(state: &DeathrunState) -> usize {
 }
 
 fn broadcast_ents(server: &Server, map: &Map, ids: impl IntoIterator<Item = usize>) {
-    let cn = crate::SERVER_BOT_CN as i32;
+    let cn = crate::SERVER_BOT_CN;
     let empty = ogz_rs::data::Entity {
         position: [0.0; 3],
         attrs: [0; 5],
@@ -138,7 +138,7 @@ fn spawn_payloads(server: &Arc<Server>, payloads: Vec<ClipboardPayload>) {
     }
     let s = server.clone();
     tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s, crate::SERVER_BOT_CN as i32, payloads, 0).await;
+        crate::geo_sync::broadcast_payloads(&s, crate::SERVER_BOT_CN, payloads, 0).await;
     });
 }
 
@@ -424,7 +424,7 @@ fn end_edit(
 
     if let Some(map) = state.map.as_mut() {
         let up = map.clear_virt_ents(id, "edit_particle");
-        let cn = crate::SERVER_BOT_CN as i32;
+        let cn = crate::SERVER_BOT_CN;
         let wrap = |pkts: Vec<channel1::EditEnt>| {
             pkts.into_iter()
                 .map(|p| Client {

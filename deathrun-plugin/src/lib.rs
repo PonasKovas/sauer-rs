@@ -9,7 +9,7 @@ pub mod ui;
 pub use edit::DeathrunEdit;
 pub use play::DeathrunPlay;
 
-pub const SERVER_BOT_CN: u8 = 0;
+pub const SERVER_BOT_CN: sauer_proto::data::Cn = sauer_proto::data::Cn(0);
 
 /// Lines the host adds to every welcome wall and to the end of `#help`, such
 /// as where to send new maps. Set with `with_notes` on either plugin; none by

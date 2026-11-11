@@ -305,7 +305,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             .iter()
             .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
 
-        let author_cn = crate::SERVER_BOT_CN as i32;
+        let author_cn = crate::SERVER_BOT_CN;
         crate::recreate::visual_rebuild_map(
             &server,
             &ids,
@@ -371,12 +371,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
             server.set_spectator(id, false); // Moves them into Dead state safely
             if let Some(cn) = server.get_cn(id) {
-                server.send_chan1(
-                    id,
-                    &channel1::ForceDeath {
-                        client_num: cn as i32,
-                    },
-                ); // Resets screen
+                server.send_chan1(id, &channel1::ForceDeath { client_num: cn }); // Resets screen
             }
 
             server.force_spawn(id, |state| {
@@ -596,7 +591,7 @@ fn declare_win(
             server.send_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: channel1::Sound { sound_id: 63 },
                 },
             );
@@ -632,7 +627,7 @@ fn send_map_to_client(
 
     let maps_arc = Arc::clone(maps);
     tokio::spawn(async move {
-        let author_cn = crate::SERVER_BOT_CN as i32;
+        let author_cn = crate::SERVER_BOT_CN;
         crate::recreate::visual_rebuild_map(
             &server,
             &[target_id],
@@ -728,7 +723,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
             server.send_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: channel1::Sound { sound_id: 61 },
                 },
             );
@@ -761,7 +756,10 @@ impl Plugin for DeathrunPlay {
         *server.master_mode.write() = MasterMode::Veto;
         // Rounds set the master mode, so it must not snap back to open.
         *server.reopen_when_masterless.write() = false;
-        server.reserve_cn(crate::SERVER_BOT_CN);
+        assert!(
+            server.reserve_cn(crate::SERVER_BOT_CN),
+            "the server bot cn is already taken"
+        );
 
         let (_, state) = self.maps.read().make_active_state();
         server.extra.insert(RwLock::new(state));
@@ -791,7 +789,7 @@ impl Plugin for DeathrunPlay {
         server.send_chan1(
             id,
             &sauer_proto::channel1::InitClient {
-                client_num: crate::SERVER_BOT_CN as i32,
+                client_num: crate::SERVER_BOT_CN,
                 name: "Server".lossy_cubestring(),
                 player_model: sauer_proto::data::PlayerModel::MrFixit,
                 team: "".lossy_cubestring(),
@@ -800,7 +798,7 @@ impl Plugin for DeathrunPlay {
         server.send_chan1(
             id,
             &sauer_proto::channel1::SpectatorServer {
-                client_num: crate::SERVER_BOT_CN as i32,
+                client_num: crate::SERVER_BOT_CN,
                 is_spectator: true,
             },
         );
@@ -1029,7 +1027,7 @@ impl Plugin for DeathrunPlay {
                 let mut state_w = crate::map_state::get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.clear_virt_ents(id, "highlight");
-                    let cn = crate::SERVER_BOT_CN as i32;
+                    let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
                         server.broadcast_chan1(
                             up.global_broadcast
@@ -1089,7 +1087,7 @@ impl Plugin for DeathrunPlay {
                     let mut state_w = crate::map_state::get_server_state(server).write();
                     if let Some(map) = state_w.map.as_mut() {
                         let up = map.update_virt_ents(id, "highlight", fake_ents);
-                        let cn = crate::SERVER_BOT_CN as i32;
+                        let cn = crate::SERVER_BOT_CN;
                         if !up.global_broadcast.is_empty() {
                             server.broadcast_chan1(
                                 up.global_broadcast
@@ -1136,7 +1134,7 @@ impl Plugin for DeathrunPlay {
                 let mut state_w = crate::map_state::get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.clear_virt_ents(id, "highlight");
-                    let cn = crate::SERVER_BOT_CN as i32;
+                    let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
                         server.broadcast_chan1(
                             up.global_broadcast
@@ -1226,7 +1224,7 @@ impl Plugin for DeathrunPlay {
                             server.send_chan1(
                                 client_id,
                                 &sauer_proto::Client {
-                                    client_num: client_cn as i32,
+                                    client_num: client_cn,
                                     packet: sauer_proto::channel1::Sound { sound_id: 60 },
                                 },
                             );
@@ -1276,7 +1274,7 @@ impl Plugin for DeathrunPlay {
                             drop(state);
 
                             if let (Some(id1), Some(id2)) = ent_ids {
-                                let actor_cn = crate::SERVER_BOT_CN as i32;
+                                let actor_cn = crate::SERVER_BOT_CN;
                                 for client_id in server.client_ids() {
                                     server.send_chan1(
                                         client_id,
@@ -1332,7 +1330,7 @@ impl Plugin for DeathrunPlay {
         let mut state_w = crate::map_state::get_server_state(server).write();
         if let Some(map) = state_w.map.as_mut() {
             let up = map.clear_all_virt_ents_for_player(id);
-            let cn = crate::SERVER_BOT_CN as i32;
+            let cn = crate::SERVER_BOT_CN;
             if !up.global_broadcast.is_empty() {
                 server.broadcast_chan1(
                     up.global_broadcast
@@ -1483,7 +1481,7 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let id = ctx.id();
         let is_admin = server.get_privilege(id) >= Privilege::Admin;
-        let claims_admin = server.get_id(packet.client_num as u8) == Some(id)
+        let claims_admin = server.get_id(packet.client_num) == Some(id)
             && packet.val
             && server.check_admin_pass(id, packet.hash.as_bytes());
         if is_admin || claims_admin {

@@ -19,7 +19,7 @@ impl Server {
     pub fn set_name(&self, id: u64, name: CubeString) {
         if let Some(cn) = self.get_cn(id) {
             let pkt = Client {
-                client_num: cn as i32,
+                client_num: cn,
                 packet: SwitchName { name },
             };
             self.broadcast_chan1(&pkt);

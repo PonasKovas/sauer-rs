@@ -2,6 +2,7 @@
 //! `fpsgame/server.cpp` (`trykick`, `addban`, `checkpassword`).
 
 use crate::Server;
+use sauer_proto::data::Cn;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use tiger::{Digest, Tiger};
@@ -16,7 +17,7 @@ const KICK_BAN: Duration = Duration::from_secs(4 * 60 * 60);
 /// The hash the client sends for `/setmaster PASSWORD`: Tiger of
 /// `"<cn> <sessionid> <password>"`, written as hex with the low nibble of each
 /// byte first (engine `hashstring`).
-pub fn hash_password(cn: u8, session_id: i32, password: &str) -> String {
+pub fn hash_password(cn: Cn, session_id: i32, password: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let digest = Tiger::digest(format!("{cn} {session_id} {password}").as_bytes());
     let mut out = String::with_capacity(digest.len() * 2);
@@ -75,22 +76,23 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::hash_password;
+    use sauer_proto::data::Cn;
 
     /// Expected values come from the engine's own `shared/crypto.cpp`
     /// (`tiger::hash` + `hashstring`) compiled on its own.
     #[test]
     fn matches_engine_hash() {
         assert_eq!(
-            hash_password(0, 12345, "hunter2"),
+            hash_password(Cn(0), 12345, "hunter2"),
             "f1b00dd400900b9f191d7d0c362bc232225b07beec287582"
         );
         assert_eq!(
-            hash_password(7, -98765, "hello world"),
+            hash_password(Cn(7), -98765, "hello world"),
             "04769a5d1ea8d1065daa8753bb7db9cedd4c3deb8ab5d375"
         );
         assert_eq!(
             hash_password(
-                3,
+                Cn(3),
                 42,
                 "a-much-longer-password-that-goes-over-sixty-four-bytes-to-hit-a-second-block"
             ),

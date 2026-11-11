@@ -5,7 +5,7 @@ use sauer_server::Server;
 /// client number, so sending these separately would let two concurrent
 /// senders paste each other's clipboards.
 fn paste_packets(
-    owner_cn: i32,
+    owner_cn: sauer_proto::data::Cn,
     payload: ClipboardPayload,
 ) -> (
     Client<channel1::DelCube>,
@@ -31,7 +31,7 @@ fn paste_packets(
 
 pub async fn broadcast_payloads(
     server: &Server,
-    owner_cn: i32,
+    owner_cn: sauer_proto::data::Cn,
     payloads: Vec<ClipboardPayload>,
     delay_ms: u64,
 ) {
@@ -50,7 +50,11 @@ pub async fn broadcast_payloads(
 
 /// Sends right away, for callers that track what they paste themselves
 /// (the button placement preview).
-pub fn broadcast_now(server: &Server, owner_cn: i32, payloads: Vec<ClipboardPayload>) {
+pub fn broadcast_now(
+    server: &Server,
+    owner_cn: sauer_proto::data::Cn,
+    payloads: Vec<ClipboardPayload>,
+) {
     for payload in payloads {
         server.broadcast_chan1(paste_packets(owner_cn, payload));
     }
@@ -66,7 +70,7 @@ fn after_paste(server: &Server) {
 pub async fn send_payloads_to_clients(
     server: &Server,
     target_ids: &[u64],
-    owner_cn: i32,
+    owner_cn: sauer_proto::data::Cn,
     payloads: Vec<ClipboardPayload>,
     delay_ms: u64,
 ) {

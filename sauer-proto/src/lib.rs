@@ -91,7 +91,7 @@ pub trait Encode<R> {
     /// return `Some(client_num)`.  The [`Writer`] uses this to
     /// transparently batch client-wrapped messages.
     #[doc(hidden)]
-    fn requires_client_wrapper(&self) -> Option<i32> {
+    fn requires_client_wrapper(&self) -> Option<crate::data::Cn> {
         None
     }
 
@@ -106,7 +106,7 @@ pub trait Decode<R>: Sized {
     #[doc(hidden)]
     fn decode(
         reader: &mut &[u8],
-        client_number: Option<i32>,
+        client_number: Option<crate::data::Cn>,
         session: &mut Session,
     ) -> Result<Self, ParseError>;
 }

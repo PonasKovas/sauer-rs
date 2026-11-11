@@ -29,8 +29,7 @@ pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
             .unwrap_or_default()
     };
     tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&server, crate::SERVER_BOT_CN as i32, payloads, 0)
-            .await;
+        crate::geo_sync::broadcast_payloads(&server, crate::SERVER_BOT_CN, payloads, 0).await;
     });
 }
 
@@ -108,7 +107,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
     };
     if !virt.is_empty() {
         let map = state.map.as_ref().unwrap();
-        let cn = crate::SERVER_BOT_CN as i32;
+        let cn = crate::SERVER_BOT_CN;
         for client in server.client_ids() {
             let fixes: Vec<_> = virt
                 .iter()
@@ -166,7 +165,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
     if !ok {
         // The edit was already relayed: put the server's entities back everywhere.
         let map = state.map.as_ref().unwrap();
-        let cn = crate::SERVER_BOT_CN as i32;
+        let cn = crate::SERVER_BOT_CN;
         let restore: Vec<_> = ids
             .iter()
             .map(|&i| {

@@ -23,7 +23,7 @@ pub struct Reader<'a, R> {
 /// Contains the active state of an N_CLIENT wrapper during deserialization
 #[derive(Copy, Clone)]
 struct ClientWrapperState {
-    client_num: i32,
+    client_num: crate::data::Cn,
     end_addr: usize, // absolute memory address, since we reduce the slice as we read it
 }
 
@@ -61,7 +61,7 @@ impl<'a, R> Reader<'a, R> {
                 return Err(ParseError::DoubleClientWrapper);
             }
 
-            let cn = i32::sauer_read(&mut temp_slice)
+            let cn = crate::data::Cn::sauer_read(&mut temp_slice)
                 .in_field("client_num")
                 .in_struct("N_CLIENT")?;
             let len = u32::sauer_read(&mut temp_slice)

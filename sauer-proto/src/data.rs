@@ -9,6 +9,7 @@ use num_enum::TryFromPrimitive;
 mod base_info;
 mod base_spawn;
 mod clipboard;
+mod cn;
 mod direction;
 mod edit_var_value;
 mod flag_state;
@@ -19,6 +20,7 @@ mod vslot;
 pub use base_info::BaseInfo;
 pub use base_spawn::BaseSpawn;
 pub use clipboard::{ClipboardPayload, MAX_CLIENT_UNPACK_LEN, UndoEntity, UndoPayload, VSlotData};
+pub use cn::Cn;
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagLocation, FlagState, FlagStateHoldTeam};
@@ -265,7 +267,7 @@ const _: () = {
 make_struct!(
 /// State for a client resuming a game (e.g., late join).
 ClientResumeState {
-    client_num: i32,
+    client_num: Cn,
     state: ClientState,
     frags: i32,
     flags: i32,
@@ -275,7 +277,7 @@ ClientResumeState {
 });
 
 make_struct!(ClientTokenState {
-    client_num: i32,
+    client_num: Cn,
     tokens: i32,
 });
 
@@ -295,7 +297,7 @@ ItemSpawn {
 make_struct!(
 /// Represents a master/admin client configuration broadcast to everyone.
 MasterClient {
-    client_num: i32,
+    client_num: Cn,
     privilege: Privilege,
 });
 
@@ -325,7 +327,7 @@ PlayerState {
 make_struct!(
 /// Contains ray/hit information from a weapon shot or explosion.
 HitInfo {
-    target_cn: i32,
+    target_cn: Cn,
     life_sequence: i32,
     dist: f32 => write_varint_float::<DMF>, read_varint_float::<DMF>,
     rays: i32,

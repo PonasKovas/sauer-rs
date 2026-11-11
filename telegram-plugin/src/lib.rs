@@ -7,7 +7,7 @@ pub struct TelegramBridge {
     enabled: bool,
     bot: Bot,
     chat_id: ChatId,
-    bot_cn: u8,
+    bot_cn: sauer_proto::data::Cn,
 }
 
 impl TelegramBridge {
@@ -17,7 +17,7 @@ impl TelegramBridge {
             enabled,
             bot: Bot::new(token),
             chat_id: ChatId(chat_id),
-            bot_cn: 255,
+            bot_cn: sauer_proto::data::Cn(255),
         }
     }
 
@@ -38,7 +38,10 @@ impl TelegramBridge {
 impl Plugin for TelegramBridge {
     async fn init(&self, server: &mut Server) {
         if self.enabled {
-            server.reserve_cn(self.bot_cn);
+            assert!(
+                server.reserve_cn(self.bot_cn),
+                "the telegram bot cn is already taken"
+            );
         }
     }
 
@@ -53,7 +56,7 @@ impl Plugin for TelegramBridge {
         ctx.server().send_chan1(
             ctx.id(),
             &InitClient {
-                client_num: self.bot_cn as i32,
+                client_num: self.bot_cn,
                 name: "TG".lossy_cubestring(),
                 player_model: PlayerModel::MrFixit,
                 team: "".lossy_cubestring(),
@@ -62,7 +65,7 @@ impl Plugin for TelegramBridge {
         ctx.server().send_chan1(
             ctx.id(),
             &SpectatorServer {
-                client_num: self.bot_cn as i32,
+                client_num: self.bot_cn,
                 is_spectator: true,
             },
         );
@@ -95,7 +98,7 @@ impl Plugin for TelegramBridge {
                                     .unwrap_or_else(|| "Unknown".to_string());
 
                                 server.broadcast_chan1(&sauer_proto::Client {
-                                    client_num: bot_cn as i32,
+                                    client_num: bot_cn,
                                     packet: sauer_proto::channel1::Text {
                                         text: format!("{}: {}", sender, text).lossy_cubestring(),
                                     },

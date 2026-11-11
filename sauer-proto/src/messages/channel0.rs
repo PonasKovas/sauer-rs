@@ -32,7 +32,7 @@ make_packet_enum!(
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Position {
-    pub client_num: u32,
+    pub client_num: Cn,
     pub phys_state: PhysState,
     /// Least significant bit of current life sequence (to make sure this packet is not from a previous life)
     pub life_seq_parity: bool,
@@ -51,7 +51,7 @@ pub struct Position {
 make_struct!(
 /// `N_TELEPORT` Sent to immediately teleport a player.
 [N_TELEPORT] Teleport {
-    client_num: i32,
+    client_num: Cn,
     tp: i32,
     td: i32,
 });
@@ -59,7 +59,7 @@ make_struct!(
 make_struct!(
 /// `N_JUMPPAD` Sent to apply a jump-pad acceleration.
 [N_JUMPPAD] JumpPad {
-    client_num: i32,
+    client_num: Cn,
     jp: i32,
 });
 
@@ -72,7 +72,8 @@ impl SauerWrite for Position {
     fn sauer_write(&self, out: &mut Vec<u8>) {
         N_POS.sauer_write(out);
 
-        self.client_num.sauer_write(out);
+        // The cn goes out unsigned here, unlike everywhere else.
+        (self.client_num.0 as u32).sauer_write(out);
 
         // Pack phys_state, life sequence, and movement into 1 byte
         let phys_state_val = (self.phys_state as u8) & 0x07;
@@ -161,7 +162,7 @@ impl SauerRead for Position {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
         check_tag(reader, N_POS)?;
 
-        let client_num = u32::sauer_read(reader)?;
+        let client_num = Cn::try_from(u32::sauer_read(reader)? as i32)?;
 
         let phys_byte = u8::sauer_read(reader)?;
 

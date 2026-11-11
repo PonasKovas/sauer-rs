@@ -47,7 +47,7 @@ impl Server {
         // Notify existing players of the new player.
         if let Some(my_cn) = self.get_cn(id)
             && let Some(init) = self.players.with(id, |p| InitClient {
-                client_num: my_cn as i32,
+                client_num: my_cn,
                 name: p.name.clone(),
                 player_model: p.model,
                 team: p.team.clone(),
@@ -66,7 +66,7 @@ impl Server {
                 self.players
                     .with(other, |pd| {
                         pd.state.clone().map(|player_state| ClientResumeState {
-                            client_num: other_cn as i32,
+                            client_num: other_cn,
                             state: pd.client_state,
                             frags: pd.frags,
                             flags: pd.flags,
@@ -87,13 +87,13 @@ impl Server {
             };
             let Some((init, clipboard)) = self.players.with(other_id, |pd| {
                 let init = InitClient {
-                    client_num: other_cn as i32,
+                    client_num: other_cn,
                     name: pd.name.clone(),
                     player_model: pd.model,
                     team: pd.team.clone(),
                 };
                 let clipboard = pd.clipboard.as_ref().map(|cb| ClipboardServer {
-                    client_num: other_cn as i32,
+                    client_num: other_cn,
                     payload: Some(cb.payload.clone()),
                 });
                 (init, clipboard)
@@ -115,7 +115,7 @@ impl Server {
         if is_spectator {
             if let Some(my_cn) = self.get_cn(id) {
                 self.broadcast_chan1(&sauer_proto::channel1::SpectatorServer {
-                    client_num: my_cn as i32,
+                    client_num: my_cn,
                     is_spectator: true,
                 });
             }

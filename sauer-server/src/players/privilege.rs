@@ -22,7 +22,7 @@ impl Server {
                 return None;
             }
             self.get_cn(id).map(|cn| MasterClient {
-                client_num: cn as i32,
+                client_num: cn,
                 privilege: p.privilege,
             })
         });

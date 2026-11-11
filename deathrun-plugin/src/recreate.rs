@@ -6,7 +6,7 @@ use sauer_server::Server;
 pub async fn visual_rebuild_map<F>(
     server: &Server,
     target_ids: &[u64],
-    author_cn: i32,
+    author_cn: sauer_proto::data::Cn,
     map: &sauer_map::Map,
     chunk_delay_ms: u64,
     send_newmap: bool,
@@ -29,7 +29,7 @@ pub async fn visual_rebuild_map<F>(
                     .map(|var| (var_name(&var).clone(), var))
                     .collect()
             });
-            let cn = server.get_cn(id).unwrap_or(0) as i32;
+            let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
             server.send_chan1(
                 id,
                 &Client {

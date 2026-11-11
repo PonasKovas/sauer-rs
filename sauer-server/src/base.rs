@@ -16,7 +16,9 @@ use sauer_proto::{
         ShotFx, SpawnServer, UndoServer,
     },
     channel2,
-    data::{ClientState, GameMode, ItemType, MasterMode, PlayerState, Privilege, SetTeamReason},
+    data::{
+        ClientState, Cn, GameMode, ItemType, MasterMode, PlayerState, Privilege, SetTeamReason,
+    },
 };
 use std::sync::{Arc, Weak};
 use tracing::info;
@@ -48,7 +50,7 @@ where
         server.broadcast_except_chan1(
             id,
             &Client {
-                client_num: cn as i32,
+                client_num: cn,
                 packet: pkt.clone(),
             },
         );
@@ -179,7 +181,7 @@ impl<P: Plugin> Plugin for Base<P> {
         server.send_chan1(
             id,
             &ServInfo {
-                client_num: cn as i32,
+                client_num: cn,
                 protocol: sauer_proto::PROTOCOL_VERSION,
                 session_id,
                 has_password: *server.has_password.read(),
@@ -239,7 +241,7 @@ impl<P: Plugin> Plugin for Base<P> {
                                 .send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(resp))
                         };
                         let ids = match client_number {
-                            Some(cn) => match u8::try_from(*cn).ok().and_then(|c| server.get_id(c))
+                            Some(cn) => match Cn::try_from(*cn).ok().and_then(|c| server.get_id(c))
                             {
                                 Some(id) => vec![id],
                                 None => {
@@ -300,11 +302,8 @@ impl<P: Plugin> Plugin for Base<P> {
         server.map_votes.write().remove(&id);
 
         // The cn goes before the player entry, the reverse of `connected`.
-        if let Some(cn) = server.get_cn(id) {
-            server.free_cn(cn);
-            server.broadcast_chan1(&channel1::ClientDisconnected {
-                client_num: cn as i32,
-            });
+        if let Some(cn) = server.free_cn(id) {
+            server.broadcast_chan1(&channel1::ClientDisconnected { client_num: cn });
         }
         clear_player(&server.players, id);
 
@@ -395,7 +394,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 server.broadcast_except_chan1(
                     id,
                     &Client {
-                        client_num: cn as i32,
+                        client_num: cn,
                         packet: SpawnServer { state },
                     },
                 );
@@ -406,7 +405,7 @@ impl<P: Plugin> Plugin for Base<P> {
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
         let id = ctx.id();
         let server = ctx.server();
-        let Some(target_id) = server.get_id(packet.spectator_cn as u8) else {
+        let Some(target_id) = server.get_id(packet.spectator_cn) else {
             return;
         };
 
@@ -458,7 +457,7 @@ impl<P: Plugin> Plugin for Base<P> {
             server.broadcast_except_chan1(
                 id,
                 &ShotFx {
-                    client_num: cn as i32,
+                    client_num: cn,
                     gun: packet.gun,
                     id: packet.id,
                     from: packet.from,
@@ -468,7 +467,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         for hit in &packet.hits {
-            let Some(target_id) = server.get_id(hit.target_cn as u8) else {
+            let Some(target_id) = server.get_id(hit.target_cn) else {
                 continue;
             };
             if !check_hit(&server, target_id, hit.life_sequence) {
@@ -505,14 +504,14 @@ impl<P: Plugin> Plugin for Base<P> {
 
         if let Some(cn) = server.get_cn(id) {
             server.broadcast_chan1(&ExplodeFx {
-                client_num: cn as i32,
+                client_num: cn,
                 gun: packet.gun,
                 id: packet.id,
             });
         }
 
         for hit in &packet.hits {
-            let Some(target_id) = server.get_id(hit.target_cn as u8) else {
+            let Some(target_id) = server.get_id(hit.target_cn) else {
                 continue;
             };
             if !check_hit(&server, target_id, hit.life_sequence) {
@@ -537,15 +536,26 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+        // Like the engine, a client only moves itself: the cn inside the
+        // packet is passed on as is, so it must be the sender's.
+        if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
+            return;
+        }
         ctx.server().set_position(ctx.id(), packet.pos);
         ctx.server().broadcast_except_chan0(ctx.id(), packet);
     }
 
     async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) {
+        if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
+            return;
+        }
         ctx.server().broadcast_except_chan0(ctx.id(), packet);
     }
 
     async fn jumppad(&self, ctx: &mut Context, packet: &channel0::JumpPad) {
+        if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
+            return;
+        }
         ctx.server().broadcast_except_chan0(ctx.id(), packet);
     }
 
@@ -592,7 +602,7 @@ impl<P: Plugin> Plugin for Base<P> {
                     ctx.server().broadcast_except_chan1(
                         id,
                         &Client {
-                            client_num: cn as i32,
+                            client_num: cn,
                             packet: channel1::Text { text },
                         },
                     );
@@ -626,7 +636,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: packet.clone(),
                 },
             );
@@ -639,7 +649,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: packet.clone(),
                 },
             );
@@ -652,7 +662,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: packet.clone(),
                 },
             );
@@ -698,7 +708,7 @@ impl<P: Plugin> Plugin for Base<P> {
             }
             let cb = p.clipboard.as_ref()?;
             let cn = server.get_cn(owner_id)?;
-            Some((cn as i32, cb.payload.clone()))
+            Some((cn, cb.payload.clone()))
         });
         for (owner_cn, payload) in clipboard_packets {
             server.send_chan1(
@@ -721,7 +731,7 @@ impl<P: Plugin> Plugin for Base<P> {
     async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) {
         let id = ctx.id();
         let server = ctx.server();
-        let Some(target) = server.get_id(packet.client_num as u8) else {
+        let Some(target) = server.get_id(packet.client_num) else {
             return;
         };
         let own = server.get_privilege(id);
@@ -789,7 +799,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
         let own = server.get_privilege(id);
-        let Some(victim) = server.get_id(packet.victim_cn as u8) else {
+        let Some(victim) = server.get_id(packet.victim_cn) else {
             return;
         };
         let theirs = server.get_privilege(victim);
@@ -842,7 +852,7 @@ impl<P: Plugin> Plugin for Base<P> {
         {
             return;
         }
-        let Some(target) = server.get_id(packet.client_num as u8) else {
+        let Some(target) = server.get_id(packet.client_num) else {
             return;
         };
         let stripped = packet.team.strip_colors();
@@ -962,7 +972,7 @@ impl<P: Plugin> Plugin for Base<P> {
             server.broadcast_except_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: packet.clone(),
                 },
             );
@@ -1036,7 +1046,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 if let Some(cn) = server.get_cn(id) {
                     server.broadcast_chan1(&ItemAck {
                         item_index: packet.item_index,
-                        client_num: cn as i32,
+                        client_num: Some(cn),
                     });
                 }
             }
@@ -1044,7 +1054,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 id,
                 &ItemAck {
                     item_index: packet.item_index,
-                    client_num: -1,
+                    client_num: None,
                 },
             ),
         }
@@ -1059,7 +1069,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &UndoServer {
-                    client_num: cn as i32,
+                    client_num: cn,
                     payload: packet.payload.clone(),
                 },
             );
@@ -1075,7 +1085,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &RedoServer {
-                    client_num: cn as i32,
+                    client_num: cn,
                     payload: packet.payload.clone(),
                 },
             );
@@ -1092,7 +1102,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: channel1::CopyServer {
                         sel: packet.sel.clone(),
                     },
@@ -1110,7 +1120,7 @@ impl<P: Plugin> Plugin for Base<P> {
             ctx.server().broadcast_except_chan1(
                 id,
                 &Client {
-                    client_num: cn as i32,
+                    client_num: cn,
                     packet: channel1::PasteServer {
                         sel: packet.sel.clone(),
                     },
@@ -1143,7 +1153,7 @@ impl<P: Plugin> Plugin for Base<P> {
             server.broadcast_except_chan1(
                 id,
                 &ClipboardServer {
-                    client_num: cn as i32,
+                    client_num: cn,
                     payload: packet.payload.clone(),
                 },
             );
@@ -1156,7 +1166,7 @@ fn ext_player_stats(
     server: &Server,
     id: u64,
 ) -> Option<(i32, sauer_proto::server_query::ExtInfoResponse)> {
-    let cn = server.get_cn(id)? as i32;
+    let cn = i32::from(server.get_cn(id)?);
     let insta = server.game_mode.read().is_insta();
     // Only the first three octets go out, like the engine.
     let ip = server.peer_addr(id).map(|a| match a.ip() {

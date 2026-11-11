@@ -11,7 +11,7 @@ use std::marker::PhantomData;
 pub struct Writer<R> {
     main: Vec<u8>,
     wrapper: Vec<u8>,
-    current_wrapper_client: Option<i32>,
+    current_wrapper_client: Option<crate::data::Cn>,
     is_reliable: bool,
     _phantom: PhantomData<R>,
 }

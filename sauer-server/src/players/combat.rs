@@ -85,8 +85,8 @@ impl Server {
 
         if let (Some(t_cn), Some(a_cn)) = (self.get_cn(target_id), self.get_cn(actor_id)) {
             self.broadcast_chan1(&Damage {
-                target_cn: t_cn as i32,
-                actor_cn: a_cn as i32,
+                target_cn: t_cn,
+                actor_cn: a_cn,
                 damage,
                 armour,
                 health,
@@ -94,7 +94,7 @@ impl Server {
             self.send_chan1(
                 target_id,
                 &HitPush {
-                    target_cn: t_cn as i32,
+                    target_cn: t_cn,
                     gun,
                     damage,
                     dir,
@@ -138,8 +138,8 @@ impl Server {
 
         if let (Some(v_cn), Some(a_cn)) = (self.get_cn(victim_id), self.get_cn(actor_id)) {
             self.broadcast_chan1(&Died {
-                victim_cn: v_cn as i32,
-                actor_cn: a_cn as i32,
+                victim_cn: v_cn,
+                actor_cn: a_cn,
                 actor_frags,
                 team_frags: 0,
             });

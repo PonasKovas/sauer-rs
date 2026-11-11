@@ -101,7 +101,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     crate::map_state::update_server_items(state.map.as_ref().unwrap(), server);
 
     // Network the changes
-    let actor_cn = crate::SERVER_BOT_CN as i32;
+    let actor_cn = crate::SERVER_BOT_CN;
 
     let mut batch = Vec::new();
     for &id in &diff_ent_ids {
@@ -216,7 +216,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         }
 
         let namespace = format!("trap_prog_{}", trap_idx);
-        let actor_cn = crate::SERVER_BOT_CN as i32;
+        let actor_cn = crate::SERVER_BOT_CN;
 
         let target_ids = {
             let is_play_mode =
@@ -282,7 +282,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
         if let Some(trigger_cn) = server_clone.get_cn(actor_id) {
             server_clone.broadcast_chan1(&sauer_proto::Client {
-                client_num: trigger_cn as i32,
+                client_num: trigger_cn,
                 packet: sauer_proto::channel1::Sound { sound_id: 64 },
             });
         }
@@ -493,7 +493,7 @@ pub fn set_button_color(
     orient: u8,
     color: [f32; 3],
 ) {
-    let actor_cn = crate::SERVER_BOT_CN as i32;
+    let actor_cn = crate::SERVER_BOT_CN;
     let mut state = get_server_state(server).write();
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {

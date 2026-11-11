@@ -53,7 +53,7 @@ impl Server {
             self.send_chan1(
                 id,
                 &SpawnState {
-                    client_num: cn as i32,
+                    client_num: cn,
                     state,
                 },
             );
@@ -89,7 +89,7 @@ impl Server {
         };
         if let Some(cn) = self.get_cn(id) {
             self.broadcast_chan1(&SpawnState {
-                client_num: cn as i32,
+                client_num: cn,
                 state,
             });
         }

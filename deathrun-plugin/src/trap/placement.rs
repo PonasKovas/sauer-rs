@@ -302,7 +302,7 @@ pub fn update_seethrough_button(server: &sauer_server::Server, id: u64, target: 
         server.send_chan1(
             id,
             &sauer_proto::Client {
-                client_num: crate::SERVER_BOT_CN as i32,
+                client_num: crate::SERVER_BOT_CN,
                 packet: sauer_proto::channel1::EditMat {
                     sel: get_outer_face_selections(pos, size, orient)[0].clone(),
                     mat: mat.to_bits() as i32,

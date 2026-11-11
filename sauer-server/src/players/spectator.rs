@@ -29,7 +29,7 @@ impl Server {
         if changed {
             if let Some(cn) = self.get_cn(id) {
                 self.broadcast_chan1(&SpectatorServer {
-                    client_num: cn as i32,
+                    client_num: cn,
                     is_spectator: spectate,
                 });
             }

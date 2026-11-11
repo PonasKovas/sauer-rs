@@ -5,7 +5,7 @@ use parking_lot::RwLock;
 use peer::Peer;
 use sauer_proto::{
     PacketDescriptor, PacketSequence,
-    data::{GameMode, MasterMode},
+    data::{Cn, GameMode, MasterMode},
     route::{Chan0, Chan1, Chan2, S2C},
 };
 use std::{collections::HashMap, net::SocketAddr};
@@ -32,16 +32,14 @@ pub use items::{
 };
 pub use players::{ClipboardData, PlayerData, Players};
 
-/// Stands in for a client id in cn slots taken with `Server::reserve_cn`.
-const RESERVED_ID: u64 = u64::MAX;
 pub use plugin::{Context, Plugin, ServerQueryContext};
 
 pub struct Server {
     pub start_time: std::time::Instant,
     pub extinfo_socket: std::sync::OnceLock<Arc<tokio::net::UdpSocket>>,
     pub(crate) clients: DashMap<u64, Peer>,
-    /// Maps client numbers (0-255) to internal ids.
-    pub cns: RwLock<[Option<u64>; 256]>,
+    /// Who holds each client number.
+    cns: RwLock<[CnSlot; 256]>,
     /// Extension point for external plugins to store their own state.
     pub extra: anymap::Map<dyn anymap::any::Any + Send + Sync>,
 
@@ -82,7 +80,7 @@ impl Server {
             start_time: std::time::Instant::now(),
             extinfo_socket: std::sync::OnceLock::new(),
             clients: DashMap::new(),
-            cns: RwLock::new([None; 256]),
+            cns: RwLock::new([CnSlot::Free; 256]),
             extra: anymap::Map::new(),
             players: Players::new(),
             items: RwLock::new(Items::new()),
@@ -137,55 +135,50 @@ impl Server {
 
     // ── Client ID / CN Mapping ────────────────────────────────────────────────
 
-    pub fn assign_cn(&self, id: u64) -> Option<u8> {
+    /// Gives a newly connected client the lowest free cn.
+    pub(crate) fn assign_cn(&self, id: u64) -> Option<Cn> {
         let mut cns = self.cns.write();
-
-        // 1. Check if already assigned
-        for (cn, slot) in cns.iter().enumerate() {
-            if slot == &Some(id) {
-                tracing::debug!("id {} already has cn {}", id, cn);
-                return Some(cn as u8);
-            }
-        }
-
-        // 2. Assign new
-        for (cn, slot) in cns.iter_mut().enumerate() {
-            if slot.is_none() {
-                *slot = Some(id);
-                tracing::info!("assigned id {} to cn {}", id, cn);
-                return Some(cn as u8);
-            }
-        }
-        tracing::error!("failed to assign cn for id {}", id);
-        None
+        let cn = cns.iter().position(|slot| *slot == CnSlot::Free)?;
+        cns[cn] = CnSlot::Client(id);
+        tracing::info!("assigned id {id} to cn {cn}");
+        Some(Cn(cn as u8))
     }
 
-    pub fn free_cn(&self, cn: u8) {
+    /// Frees the cn a client was holding, and returns it.
+    pub(crate) fn free_cn(&self, id: u64) -> Option<Cn> {
         let mut cns = self.cns.write();
-        cns[cn as usize] = None;
+        let cn = cns.iter().position(|slot| *slot == CnSlot::Client(id))?;
+        cns[cn] = CnSlot::Free;
+        Some(Cn(cn as u8))
     }
 
-    pub fn get_cn(&self, id: u64) -> Option<u8> {
+    pub fn get_cn(&self, id: u64) -> Option<Cn> {
         let cns = self.cns.read();
         cns.iter()
-            .position(|&slot| slot == Some(id))
-            .map(|i| i as u8)
+            .position(|slot| *slot == CnSlot::Client(id))
+            .map(|i| Cn(i as u8))
     }
 
     /// The connected client using `cn`. `None` for a free or reserved cn: a
     /// reserved one belongs to a fake player (like a plugin's bot) with no
     /// player data, so packets aimed at it are ignored.
-    pub fn get_id(&self, cn: u8) -> Option<u64> {
-        let cns = self.cns.read();
-        cns[cn as usize].filter(|&id| id != RESERVED_ID)
+    pub fn get_id(&self, cn: Cn) -> Option<u64> {
+        match self.cns.read()[cn.index()] {
+            CnSlot::Client(id) => Some(id),
+            CnSlot::Free | CnSlot::Reserved => None,
+        }
     }
 
-    pub fn reserve_cn(&self, cn: u8) -> bool {
+    /// Takes `cn` for a fake player that has no connection. Returns false if
+    /// it's already taken.
+    #[must_use]
+    pub fn reserve_cn(&self, cn: Cn) -> bool {
         let mut cns = self.cns.write();
-        if cns[cn as usize].is_some() {
+        let slot = &mut cns[cn.index()];
+        if *slot != CnSlot::Free {
             return false;
         }
-        cns[cn as usize] = Some(RESERVED_ID);
+        *slot = CnSlot::Reserved;
         true
     }
 
@@ -284,6 +277,15 @@ impl Server {
     pub fn client_count(&self) -> usize {
         self.clients.len()
     }
+}
+
+/// Who holds a client number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CnSlot {
+    Free,
+    Client(u64),
+    /// Taken with [`Server::reserve_cn`] for a fake player.
+    Reserved,
 }
 
 impl Default for Server {

@@ -53,7 +53,7 @@ fn do_chunk(
     let fits = payload.uncompressed().len() <= MAX_CLIENT_UNPACK_LEN
         && (max_bytes == usize::MAX || {
             let packet = ClipboardServer {
-                client_num: 0,
+                client_num: sauer_proto::data::Cn(0),
                 payload: Some(payload.clone()),
             };
             let mut buf = Vec::new();

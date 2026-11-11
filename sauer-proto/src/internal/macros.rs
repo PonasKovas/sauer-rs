@@ -212,7 +212,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $variant {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<crate::data::Cn>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 if client_number.is_some() {
                     return Err(crate::ParseError::BadClientWrapper);
                 }
@@ -231,7 +231,7 @@ macro_rules! make_packet_enum {
                 // Call the private trait, ensuring $variant doesn't need to impl Encode
                 crate::internal::SauerWrite::sauer_write(&self.packet, out);
             }
-            fn requires_client_wrapper(&self) -> Option<i32> {
+            fn requires_client_wrapper(&self) -> Option<crate::data::Cn> {
                 Some(self.client_num)
             }
             fn is_reliable(&self) -> bool {
@@ -239,7 +239,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $client_wrapper<$variant> {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<crate::data::Cn>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 match client_number {
                     None => {
                         let mut temp = *reader;
@@ -267,7 +267,7 @@ macro_rules! make_packet_enum {
             fn encode(&self, out: &mut Vec<u8>) {
                 crate::internal::SauerWrite::sauer_write(&self.packet, out);
             }
-            fn requires_client_wrapper(&self) -> Option<i32> {
+            fn requires_client_wrapper(&self) -> Option<crate::data::Cn> {
                 Some(self.client_num)
             }
             fn is_reliable(&self) -> bool {
@@ -275,7 +275,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $client_wrapper<$DUPLICATE_STRUCT> {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<crate::data::Cn>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 match client_number {
                     None => {
                         let mut temp = *reader;
@@ -307,7 +307,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $variant {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<crate::data::Cn>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 if client_number.is_some() {
                     return Err(crate::ParseError::BadClientWrapper);
                 }
@@ -381,7 +381,7 @@ macro_rules! make_packet_enum {
                 }
             }
 
-            fn requires_client_wrapper(&self) -> Option<i32> {
+            fn requires_client_wrapper(&self) -> Option<crate::data::Cn> {
                 match self {
                     $(
                         Self::$variant(v) => crate::Encode::<$ROUTE>::requires_client_wrapper(v),
@@ -398,7 +398,7 @@ macro_rules! make_packet_enum {
             }
         }
         impl crate::Decode<$ROUTE> for $name {
-            fn decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
+            fn decode(reader: &mut &[u8], client_number: Option<crate::data::Cn>, session: &mut crate::Session) -> Result<Self, crate::ParseError> {
                 let mut temp_reader = *reader;
                 let msg_id = <i32 as crate::internal::SauerRead>::sauer_read(&mut temp_reader)?;
 
