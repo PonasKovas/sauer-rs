@@ -88,7 +88,7 @@ pub(crate) fn send_map_to_async(server: &std::sync::Arc<Server>, id: u64) {
 
             match out_bytes {
                 Ok(bytes) => {
-                    server_clone.send_chan2(id, &channel2::SendMap { data: bytes });
+                    server_clone.send(id, &channel2::SendMap { data: bytes });
                 }
                 Err(e) => {
                     error!("failed to serialize map state: {e}");

@@ -269,10 +269,10 @@ fn send_virt(server: &Server, id: u64, up: VirtEntUpdates) {
             .collect::<Vec<_>>()
     };
     if !up.global_broadcast.is_empty() {
-        server.broadcast_chan1(wrap(up.global_broadcast));
+        server.broadcast(wrap(up.global_broadcast));
     }
     if !up.personal.is_empty() {
-        server.send_chan1(id, wrap(up.personal));
+        server.send(id, wrap(up.personal));
     }
 }
 
@@ -337,7 +337,7 @@ fn name(server: &Server, id: u64) -> String {
 }
 
 fn announce(server: &Server, text: String) {
-    server.broadcast_chan1(&channel1::ServMsg {
+    server.broadcast(&channel1::ServMsg {
         text: format!("\x0C6[TRAP]\x0C7 {text}").lossy_cubestring(),
     });
 }

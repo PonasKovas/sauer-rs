@@ -126,12 +126,12 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
             },
         });
         if batch.len() >= 50 {
-            server.broadcast_chan1(batch.clone());
+            server.broadcast(batch.clone());
             batch.clear();
         }
     }
     if !batch.is_empty() {
-        server.broadcast_chan1(batch);
+        server.broadcast(batch);
     }
 
     if !changed.is_empty() {
@@ -252,7 +252,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     pers.insert(target_id, up.personal);
                 }
                 if !glob.is_empty() {
-                    server_clone.broadcast_chan1(
+                    server_clone.broadcast(
                         glob.into_iter()
                             .map(|p| sauer_proto::Client {
                                 client_num: actor_cn,
@@ -263,7 +263,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 }
                 for (tid, pkts) in pers {
                     if !pkts.is_empty() {
-                        server_clone.send_chan1(
+                        server_clone.send(
                             tid,
                             pkts.into_iter()
                                 .map(|p| sauer_proto::Client {
@@ -281,7 +281,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         recompose_traps(&server_clone);
 
         if let Some(trigger_cn) = server_clone.get_cn(actor_id) {
-            server_clone.broadcast_chan1(&sauer_proto::Client {
+            server_clone.broadcast(&sauer_proto::Client {
                 client_num: trigger_cn,
                 packet: sauer_proto::channel1::Sound { sound_id: 64 },
             });
@@ -386,7 +386,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                     }
                 }
                 if !glob.is_empty() {
-                    server_clone.broadcast_chan1(
+                    server_clone.broadcast(
                         glob.into_iter()
                             .map(|p| sauer_proto::Client {
                                 client_num: actor_cn,
@@ -397,7 +397,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 }
                 for (tid, pkts) in pers {
                     if !pkts.is_empty() {
-                        server_clone.send_chan1(
+                        server_clone.send(
                             tid,
                             pkts.into_iter()
                                 .map(|p| sauer_proto::Client {
@@ -450,7 +450,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
             drop(state);
             if !glob.is_empty() {
-                server_clone.broadcast_chan1(
+                server_clone.broadcast(
                     glob.into_iter()
                         .map(|p| sauer_proto::Client {
                             client_num: actor_cn,
@@ -461,7 +461,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             }
             for (tid, pkts) in pers {
                 if !pkts.is_empty() {
-                    server_clone.send_chan1(
+                    server_clone.send(
                         tid,
                         pkts.into_iter()
                             .map(|p| sauer_proto::Client {
@@ -503,7 +503,7 @@ pub fn set_button_color(
         if let Some(base) = state.base_map.as_mut() {
             base.apply_vslot_edit(&packet);
         }
-        server.broadcast_chan1(&Client {
+        server.broadcast(&Client {
             client_num: actor_cn,
             packet,
         });

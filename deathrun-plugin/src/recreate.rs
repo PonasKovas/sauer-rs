@@ -30,7 +30,7 @@ pub async fn visual_rebuild_map<F>(
                     .collect()
             });
             let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
-            server.send_chan1(
+            server.send(
                 id,
                 &Client {
                     client_num: cn,
@@ -41,7 +41,7 @@ pub async fn visual_rebuild_map<F>(
             );
         }
 
-        server.send_chan1(
+        server.send(
             id,
             &Client {
                 client_num: author_cn,
@@ -87,7 +87,7 @@ pub async fn visual_rebuild_map<F>(
                         sauer_proto::data::EditVarValue::String(value.clone())
                     }
                 };
-                server.send_chan1(
+                server.send(
                     id,
                     &Client {
                         client_num: author_cn,
@@ -113,12 +113,12 @@ pub async fn visual_rebuild_map<F>(
                 },
             });
             if empty_batch.len() >= 50 {
-                server.send_chan1(id, empty_batch.clone());
+                server.send(id, empty_batch.clone());
                 empty_batch.clear();
             }
         }
         if !empty_batch.is_empty() {
-            server.send_chan1(id, empty_batch);
+            server.send(id, empty_batch);
         }
     }
 
@@ -160,13 +160,13 @@ pub async fn visual_rebuild_map<F>(
                     },
                 });
                 if batch.len() >= 50 {
-                    server.send_chan1(id, batch.clone());
+                    server.send(id, batch.clone());
                     batch.clear();
                 }
             }
         }
         if !batch.is_empty() {
-            server.send_chan1(id, batch);
+            server.send(id, batch);
         }
     }
     // The rebuild turned any see-through trap buttons solid again.

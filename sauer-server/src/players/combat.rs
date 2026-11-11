@@ -84,14 +84,14 @@ impl Server {
         };
 
         if let (Some(t_cn), Some(a_cn)) = (self.get_cn(target_id), self.get_cn(actor_id)) {
-            self.broadcast_chan1(&Damage {
+            self.broadcast(&Damage {
                 target_cn: t_cn,
                 actor_cn: a_cn,
                 damage,
                 armour,
                 health,
             });
-            self.send_chan1(
+            self.send(
                 target_id,
                 &HitPush {
                     target_cn: t_cn,
@@ -137,7 +137,7 @@ impl Server {
         self.players.with_mut(victim_id, |p| p.deaths += 1);
 
         if let (Some(v_cn), Some(a_cn)) = (self.get_cn(victim_id), self.get_cn(actor_id)) {
-            self.broadcast_chan1(&Died {
+            self.broadcast(&Died {
                 victim_cn: v_cn,
                 actor_cn: a_cn,
                 actor_frags,

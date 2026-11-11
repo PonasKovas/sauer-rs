@@ -22,7 +22,7 @@ fn find_trap(state: &DeathrunState, hit_pt: [f32; 3]) -> Option<usize> {
 }
 
 fn not_looking(server: &Server, id: u64) {
-    server.send_chan1(
+    server.send(
         id,
         &ServMsg {
             text: "Not looking at a trap.".lossy_cubestring(),
@@ -31,7 +31,7 @@ fn not_looking(server: &Server, id: u64) {
 }
 
 fn say(server: &Server, id: u64, text: String) {
-    server.send_chan1(
+    server.send(
         id,
         &ServMsg {
             text: text.lossy_cubestring(),
@@ -124,11 +124,11 @@ fn broadcast_ents(server: &Server, map: &Map, ids: impl IntoIterator<Item = usiz
             },
         });
         if batch.len() >= 50 {
-            server.broadcast_chan1(std::mem::take(&mut batch));
+            server.broadcast(std::mem::take(&mut batch));
         }
     }
     if !batch.is_empty() {
-        server.broadcast_chan1(batch);
+        server.broadcast(batch);
     }
 }
 
@@ -237,7 +237,7 @@ pub fn cmd_cleartrap(ctx: &Context, hit_pt: [f32; 3]) {
         .players
         .with(id, |p| p.name.strip_colors().to_utf8())
         .unwrap_or_else(|| "Someone".to_string());
-    server.broadcast_chan1(&ServMsg {
+    server.broadcast(&ServMsg {
         text: format!("\x0C6[TRAP]\x0C7 {name} cleared trap {trap_idx}. Its button stays.")
             .lossy_cubestring(),
     });
@@ -434,10 +434,10 @@ fn end_edit(
                 .collect::<Vec<_>>()
         };
         if !up.global_broadcast.is_empty() {
-            server.broadcast_chan1(wrap(up.global_broadcast));
+            server.broadcast(wrap(up.global_broadcast));
         }
         if !up.personal.is_empty() {
-            server.send_chan1(id, wrap(up.personal));
+            server.send(id, wrap(up.personal));
         }
     }
 
@@ -512,7 +512,7 @@ fn end_edit(
     } else {
         "Trap recorded and area reverted successfully.".to_string()
     };
-    server.broadcast_chan1(&ServMsg {
+    server.broadcast(&ServMsg {
         text: text.lossy_cubestring(),
     });
 }

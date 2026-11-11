@@ -14,7 +14,7 @@ impl Server {
                 client_num: cn,
                 packet: SwitchModel { model },
             };
-            self.broadcast_chan1(&pkt);
+            self.broadcast(&pkt);
             self.players.with_mut(id, |p| p.model = model);
         }
     }

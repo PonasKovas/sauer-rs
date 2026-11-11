@@ -50,7 +50,7 @@ impl Server {
             p.quad_millis = 0;
         });
         if let Some(cn) = self.get_cn(id) {
-            self.send_chan1(
+            self.send(
                 id,
                 &SpawnState {
                     client_num: cn,
@@ -88,7 +88,7 @@ impl Server {
             return;
         };
         if let Some(cn) = self.get_cn(id) {
-            self.broadcast_chan1(&SpawnState {
+            self.broadcast(&SpawnState {
                 client_num: cn,
                 state,
             });

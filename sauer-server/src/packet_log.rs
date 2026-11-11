@@ -238,6 +238,9 @@ fn filters() -> &'static Filters {
 // ── Public logging fns ────────────────────────────────────────────────────────
 
 pub fn trace_in(id: u64, name: &'static str, pkt: &dyn fmt::Debug) {
+    if !tracing::enabled!(target: "sauer_packet", tracing::Level::TRACE) {
+        return;
+    }
     if filters().incoming.allows(name) {
         tracing::trace!(target: "sauer_packet", id, direction = "in", packet = name, data = ?TruncatedDebug(pkt));
     }
@@ -262,6 +265,9 @@ pub fn trace_out_broadcast_except<T: PacketDescriptor + fmt::Debug>(except: u64,
 }
 
 fn log_out<T: PacketDescriptor + fmt::Debug>(pkt: &T, emit: impl FnOnce(&[&'static str], &T)) {
+    if !tracing::enabled!(target: "sauer_packet", tracing::Level::TRACE) {
+        return;
+    }
     let all_names = pkt.packet_names();
     let matched: Vec<&'static str> = all_names
         .into_iter()

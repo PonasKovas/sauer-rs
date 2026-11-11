@@ -62,7 +62,7 @@ function connect(id, packet, event)
     end)
 end
 
-function disconnected(id, event)
+function disconnected(id)
     if tasks[id] then
         tasks[id]:cancel()
         tasks[id] = nil

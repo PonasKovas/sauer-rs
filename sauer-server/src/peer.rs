@@ -4,7 +4,7 @@ use lenet::SendFlags;
 use lenet_tokio::ConnectionSender;
 use sauer_proto::{
     PacketSequence, Writer,
-    route::{Chan0, Chan1, Chan2, S2C},
+    route::{Channel, S2C},
 };
 use std::net::SocketAddr;
 
@@ -17,51 +17,18 @@ impl Peer {
         Self { raw: peer }
     }
 
-    pub fn try_send_chan0(&self, pkt: impl PacketSequence<S2C<Chan0>>) {
-        let mut writer = Writer::<S2C<Chan0>>::new();
+    pub fn try_send<C: Channel>(&self, pkt: impl PacketSequence<S2C<C>>) {
+        let mut writer = Writer::<S2C<C>>::new();
         pkt.push_to(&mut writer);
         let (bytes, mode) = writer.consume();
-        if let Err(e) = self
-            .raw
-            .try_send(sauer_proto::CHANNEL_POSITIONS, convert_mode(mode), bytes)
-        {
+        if let Err(e) = self.raw.try_send(C::ID, convert_mode(mode), bytes) {
             // Only fails once the connection is closed (peer leaving).
-            tracing::debug!("dropped Chan0 packet to closed peer: {e}");
+            tracing::debug!("dropped channel {} packet to closed peer: {e}", C::ID);
         }
     }
 
-    pub fn try_send_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>>) {
-        let mut writer = Writer::<S2C<Chan1>>::new();
-        pkt.push_to(&mut writer);
-        let (bytes, mode) = writer.consume();
-        if let Err(e) = self
-            .raw
-            .try_send(sauer_proto::CHANNEL_MESSAGES, convert_mode(mode), bytes)
-        {
-            // Only fails once the connection is closed (peer leaving).
-            tracing::debug!("dropped Chan1 packet to closed peer: {e}");
-        }
-    }
-
-    pub fn try_send_chan2(&self, pkt: impl PacketSequence<S2C<Chan2>>) {
-        let mut writer = Writer::<S2C<Chan2>>::new();
-        pkt.push_to(&mut writer);
-        let (bytes, mode) = writer.consume();
-        if let Err(e) = self
-            .raw
-            .try_send(sauer_proto::CHANNEL_MAPS, convert_mode(mode), bytes)
-        {
-            // Only fails once the connection is closed (peer leaving).
-            tracing::debug!("dropped Chan2 packet to closed peer: {e}");
-        }
-    }
-
-    pub fn try_disconnect(&self) {
-        let _ = self.raw.try_disconnect(0);
-    }
-
-    /// Disconnects with an engine `DISC_*` reason the client shows.
-    pub fn try_disconnect_with(&self, reason: u32) {
+    /// Disconnects with an engine `DISC_*` reason the client shows (0 for none).
+    pub fn try_disconnect(&self, reason: u32) {
         let _ = self.raw.try_disconnect(reason);
     }
 

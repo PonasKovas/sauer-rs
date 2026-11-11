@@ -89,11 +89,11 @@ pub fn warn_msg(text: &str) -> CubeString {
 // ─── Send helpers ─────────────────────────────────────────────────────────────
 
 pub fn send(server: &Server, id: u64, text: CubeString) {
-    server.send_chan1(id, &ServMsg { text });
+    server.send(id, &ServMsg { text });
 }
 
 pub fn broadcast(server: &Server, text: CubeString) {
-    server.broadcast_chan1(&ServMsg { text });
+    server.broadcast(&ServMsg { text });
 }
 
 pub fn send_warn(server: &Server, id: u64, text: &str) {

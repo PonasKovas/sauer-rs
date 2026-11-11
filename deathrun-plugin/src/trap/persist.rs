@@ -348,7 +348,7 @@ pub fn send(server: &Arc<Server>, (enlarges, payloads): (u32, Vec<ClipboardPaylo
     }
     let cn = crate::SERVER_BOT_CN;
     for _ in 0..enlarges {
-        server.broadcast_chan1(&Client {
+        server.broadcast(&Client {
             client_num: cn,
             packet: channel1::NewMap { size: -1 },
         });

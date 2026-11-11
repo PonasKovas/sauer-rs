@@ -14,7 +14,7 @@ impl Server {
         self.set_initial_team(id);
         self.set_initial_state(id);
 
-        self.send_chan1(id, &Welcome {});
+        self.send(id, &Welcome {});
 
         let (map_name, mode, notgotitems, spawned_items) = {
             let game = self.game.read();
@@ -31,9 +31,9 @@ impl Server {
 
         // Sauerbraten requires N_ITEMLIST in the same ENet packet as N_MAPCHANGE.
         if let Some(items) = spawned_items {
-            self.send_chan1(id, (mapchange, ItemList { items }));
+            self.send(id, (mapchange, ItemList { items }));
         } else {
-            self.send_chan1(id, mapchange);
+            self.send(id, mapchange);
         }
 
         self.send_current_master(id);
@@ -47,7 +47,7 @@ impl Server {
                 team: p.team.clone(),
             })
         {
-            self.broadcast_except_chan1(id, &init);
+            self.broadcast_except(id, &init);
         }
 
         // Send the new player a resume snapshot of all existing players.
@@ -72,7 +72,7 @@ impl Server {
                     .flatten()
             })
             .collect();
-        self.send_chan1(id, &Resume { clients });
+        self.send(id, &Resume { clients });
 
         // Introduce all existing players to the new player and send their clipboards.
         for other_id in self.client_ids().into_iter().filter(|&other| other != id) {
@@ -95,9 +95,9 @@ impl Server {
                 continue;
             };
 
-            self.send_chan1(id, &init);
+            self.send(id, &init);
             if let Some(cb) = clipboard {
-                self.send_chan1(id, &cb);
+                self.send(id, &cb);
             }
         }
 
@@ -108,7 +108,7 @@ impl Server {
 
         if is_spectator {
             if let Some(my_cn) = self.get_cn(id) {
-                self.broadcast_chan1(&sauer_proto::channel1::SpectatorServer {
+                self.broadcast(&sauer_proto::channel1::SpectatorServer {
                     client_num: my_cn,
                     is_spectator: true,
                 });

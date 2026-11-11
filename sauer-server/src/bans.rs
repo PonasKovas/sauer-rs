@@ -32,7 +32,7 @@ impl Server {
     /// Disconnects a client, telling it why (one of the `DISC_*` codes).
     pub fn disconnect_with(&self, id: u64, reason: u32) {
         if let Some(peer) = self.clients.get(&id) {
-            peer.try_disconnect_with(reason);
+            peer.try_disconnect(reason);
         }
     }
 

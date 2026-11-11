@@ -28,7 +28,7 @@ impl Server {
 
         if changed {
             if let Some(cn) = self.get_cn(id) {
-                self.broadcast_chan1(&SpectatorServer {
+                self.broadcast(&SpectatorServer {
                     client_num: cn,
                     is_spectator: spectate,
                 });

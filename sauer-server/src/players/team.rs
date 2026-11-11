@@ -30,7 +30,7 @@ impl Server {
                 team,
                 reason,
             };
-            self.broadcast_chan1(&pkt);
+            self.broadcast(&pkt);
             self.players.with_mut(id, |p| p.team = pkt.team);
         }
     }

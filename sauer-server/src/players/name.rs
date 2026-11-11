@@ -22,7 +22,7 @@ impl Server {
                 client_num: cn,
                 packet: SwitchName { name },
             };
-            self.broadcast_chan1(&pkt);
+            self.broadcast(&pkt);
             self.players.with_mut(id, |p| p.name = pkt.packet.name);
         }
     }

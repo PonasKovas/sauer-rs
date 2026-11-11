@@ -371,7 +371,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
             server.set_spectator(id, false); // Moves them into Dead state safely
             if let Some(cn) = server.get_cn(id) {
-                server.send_chan1(id, &channel1::ForceDeath { client_num: cn }); // Resets screen
+                server.send(id, &channel1::ForceDeath { client_num: cn }); // Resets screen
             }
 
             server.force_spawn(id, |state| {
@@ -586,7 +586,7 @@ fn declare_win(
 
     for id in server.client_ids() {
         if let Some(cn) = server.get_cn(id) {
-            server.send_chan1(
+            server.send(
                 id,
                 &Client {
                     client_num: cn,
@@ -718,7 +718,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
 
     for id in to_warn {
         if let Some(cn) = server.get_cn(id) {
-            server.send_chan1(
+            server.send(
                 id,
                 &Client {
                     client_num: cn,
@@ -784,7 +784,7 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
-        server.send_chan1(
+        server.send(
             id,
             &sauer_proto::channel1::InitClient {
                 client_num: crate::SERVER_BOT_CN,
@@ -793,7 +793,7 @@ impl Plugin for DeathrunPlay {
                 team: "".lossy_cubestring(),
             },
         );
-        server.send_chan1(
+        server.send(
             id,
             &sauer_proto::channel1::SpectatorServer {
                 client_num: crate::SERVER_BOT_CN,
@@ -1027,7 +1027,7 @@ impl Plugin for DeathrunPlay {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
-                        server.broadcast_chan1(
+                        server.broadcast(
                             up.global_broadcast
                                 .into_iter()
                                 .map(|p| sauer_proto::Client {
@@ -1038,7 +1038,7 @@ impl Plugin for DeathrunPlay {
                         );
                     }
                     if !up.personal.is_empty() {
-                        server.send_chan1(
+                        server.send(
                             id,
                             up.personal
                                 .into_iter()
@@ -1087,7 +1087,7 @@ impl Plugin for DeathrunPlay {
                         let up = map.update_virt_ents(id, "highlight", fake_ents);
                         let cn = crate::SERVER_BOT_CN;
                         if !up.global_broadcast.is_empty() {
-                            server.broadcast_chan1(
+                            server.broadcast(
                                 up.global_broadcast
                                     .into_iter()
                                     .map(|p| sauer_proto::Client {
@@ -1098,7 +1098,7 @@ impl Plugin for DeathrunPlay {
                             );
                         }
                         if !up.personal.is_empty() {
-                            server.send_chan1(
+                            server.send(
                                 id,
                                 up.personal
                                     .into_iter()
@@ -1134,7 +1134,7 @@ impl Plugin for DeathrunPlay {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
-                        server.broadcast_chan1(
+                        server.broadcast(
                             up.global_broadcast
                                 .into_iter()
                                 .map(|p| sauer_proto::Client {
@@ -1145,7 +1145,7 @@ impl Plugin for DeathrunPlay {
                         );
                     }
                     if !up.personal.is_empty() {
-                        server.send_chan1(
+                        server.send(
                             id,
                             up.personal
                                 .into_iter()
@@ -1219,7 +1219,7 @@ impl Plugin for DeathrunPlay {
 
                     for client_id in server.client_ids() {
                         if let Some(client_cn) = server.get_cn(client_id) {
-                            server.send_chan1(
+                            server.send(
                                 client_id,
                                 &sauer_proto::Client {
                                     client_num: client_cn,
@@ -1274,7 +1274,7 @@ impl Plugin for DeathrunPlay {
                             if let (Some(id1), Some(id2)) = ent_ids {
                                 let actor_cn = crate::SERVER_BOT_CN;
                                 for client_id in server.client_ids() {
-                                    server.send_chan1(
+                                    server.send(
                                         client_id,
                                         &sauer_proto::Client {
                                             client_num: actor_cn,
@@ -1290,7 +1290,7 @@ impl Plugin for DeathrunPlay {
                                             },
                                         },
                                     );
-                                    server.send_chan1(
+                                    server.send(
                                         client_id,
                                         &sauer_proto::Client {
                                             client_num: actor_cn,
@@ -1331,7 +1331,7 @@ impl Plugin for DeathrunPlay {
             let up = map.clear_all_virt_ents_for_player(id);
             let cn = crate::SERVER_BOT_CN;
             if !up.global_broadcast.is_empty() {
-                server.broadcast_chan1(
+                server.broadcast(
                     up.global_broadcast
                         .into_iter()
                         .map(|p| sauer_proto::Client {

@@ -39,7 +39,7 @@ pub async fn broadcast_payloads(
         return;
     }
     for payload in payloads {
-        server.broadcast_chan1(paste_packets(owner_cn, payload));
+        server.broadcast(paste_packets(owner_cn, payload));
 
         if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -56,7 +56,7 @@ pub fn broadcast_now(
     payloads: Vec<ClipboardPayload>,
 ) {
     for payload in payloads {
-        server.broadcast_chan1(paste_packets(owner_cn, payload));
+        server.broadcast(paste_packets(owner_cn, payload));
     }
 }
 
@@ -80,7 +80,7 @@ pub async fn send_payloads_to_clients(
     for payload in payloads {
         let packets = paste_packets(owner_cn, payload);
         for &target_id in target_ids {
-            server.send_chan1(target_id, &packets);
+            server.send(target_id, &packets);
         }
 
         if delay_ms > 0 {

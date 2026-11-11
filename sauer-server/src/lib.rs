@@ -5,7 +5,7 @@ use peer::Peer;
 use sauer_proto::{
     PacketDescriptor, PacketSequence,
     data::Cn,
-    route::{Chan0, Chan1, Chan2, S2C},
+    route::{Channel, S2C},
 };
 use std::net::SocketAddr;
 use std::{fmt::Debug, sync::Arc};
@@ -153,75 +153,58 @@ impl Server {
         true
     }
 
-    // ── Targeted sends ────────────────────────────────────────────────────────
+    // ── Sending ───────────────────────────────────────────────────────────────
+    // The channel comes from the packet's type.
 
-    pub fn send_chan0(
+    pub fn send<C: Channel>(
         &self,
         id: u64,
-        pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug,
+        pkt: impl PacketSequence<S2C<C>> + PacketDescriptor + Debug,
     ) {
         packet_log::trace_out(id, &pkt);
         if let Some(peer) = self.clients.get(&id) {
-            peer.try_send_chan0(pkt);
+            peer.try_send(pkt);
         }
     }
 
-    pub fn send_chan1(
+    pub fn broadcast<C: Channel>(
         &self,
-        id: u64,
-        pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug,
+        pkt: impl PacketSequence<S2C<C>> + PacketDescriptor + Debug,
     ) {
-        packet_log::trace_out(id, &pkt);
-        if let Some(peer) = self.clients.get(&id) {
-            peer.try_send_chan1(pkt);
-        }
-    }
-
-    pub fn send_chan2(&self, id: u64, pkt: impl PacketSequence<S2C<Chan2>>) {
-        if let Some(peer) = self.clients.get(&id) {
-            peer.try_send_chan2(pkt);
-        }
-    }
-
-    // ── Broadcast ─────────────────────────────────────────────────────────────
-
-    pub fn broadcast_chan0(&self, pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug) {
         packet_log::trace_out_broadcast(&pkt);
         for entry in self.clients.iter() {
-            entry.value().try_send_chan0(&pkt);
+            entry.value().try_send(&pkt);
         }
     }
 
-    pub fn broadcast_chan1(&self, pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug) {
-        packet_log::trace_out_broadcast(&pkt);
-        for entry in self.clients.iter() {
-            entry.value().try_send_chan1(&pkt);
-        }
-    }
-
-    pub fn broadcast_except_chan0(
+    pub fn broadcast_except<C: Channel>(
         &self,
         except: u64,
-        pkt: impl PacketSequence<S2C<Chan0>> + PacketDescriptor + Debug,
+        pkt: impl PacketSequence<S2C<C>> + PacketDescriptor + Debug,
     ) {
         packet_log::trace_out_broadcast_except(except, &pkt);
         for entry in self.clients.iter() {
             if *entry.key() != except {
-                entry.value().try_send_chan0(&pkt);
+                entry.value().try_send(&pkt);
             }
         }
     }
 
-    pub fn broadcast_except_chan1(
-        &self,
-        except: u64,
-        pkt: impl PacketSequence<S2C<Chan1>> + PacketDescriptor + Debug,
-    ) {
-        packet_log::trace_out_broadcast_except(except, &pkt);
-        for entry in self.clients.iter() {
-            if *entry.key() != except {
-                entry.value().try_send_chan1(&pkt);
-            }
+    /// Passes a client's packet on to everyone else, wrapped in `N_CLIENT` with
+    /// their cn so the others know who it came from.
+    pub fn relay_from<T>(&self, id: u64, packet: T)
+    where
+        sauer_proto::Client<T>:
+            PacketSequence<S2C<sauer_proto::route::Chan1>> + PacketDescriptor + Debug,
+    {
+        if let Some(cn) = self.get_cn(id) {
+            self.broadcast_except(
+                id,
+                &sauer_proto::Client {
+                    client_num: cn,
+                    packet,
+                },
+            );
         }
     }
 
@@ -230,9 +213,7 @@ impl Server {
     /// Initiate a graceful disconnect. The client is removed from the map only
     /// once the ENet connection is fully closed.
     pub fn disconnect(&self, id: u64) {
-        if let Some(peer) = self.clients.get(&id) {
-            peer.try_disconnect();
-        }
+        self.disconnect_with(id, 0);
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────

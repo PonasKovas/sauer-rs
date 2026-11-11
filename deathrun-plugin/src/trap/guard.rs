@@ -117,7 +117,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
                     packet,
                 })
                 .collect();
-            server.send_chan1(client, fixes);
+            server.send(client, fixes);
         }
         if virt.len() == ids.len() {
             return;
@@ -195,7 +195,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
             })
             .collect();
         drop(state);
-        server.broadcast_chan1(restore);
+        server.broadcast(restore);
         crate::ui::send_warn(server, ctx.id(), PROTECTED_MSG);
         return;
     }
@@ -222,7 +222,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
     }
     drop(state);
     for text in messages {
-        server.broadcast_chan1(&channel1::ServMsg {
+        server.broadcast(&channel1::ServMsg {
             text: format!("\x0C6[TRAP]\x0C7 {text}").lossy_cubestring(),
         });
     }

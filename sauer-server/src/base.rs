@@ -44,15 +44,7 @@ where
     if server.game.read().mode != GameMode::CoopEdit {
         return;
     }
-    if let Some(cn) = server.get_cn(id) {
-        server.broadcast_except_chan1(
-            id,
-            &Client {
-                client_num: cn,
-                packet: pkt.clone(),
-            },
-        );
-    }
+    server.relay_from(id, pkt.clone());
 }
 
 /// Like the engine's `setmaster`: once nobody holds master, the mode goes back
@@ -97,7 +89,7 @@ fn check_hit(server: &Server, target_id: u64, life_sequence: i32) -> bool {
 /// and clears all outstanding votes.
 fn do_map_change(server: &Server, map_name: cube_string::CubeString, mode: GameMode) {
     server.game.write().change_map(map_name.clone(), mode);
-    server.broadcast_chan1(&MapChange {
+    server.broadcast(&MapChange {
         map_name,
         mode,
         has_items: true,
@@ -148,7 +140,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
                 let spawned = server.game.write().items.tick(100);
                 for i in spawned {
-                    server.broadcast_chan1(&ItemSpawn {
+                    server.broadcast(&ItemSpawn {
                         item_index: i as i32,
                     });
                 }
@@ -172,7 +164,7 @@ impl<P: Plugin> Plugin for Base<P> {
             }
         };
 
-        server.send_chan1(
+        server.send(
             id,
             &ServInfo {
                 client_num: cn,
@@ -299,7 +291,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         // The cn goes before the player entry, the reverse of `connected`.
         if let Some(cn) = server.free_cn(id) {
-            server.broadcast_chan1(&channel1::ClientDisconnected { client_num: cn });
+            server.broadcast(&channel1::ClientDisconnected { client_num: cn });
         }
         clear_player(&server.players, id);
 
@@ -389,15 +381,7 @@ impl<P: Plugin> Plugin for Base<P> {
         });
 
         if let Some(state) = spawned_state.flatten() {
-            if let Some(cn) = server.get_cn(id) {
-                server.broadcast_except_chan1(
-                    id,
-                    &Client {
-                        client_num: cn,
-                        packet: SpawnServer { state },
-                    },
-                );
-            }
+            server.relay_from(id, SpawnServer { state });
         }
         Flow::Continue
     }
@@ -456,7 +440,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         if let Some(cn) = server.get_cn(id) {
-            server.broadcast_except_chan1(
+            server.broadcast_except(
                 id,
                 &ShotFx {
                     client_num: cn,
@@ -504,7 +488,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         if let Some(cn) = server.get_cn(id) {
-            server.broadcast_chan1(&ExplodeFx {
+            server.broadcast(&ExplodeFx {
                 client_num: cn,
                 gun: packet.gun,
                 id: packet.id,
@@ -544,7 +528,7 @@ impl<P: Plugin> Plugin for Base<P> {
             return Flow::Continue;
         }
         ctx.server().set_position(ctx.id(), packet.pos);
-        ctx.server().broadcast_except_chan0(ctx.id(), packet);
+        ctx.server().broadcast_except(ctx.id(), packet);
         Flow::Continue
     }
 
@@ -552,7 +536,7 @@ impl<P: Plugin> Plugin for Base<P> {
         if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
             return Flow::Continue;
         }
-        ctx.server().broadcast_except_chan0(ctx.id(), packet);
+        ctx.server().broadcast_except(ctx.id(), packet);
         Flow::Continue
     }
 
@@ -560,7 +544,7 @@ impl<P: Plugin> Plugin for Base<P> {
         if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
             return Flow::Continue;
         }
-        ctx.server().broadcast_except_chan0(ctx.id(), packet);
+        ctx.server().broadcast_except(ctx.id(), packet);
         Flow::Continue
     }
 
@@ -604,15 +588,7 @@ impl<P: Plugin> Plugin for Base<P> {
             if flow == Flow::Continue {
                 let name = ctx.server().player_name(id);
                 info!("[CHAT] {name}: {text}");
-                if let Some(cn) = ctx.server().get_cn(id) {
-                    ctx.server().broadcast_except_chan1(
-                        id,
-                        &Client {
-                            client_num: cn,
-                            packet: channel1::Text { text },
-                        },
-                    );
-                }
+                ctx.server().relay_from(id, channel1::Text { text });
             }
         }
         Flow::Continue
@@ -636,50 +612,26 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn ping(&self, ctx: &mut Context, packet: &channel1::Ping) -> Flow {
         ctx.server()
-            .send_chan1(ctx.id(), &channel1::Pong { ping: packet.time });
+            .send(ctx.id(), &channel1::Pong { ping: packet.time });
         Flow::Continue
     }
 
     async fn client_ping(&self, ctx: &mut Context, packet: &channel1::ClientPing) -> Flow {
         let id = ctx.id();
         ctx.server().players.with_mut(id, |p| p.ping = packet.ping);
-        if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
-                id,
-                &Client {
-                    client_num: cn,
-                    packet: packet.clone(),
-                },
-            );
-        }
+        ctx.server().relay_from(id, packet.clone());
         Flow::Continue
     }
 
     async fn taunt(&self, ctx: &mut Context, packet: &channel1::Taunt) -> Flow {
         let id = ctx.id();
-        if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
-                id,
-                &Client {
-                    client_num: cn,
-                    packet: packet.clone(),
-                },
-            );
-        }
+        ctx.server().relay_from(id, packet.clone());
         Flow::Continue
     }
 
     async fn sound(&self, ctx: &mut Context, packet: &channel1::Sound) -> Flow {
         let id = ctx.id();
-        if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
-                id,
-                &Client {
-                    client_num: cn,
-                    packet: packet.clone(),
-                },
-            );
-        }
+        ctx.server().relay_from(id, packet.clone());
         Flow::Continue
     }
 
@@ -696,7 +648,7 @@ impl<P: Plugin> Plugin for Base<P> {
             .unwrap_or_else(|| "?".to_string());
         info!("[MAP] {name} (cn {cn_str}) uploaded a new map.");
 
-        server.broadcast_chan1(&channel1::ServMsg {
+        server.broadcast(&channel1::ServMsg {
             text: format!("[{name} uploaded the map, use \"/getmap\" to receive it]")
                 .lossy_cubestring(),
         });
@@ -712,7 +664,7 @@ impl<P: Plugin> Plugin for Base<P> {
             return Flow::Continue;
         };
 
-        server.send_chan2(
+        server.send(
             id,
             &channel2::SendMap {
                 data: data.to_vec(),
@@ -728,7 +680,7 @@ impl<P: Plugin> Plugin for Base<P> {
             Some((cn, cb.payload.clone()))
         });
         for (owner_cn, payload) in clipboard_packets {
-            server.send_chan1(
+            server.send(
                 id,
                 &ClipboardServer {
                     client_num: owner_cn,
@@ -806,7 +758,7 @@ impl<P: Plugin> Plugin for Base<P> {
             Privilege::None => format!("{} relinquished {}", name.to_utf8(), priv_name(theirs)),
             p => format!("{} claimed {}", name.to_utf8(), priv_name(p)),
         };
-        server.broadcast_chan1(&channel1::ServMsg {
+        server.broadcast(&channel1::ServMsg {
             text: msg.lossy_cubestring(),
         });
         server.set_privilege(target, new);
@@ -838,7 +790,7 @@ impl<P: Plugin> Plugin for Base<P> {
         } else {
             format!("{kicker} kicked {kicked} because: {reason}")
         };
-        server.broadcast_chan1(&channel1::ServMsg {
+        server.broadcast(&channel1::ServMsg {
             text: msg.lossy_cubestring(),
         });
 
@@ -858,7 +810,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let server = ctx.server();
         if server.get_privilege(ctx.id()) >= Privilege::Master {
             server.clear_bans();
-            server.broadcast_chan1(&channel1::ServMsg {
+            server.broadcast(&channel1::ServMsg {
                 text: "cleared all bans".lossy_cubestring(),
             });
         }
@@ -988,18 +940,10 @@ impl<P: Plugin> Plugin for Base<P> {
             .items
             .edit(idx, ItemType::try_from(packet.type_).ok());
 
-        if let Some(cn) = server.get_cn(id) {
-            server.broadcast_except_chan1(
-                id,
-                &Client {
-                    client_num: cn,
-                    packet: packet.clone(),
-                },
-            );
-        }
+        server.relay_from(id, packet.clone());
 
         if new_item {
-            server.broadcast_chan1(&ItemSpawn {
+            server.broadcast(&ItemSpawn {
                 item_index: idx as i32,
             });
         }
@@ -1071,13 +1015,13 @@ impl<P: Plugin> Plugin for Base<P> {
             None | Some(None) => {}
             Some(Some(true)) => {
                 if let Some(cn) = server.get_cn(id) {
-                    server.broadcast_chan1(&ItemAck {
+                    server.broadcast(&ItemAck {
                         item_index: packet.item_index,
                         client_num: Some(cn),
                     });
                 }
             }
-            Some(Some(false)) => server.send_chan1(
+            Some(Some(false)) => server.send(
                 id,
                 &ItemAck {
                     item_index: packet.item_index,
@@ -1094,7 +1038,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
+            ctx.server().broadcast_except(
                 id,
                 &UndoServer {
                     client_num: cn,
@@ -1111,7 +1055,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
+            ctx.server().broadcast_except(
                 id,
                 &RedoServer {
                     client_num: cn,
@@ -1126,38 +1070,18 @@ impl<P: Plugin> Plugin for Base<P> {
         if ctx.server().game.read().mode != GameMode::CoopEdit {
             return Flow::Continue;
         }
-        let id = ctx.id();
-        ctx.server().players.with_mut(id, |p| p.clipboard = None);
-        if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
-                id,
-                &Client {
-                    client_num: cn,
-                    packet: channel1::CopyServer {
-                        sel: packet.sel.clone(),
-                    },
-                },
-            );
-        }
+        ctx.server()
+            .players
+            .with_mut(ctx.id(), |p| p.clipboard = None);
+        let sel = packet.sel.clone();
+        ctx.server()
+            .relay_from(ctx.id(), channel1::CopyServer { sel });
         Flow::Continue
     }
 
     async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) -> Flow {
-        if ctx.server().game.read().mode != GameMode::CoopEdit {
-            return Flow::Continue;
-        }
-        let id = ctx.id();
-        if let Some(cn) = ctx.server().get_cn(id) {
-            ctx.server().broadcast_except_chan1(
-                id,
-                &Client {
-                    client_num: cn,
-                    packet: channel1::PasteServer {
-                        sel: packet.sel.clone(),
-                    },
-                },
-            );
-        }
+        let sel = packet.sel.clone();
+        relay_coop(ctx.server(), ctx.id(), &channel1::PasteServer { sel });
         Flow::Continue
     }
 
@@ -1182,7 +1106,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         // An empty one is passed on too, so others drop their copy.
         if let Some(cn) = server.get_cn(id) {
-            server.broadcast_except_chan1(
+            server.broadcast_except(
                 id,
                 &ClipboardServer {
                     client_num: cn,

@@ -26,3 +26,18 @@ pub struct Chan2;
 pub struct S2C<C>(PhantomData<C>);
 /// Client-to-Server direction marker.
 pub struct C2S<C>(PhantomData<C>);
+
+/// An ENet channel, and its number.
+pub trait Channel {
+    const ID: u8;
+}
+
+impl Channel for Chan0 {
+    const ID: u8 = crate::CHANNEL_POSITIONS;
+}
+impl Channel for Chan1 {
+    const ID: u8 = crate::CHANNEL_MESSAGES;
+}
+impl Channel for Chan2 {
+    const ID: u8 = crate::CHANNEL_MAPS;
+}

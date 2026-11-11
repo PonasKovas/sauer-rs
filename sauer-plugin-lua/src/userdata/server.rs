@@ -243,7 +243,7 @@ impl UserData for LuaServer {
             ($name:literal, $ty:ty) => {
                 methods.add_method($name, |lua, this, (id, table): (u64, Table)| {
                     let packet = <$ty>::from_lua(Value::Table(table), lua)?;
-                    this.inner.send_chan1(id, &packet);
+                    this.inner.send(id, &packet);
                     Ok(())
                 });
             };
@@ -254,7 +254,7 @@ impl UserData for LuaServer {
             ($name:literal, $ty:ty) => {
                 methods.add_method($name, |lua, this, table: Table| {
                     let packet = <$ty>::from_lua(Value::Table(table), lua)?;
-                    this.inner.broadcast_chan1(&packet);
+                    this.inner.broadcast(&packet);
                     Ok(())
                 });
             };

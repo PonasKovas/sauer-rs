@@ -53,7 +53,7 @@ impl Plugin for TelegramBridge {
         use sauer_proto::channel1::{InitClient, SpectatorServer};
         use sauer_proto::data::PlayerModel;
 
-        ctx.server().send_chan1(
+        ctx.server().send(
             ctx.id(),
             &InitClient {
                 client_num: self.bot_cn,
@@ -62,7 +62,7 @@ impl Plugin for TelegramBridge {
                 team: "".lossy_cubestring(),
             },
         );
-        ctx.server().send_chan1(
+        ctx.server().send(
             ctx.id(),
             &SpectatorServer {
                 client_num: self.bot_cn,
@@ -97,7 +97,7 @@ impl Plugin for TelegramBridge {
                                     .or_else(|| msg.from.as_ref().map(|u| u.first_name.clone()))
                                     .unwrap_or_else(|| "Unknown".to_string());
 
-                                server.broadcast_chan1(&sauer_proto::Client {
+                                server.broadcast(&sauer_proto::Client {
                                     client_num: bot_cn,
                                     packet: sauer_proto::channel1::Text {
                                         text: format!("{}: {}", sender, text).lossy_cubestring(),

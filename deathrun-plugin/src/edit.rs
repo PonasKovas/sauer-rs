@@ -89,7 +89,7 @@ impl Plugin for DeathrunEdit {
             let up = map.clear_all_virt_ents_for_player(id);
             let cn = crate::SERVER_BOT_CN;
             if !up.global_broadcast.is_empty() {
-                ctx.server().broadcast_chan1(
+                ctx.server().broadcast(
                     up.global_broadcast
                         .into_iter()
                         .map(|p| Client {
@@ -301,7 +301,7 @@ impl Plugin for DeathrunEdit {
                 let up = map.clear_virt_ents(id, "highlight");
                 let cn = crate::SERVER_BOT_CN;
                 if !up.global_broadcast.is_empty() {
-                    server.broadcast_chan1(
+                    server.broadcast(
                         up.global_broadcast
                             .into_iter()
                             .map(|p| Client {
@@ -312,7 +312,7 @@ impl Plugin for DeathrunEdit {
                     );
                 }
                 if !up.personal.is_empty() {
-                    server.send_chan1(
+                    server.send(
                         id,
                         up.personal
                             .into_iter()
@@ -342,7 +342,7 @@ impl Plugin for DeathrunEdit {
                     let up = map.update_virt_ents(id, "highlight", fake_ents);
                     let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
-                        server.broadcast_chan1(
+                        server.broadcast(
                             up.global_broadcast
                                 .into_iter()
                                 .map(|p| Client {
@@ -353,7 +353,7 @@ impl Plugin for DeathrunEdit {
                         );
                     }
                     if !up.personal.is_empty() {
-                        server.send_chan1(
+                        server.send(
                             id,
                             up.personal
                                 .into_iter()
@@ -372,7 +372,7 @@ impl Plugin for DeathrunEdit {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN;
                     if !up.global_broadcast.is_empty() {
-                        server.broadcast_chan1(
+                        server.broadcast(
                             up.global_broadcast
                                 .into_iter()
                                 .map(|p| Client {
@@ -383,7 +383,7 @@ impl Plugin for DeathrunEdit {
                         );
                     }
                     if !up.personal.is_empty() {
-                        server.send_chan1(
+                        server.send(
                             id,
                             up.personal
                                 .into_iter()
@@ -418,10 +418,10 @@ impl Plugin for DeathrunEdit {
                         .collect::<Vec<_>>()
                 };
                 if !up.global_broadcast.is_empty() {
-                    server.broadcast_chan1(wrap(up.global_broadcast));
+                    server.broadcast(wrap(up.global_broadcast));
                 }
                 if !up.personal.is_empty() {
-                    server.send_chan1(id, wrap(up.personal));
+                    server.send(id, wrap(up.personal));
                 }
             }
         }
@@ -452,7 +452,7 @@ impl Plugin for DeathrunEdit {
                 let up = map.clear_virt_ents(id, "edit_particle");
                 let cn = crate::SERVER_BOT_CN;
                 if !up.global_broadcast.is_empty() {
-                    server.broadcast_chan1(
+                    server.broadcast(
                         up.global_broadcast
                             .into_iter()
                             .map(|p| Client {
@@ -463,7 +463,7 @@ impl Plugin for DeathrunEdit {
                     );
                 }
                 if !up.personal.is_empty() {
-                    server.send_chan1(
+                    server.send(
                         id,
                         up.personal
                             .into_iter()
@@ -543,7 +543,7 @@ impl Plugin for DeathrunEdit {
                 let up = map.update_virt_ents(id, "edit_particle", vec![fake_ent]);
                 let cn = crate::SERVER_BOT_CN;
                 if !up.global_broadcast.is_empty() {
-                    server.broadcast_chan1(
+                    server.broadcast(
                         up.global_broadcast
                             .into_iter()
                             .map(|p| Client {
@@ -554,7 +554,7 @@ impl Plugin for DeathrunEdit {
                     );
                 }
                 if !up.personal.is_empty() {
-                    server.send_chan1(
+                    server.send(
                         id,
                         up.personal
                             .into_iter()
@@ -778,7 +778,7 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let cn = ctx.server().get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
         if is_waiting_for_map(ctx.server()) {
-            ctx.server().send_chan1(
+            ctx.server().send(
                 id,
                 &Client {
                     client_num: cn,
@@ -833,7 +833,7 @@ impl Plugin for DeathrunEdit {
             .with(id, |p| p.name.strip_colors().to_utf8())
             .unwrap_or_else(|| "Someone".to_string());
 
-        server.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+        server.broadcast(&sauer_proto::channel1::ServMsg {
             text: format!(
                 "\x0C1[MAP] \x0C7Receiving map from \x0C5{}\x0C7 ({} KB). Processing...",
                 player_name, size_kb
@@ -939,7 +939,7 @@ impl Plugin for DeathrunEdit {
                         game.mode = GameMode::CoopEdit;
                     }
 
-                    server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+                    server_clone.broadcast(&sauer_proto::channel1::ServMsg {
                         text: format!(
                             "\x0C1[MAP] \x0C7Loaded \x0C5{}\x0C7 traps ({} KB map).",
                             loaded_traps_len,
@@ -948,14 +948,14 @@ impl Plugin for DeathrunEdit {
                         .lossy_cubestring(),
                     });
                     for w in warnings {
-                        server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
+                        server_clone.broadcast(&sauer_proto::channel1::ServMsg {
                             text: format!("\x0C6[TRAP]\x0C7 {w}").lossy_cubestring(),
                         });
                     }
 
                     let pkt = sauer_proto::channel2::SendMap { data: out_bytes };
                     for client_id in server_clone.client_ids() {
-                        server_clone.send_chan2(client_id, &pkt);
+                        server_clone.send(client_id, &pkt);
                     }
 
                     ui::send(&server_clone, id, ui::body("Map successfully uploaded!"));
@@ -976,7 +976,7 @@ impl Plugin for DeathrunEdit {
             server.set_master_mode(MasterMode::Locked);
         }
 
-        server.send_chan1(
+        server.send(
             id,
             &sauer_proto::channel1::InitClient {
                 client_num: crate::SERVER_BOT_CN,
@@ -985,7 +985,7 @@ impl Plugin for DeathrunEdit {
                 team: "".lossy_cubestring(),
             },
         );
-        server.send_chan1(
+        server.send(
             id,
             &sauer_proto::channel1::SpectatorServer {
                 client_num: crate::SERVER_BOT_CN,
@@ -1144,7 +1144,7 @@ impl Plugin for DeathrunEdit {
         }
 
         let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
-        server.broadcast_except_chan1(
+        server.broadcast_except(
             id,
             &sauer_proto::Client {
                 client_num: cn,
@@ -1248,7 +1248,7 @@ impl Plugin for DeathrunEdit {
             server.set_spectator(client_id, true);
         }
 
-        server.send_chan1(
+        server.send(
             id,
             &channel1::MapChange {
                 map_name: packet.map_name.clone(),
