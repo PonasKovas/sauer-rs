@@ -3,7 +3,7 @@
 //! One player aims around while everyone sees a see-through copy of the
 //! button where it would go: green if it can go there, yellow if it would sit
 //! inside a trap's frame (the frame is shown too), red if it can't. Typing the
-//! command again puts it there. A move is cancelled by aiming back at the
+//! command again (or shooting) puts it there. A move is cancelled by aiming back at the
 //! button, a new trap by typing the command where the button can't go.
 //!
 //! The copy is never part of the server's map. It is only pasted on clients,
@@ -421,7 +421,7 @@ fn start(
         server,
         id,
         crate::ui::body(&format!(
-            "  Aim where it should go and type {cmd} again. Green: fine. Yellow: inside a trap's frame (shown), its geometry covers the button while it is active. Red: can't go there. To cancel, {back} and type {cmd}."
+            "  Aim where it should go and shoot or type {cmd} again. Green: fine. Yellow: inside a trap's frame (shown), its geometry covers the button while it is active. Red: can't go there. To cancel, {back} and shoot or type {cmd}."
         )),
     );
 }
@@ -526,6 +526,16 @@ pub fn cancel_for(server: &Server, id: u64, why: &str) {
         server,
         format!("Placing the trap button was cancelled: {why}."),
     );
+}
+
+/// What `id` is placing, if they are the one placing a button.
+pub fn placing_kind(server: &Server, id: u64) -> Option<Kind> {
+    let state = get_server_state(server).read().unwrap();
+    state
+        .mode
+        .placing()
+        .filter(|p| p.player == id)
+        .map(Placing::kind)
 }
 
 fn is_placer(state: &DeathrunState, id: u64) -> bool {

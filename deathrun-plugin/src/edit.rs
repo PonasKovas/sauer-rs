@@ -679,6 +679,28 @@ impl Plugin for DeathrunEdit {
 
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
 
+        // Shooting while placing a button puts it down, like typing the command again.
+        if let Some(kind) = crate::trap::place::placing_kind(&server, id) {
+            let Some(pos) = server.players.try_get(id).map(|p| p.position) else {
+                return;
+            };
+            let Some(dir) = self.player_dirs.get(&id).map(|d| *d) else {
+                return;
+            };
+            let (yaw, pitch) = (
+                (dir.yaw as f32).to_radians(),
+                (dir.pitch as f32).to_radians(),
+            );
+            let ray = [
+                -yaw.sin() * pitch.cos(),
+                yaw.cos() * pitch.cos(),
+                pitch.sin(),
+            ];
+            let origin = [pos.x, pos.y, pos.z + 14.0];
+            crate::trap::place::command(&server, id, kind, origin, ray);
+            return;
+        }
+
         let trap_to_trigger = {
             let state = crate::map_state::get_server_state(&server).read().unwrap();
             if state.mode.editing().is_some() {
