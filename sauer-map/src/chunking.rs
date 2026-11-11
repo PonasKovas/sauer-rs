@@ -32,6 +32,8 @@ fn do_chunk(
     while (max_span + grid - 1) / grid > 8 {
         grid <<= 1;
     }
+    let shaped = crate::octree::max_shaped_leaf(&map.root, [0; 3], map.size, min, max);
+    grid = grid.max(shaped);
 
     let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
     let padded_max: [i32; 3] =
@@ -42,7 +44,8 @@ fn do_chunk(
     let sz = (padded_max[2] - padded_min[2]) / grid;
 
     // Check if it's 1x1x1 and cannot be split further
-    let cannot_split = sx <= 1 && sy <= 1 && sz <= 1 && grid == 1;
+    // Going smaller than `shaped` would split a shaped leaf.
+    let cannot_split = sx <= 1 && sy <= 1 && sz <= 1 && grid <= shaped.max(1);
 
     let payload =
         crate::clipboard::generate_clipboard_for_region(map, padded_min, [sx, sy, sz], grid);

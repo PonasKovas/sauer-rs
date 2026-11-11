@@ -1,6 +1,34 @@
 use crate::{Cube, Node};
 use ogz_rs::data::{CubeInfo, ModernSurfaceData, ModernSurfaces, OctreeNode, Surfaces};
 
+/// Size of the biggest shaped (neither empty nor fully solid) leaf touching
+/// `[min, max)`, or 0. A clipboard grid below this would split that leaf,
+/// and the engine's split can't keep most slopes (subdividecube is not
+/// "perfect" for them), so the copy would come back with dents.
+pub fn max_shaped_leaf(node: &Node, pos: [i32; 3], size: i32, min: [i32; 3], max: [i32; 3]) -> i32 {
+    if (0..3).any(|k| pos[k] + size <= min[k] || pos[k] >= max[k]) {
+        return 0;
+    }
+    match node {
+        Node::Leaf(cube) if cube.is_empty() || cube.is_entirely_solid() => 0,
+        Node::Leaf(_) => size,
+        Node::Branch(children) => {
+            let half = size / 2;
+            (0..8)
+                .map(|i| {
+                    let child_pos = [
+                        pos[0] + (i & 1) as i32 * half,
+                        pos[1] + ((i >> 1) & 1) as i32 * half,
+                        pos[2] + ((i >> 2) & 1) as i32 * half,
+                    ];
+                    max_shaped_leaf(&children[i], child_pos, half, min, max)
+                })
+                .max()
+                .unwrap_or(0)
+        }
+    }
+}
+
 pub fn extract_node_at(
     node: &Node,
     node_pos: [i32; 3],

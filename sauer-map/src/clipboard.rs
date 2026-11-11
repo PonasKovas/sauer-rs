@@ -107,6 +107,9 @@ pub fn generate_region_clipboard(
     while (max_span + grid - 1) / grid > 8 {
         grid <<= 1;
     }
+    grid = grid.max(crate::octree::max_shaped_leaf(
+        &map.root, [0; 3], map.size, min, max,
+    ));
 
     let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
     let padded_max: [i32; 3] =
