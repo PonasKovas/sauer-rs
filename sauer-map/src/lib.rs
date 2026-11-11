@@ -7,6 +7,7 @@ pub mod virt_ents;
 pub mod chunking;
 pub mod clipboard;
 pub mod facemerge;
+pub mod map_vars;
 pub mod param_blob;
 pub mod raycast;
 pub mod vslot;

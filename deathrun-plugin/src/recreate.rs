@@ -25,7 +25,9 @@ pub async fn visual_rebuild_map<F>(
         if send_newmap {
             // The client resets all map vars to defaults on a new map.
             if let Some(mut p) = server.players.try_get_mut(id) {
-                p.known_vars.clear();
+                p.known_vars = sauer_map::map_vars::new_map_vars()
+                    .map(|var| (var_name(&var).clone(), var))
+                    .collect();
             }
             let cn = server.get_cn(id).unwrap_or(0) as i32;
             server.send_chan1(
@@ -60,11 +62,10 @@ pub async fn visual_rebuild_map<F>(
         );
 
         for var in &map.vars {
-            let name = match var {
-                ogz_rs::data::Variable::Int { name, .. } => name.clone(),
-                ogz_rs::data::Variable::Float { name, .. } => name.clone(),
-                ogz_rs::data::Variable::String { name, .. } => name.clone(),
-            };
+            let name = var_name(var).clone();
+            if sauer_map::map_vars::is_read_only(&name.to_string()) {
+                continue;
+            }
 
             let mut send = true;
             if let Some(mut p) = server.players.try_get_mut(id) {
@@ -174,4 +175,12 @@ pub async fn visual_rebuild_map<F>(
     }
     // The rebuild turned any see-through trap buttons solid again.
     crate::trap::placement::mark_seethrough_stale(server);
+}
+
+fn var_name(var: &ogz_rs::data::Variable) -> &cube_string::CubeString {
+    match var {
+        ogz_rs::data::Variable::Int { name, .. } => name,
+        ogz_rs::data::Variable::Float { name, .. } => name,
+        ogz_rs::data::Variable::String { name, .. } => name,
+    }
 }
