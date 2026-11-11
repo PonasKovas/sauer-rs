@@ -467,7 +467,7 @@ pub fn describe_trap(trap: &Trap) -> String {
 pub fn unlinked_message(trap: &Trap, rec: &EntRec) -> String {
     let ty = rec.to_entity().ent_type;
     format!(
-        "Entity {ty:?} at ({:.0}, {:.0}, {:.0}) changed, so it is no longer part of {}. Use #edittrap on it if the entity should still be involved.",
+        "Entity {ty:?} at ({:.0}, {:.0}, {:.0}) changed, so it is no longer part of {}. Use #tedit on it if the entity should still be involved.",
         rec.pos[0],
         rec.pos[1],
         rec.pos[2],

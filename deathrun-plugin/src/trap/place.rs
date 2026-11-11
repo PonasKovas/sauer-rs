@@ -1,4 +1,4 @@
-//! Choosing a spot for a trap button: `#newtrap` and `#movetrap`.
+//! Choosing a spot for a trap button: `#tnew` and `#tmove`.
 //!
 //! One player aims around while everyone sees a see-through copy of the
 //! button where it would go: green if it can go there, yellow if it would sit
@@ -39,8 +39,8 @@ pub enum Kind {
 impl Kind {
     fn command(self) -> &'static str {
         match self {
-            Kind::New => "#newtrap",
-            Kind::Move => "#movetrap",
+            Kind::New => "#tnew",
+            Kind::Move => "#tmove",
         }
     }
 }
@@ -352,12 +352,12 @@ pub fn busy_message(server: &Server, state: &DeathrunState) -> Option<String> {
     ))
 }
 
-/// `#newtrap` and `#movetrap`: starts placing a button, places it, or cancels.
+/// `#tnew` and `#tmove`: starts placing a button, places it, or cancels.
 pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray: [f32; 3]) {
     let mut state = get_server_state(server).write().unwrap();
     let refusal = match &state.mode {
         TrapMode::Editing(e) => Some(format!(
-            "Trap {} is being edited. Type #edittrap to finish editing first.",
+            "Trap {} is being edited. Type #tedit to finish editing first.",
             e.trap_idx
         )),
         TrapMode::Placing(p) if p.player != id => busy_message(server, &state),

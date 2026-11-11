@@ -46,9 +46,9 @@ pub struct TrapEditState {
 pub enum TrapMode {
     #[default]
     Idle,
-    /// `#edittrap`: every player's edits go into this trap's active state.
+    /// `#tedit`: every player's edits go into this trap's active state.
     Editing(TrapEditState),
-    /// `#newtrap` or `#movetrap`: one player is choosing a spot for a button.
+    /// `#tnew` or `#tmove`: one player is choosing a spot for a button.
     Placing(place::Placing),
 }
 
@@ -71,7 +71,7 @@ impl TrapMode {
     pub fn busy_reason(&self) -> Option<&'static str> {
         match self {
             Self::Idle => None,
-            Self::Editing(_) => Some("a trap is being edited (#edittrap to finish)"),
+            Self::Editing(_) => Some("a trap is being edited (#tedit to finish)"),
             Self::Placing(_) => Some("a trap button is being placed"),
         }
     }

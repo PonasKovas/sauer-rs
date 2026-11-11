@@ -152,7 +152,7 @@ fn locked(server: &Server, state: &DeathrunState, idx: usize) -> Option<String> 
 fn busy(server: &Server, state: &DeathrunState) -> Option<String> {
     if let Some(e) = state.mode.editing() {
         return Some(format!(
-            "Trap {} is being edited. Type #edittrap to finish editing first.",
+            "Trap {} is being edited. Type #tedit to finish editing first.",
             e.trap_idx
         ));
     }
@@ -357,7 +357,7 @@ pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
     say(server, id, msg);
 }
 
-/// `#edittrap`: starts editing the aimed trap, or finishes the edit going on.
+/// `#tedit`: starts editing the aimed trap, or finishes the edit going on.
 pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
     let id = ctx.id();
     let server = ctx.server();
@@ -368,7 +368,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
         // Someone aiming at another trap most likely meant to edit that one.
         if let Some(other) = aimed.filter(|&i| i != edit.trap_idx) {
             let msg = format!(
-                "Trap {} is being edited, not trap {other}. Aim at it, or away from other traps, and type #edittrap to finish.",
+                "Trap {} is being edited, not trap {other}. Aim at it, or away from other traps, and type #tedit to finish.",
                 edit.trap_idx
             );
             drop(state);

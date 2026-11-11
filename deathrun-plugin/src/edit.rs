@@ -117,37 +117,29 @@ impl Plugin for DeathrunEdit {
             .insert(crate::trap::placement::SeeThrough::default());
 
         server.register_command(
-            "#newtrap",
+            "#tnew",
             "place a new trap button (type again to put it down)",
             "",
         );
         server.register_command(
-            "#movetrap",
+            "#tmove",
             "move the aimed trap button (type again to put it down)",
             "",
         );
-        server.register_command("#deltrap", "remove the trap at the aimed surface", "");
+        server.register_command("#tdel", "remove the trap at the aimed surface", "");
         server.register_command(
-            "#cleartrap",
+            "#tclear",
             "remove what the aimed trap does, keep its button",
             "",
         );
         server.register_command(
-            "#edittrap",
+            "#tedit",
             "edit the aimed trap; type again to save and finish",
             "",
         );
-        server.register_command(
-            "#trapinfo",
-            "print info about the trap (size, overhead)",
-            "",
-        );
-        server.register_command("#traptime", "extend duration (default 2 000ms)", "<ms>");
-        server.register_command(
-            "#traptimeout",
-            "set trap timeout (default 20 000ms)",
-            "<ms>",
-        );
+        server.register_command("#tinfo", "print info about the trap (size, overhead)", "");
+        server.register_command("#ttime", "extend duration (default 2 000ms)", "<ms>");
+        server.register_command("#ttimeout", "set trap timeout (default 20 000ms)", "<ms>");
 
         // Matches how play.rs reads the map: playerstart attr 2 is the team,
         // and good players finish by touching any flag.
@@ -576,14 +568,14 @@ impl Plugin for DeathrunEdit {
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
         const TRAP_COMMANDS: [&str; 8] = [
-            "#newtrap",
-            "#movetrap",
-            "#deltrap",
-            "#cleartrap",
-            "#edittrap",
-            "#trapinfo",
-            "#traptime",
-            "#traptimeout",
+            "#tnew",
+            "#tmove",
+            "#tdel",
+            "#tclear",
+            "#tedit",
+            "#tinfo",
+            "#ttime",
+            "#ttimeout",
         ];
         let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
         if !TRAP_COMMANDS.contains(&cmd) {
@@ -619,10 +611,10 @@ impl Plugin for DeathrunEdit {
         let origin = [pos.x, pos.y, pos.z + 14.0];
 
         match cmd {
-            "#newtrap" => {
+            "#tnew" => {
                 return crate::trap::place::command(&server, id, Kind::New, origin, ray);
             }
-            "#movetrap" => {
+            "#tmove" => {
                 return crate::trap::place::command(&server, id, Kind::Move, origin, ray);
             }
             _ => {}
@@ -647,20 +639,20 @@ impl Plugin for DeathrunEdit {
         };
 
         // Finishing an edit works wherever the player aims.
-        if cmd == "#edittrap" {
+        if cmd == "#tedit" {
             return crate::trap::cmd_edittrap(ctx, hit_pt);
         }
         let Some(hit_pt) = hit_pt else {
             return;
         };
 
-        if cmd == "#deltrap" {
+        if cmd == "#tdel" {
             cmd_deltrap(ctx, hit_pt);
-        } else if cmd == "#cleartrap" {
+        } else if cmd == "#tclear" {
             crate::trap::cmd_cleartrap(ctx, hit_pt);
-        } else if cmd == "#trapinfo" {
+        } else if cmd == "#tinfo" {
             crate::trap::cmd_trapinfo(ctx, hit_pt);
-        } else if cmd == "#traptime" {
+        } else if cmd == "#ttime" {
             let time = args
                 .get(1)
                 .and_then(|s| s.as_str())
@@ -669,7 +661,7 @@ impl Plugin for DeathrunEdit {
                 Some(t) => crate::trap::cmd_traptime(ctx, hit_pt, t),
                 None => crate::trap::cmd_traptime_print(ctx, hit_pt),
             }
-        } else if cmd == "#traptimeout" {
+        } else if cmd == "#ttimeout" {
             let timeout = args
                 .get(1)
                 .and_then(|s| s.as_str())
