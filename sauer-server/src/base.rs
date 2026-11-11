@@ -248,7 +248,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
                 let resp = ServerQueryResponse::ServerInfo {
                     ping_id: *ping_id,
-                    num_clients: server.client_count() as i32,
+                    num_clients: server.joined_count() as i32,
                     protocol_version: sauer_proto::PROTOCOL_VERSION,
                     game_mode: gamemode,
                     remaining_time: 0, // TODO
@@ -926,7 +926,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let change = match server.master_mode() {
             MasterMode::Open => {
-                let total_clients = server.client_count();
+                let total_clients = server.joined_count();
                 let mut game = server.game.write();
                 game.map_votes.insert(id, packet.map_name.clone());
                 let votes = game.map_votes.values().filter(|v| **v == packet.map_name);
@@ -1042,7 +1042,7 @@ impl<P: Plugin> Plugin for Base<P> {
             .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(false);
 
-        let num_players = server.client_count();
+        let num_players = server.joined_count();
         let mut game = server.game.write();
         if !game.items.is_awaiting_list() || is_spectator {
             return Flow::Continue;
@@ -1061,7 +1061,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
         let idx = packet.item_index as usize;
-        let num_players = server.client_count();
+        let num_players = server.joined_count();
 
         // Checked and taken under one items lock, so two players can't both
         // get the item and a map change can't empty the list in between.

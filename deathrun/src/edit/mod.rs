@@ -310,7 +310,7 @@ impl Plugin for DeathrunEdit {
         let server = ctx.server();
 
         // First one in gets master and locks the server, so nobody joins in on their editing.
-        if server.client_count() == 1 {
+        if server.joined_count() == 1 {
             server.set_privilege(id, Privilege::Master);
             server.set_master_mode(MasterMode::Locked);
         }

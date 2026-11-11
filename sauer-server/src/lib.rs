@@ -245,8 +245,14 @@ impl Server {
             .collect()
     }
 
+    /// Every connected peer, joined or not.
     pub fn client_count(&self) -> usize {
         self.clients.len()
+    }
+
+    /// Clients that finished joining, like the engine's `numclients`.
+    pub fn joined_count(&self) -> usize {
+        self.clients.iter().filter(|e| e.value().joined()).count()
     }
 }
 

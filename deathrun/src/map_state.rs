@@ -7,7 +7,7 @@ pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
         let item_type = sauer_proto::data::ItemType::try_from(ent.ent_type).ok()?;
         Some((i, item_type))
     });
-    let num_players = server.client_count();
+    let num_players = server.joined_count();
     server.game.write().items.load(items, num_players);
 }
 
