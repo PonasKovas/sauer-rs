@@ -340,12 +340,10 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     }
 
     // The header field is only a "has blendmap" flag. The blendmap itself is a
-    // quadtree (engine `loadblendmap`), kept here as its raw serialized bytes.
+    // quadtree (engine `loadblendmap`).
     let mut blendmap = None;
     if version >= 28 && has_blendmap {
-        let mut bdata = Vec::new();
-        crate::blendmap::read_node(&mut cursor, &mut bdata, 0)?;
-        blendmap = Some(bdata);
+        blendmap = Some(crate::blendmap::read(&mut cursor, 0)?);
     }
 
     Ok(OgzMap {

@@ -36,8 +36,8 @@ pub struct OgzMap {
     pub lightmaps: Vec<Lightmap>,
     pub pvs: Option<pvs::Pvs>,
 
-    /// The blendmap quadtree as its raw serialized bytes, if the map has one.
-    pub blendmap: Option<Vec<u8>>,
+    /// The blendmap quadtree, if the map has one.
+    pub blendmap: Option<blendmap::BlendNode>,
 }
 
 impl OgzMap {

@@ -193,8 +193,8 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
     if let Some(pvs) = map.pvs.as_ref().filter(|_| num_pvs > 0) {
         crate::pvs::write(&mut encoder, pvs)?;
     }
-    if let Some(ref bdata) = map.blendmap {
-        encoder.write_all(bdata)?;
+    if let Some(ref blendmap) = map.blendmap {
+        crate::blendmap::write(&mut encoder, blendmap)?;
     }
 
     let gz_encoder = encoder.into_inner().map_err(|e| e.into_error())?;

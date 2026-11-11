@@ -37,7 +37,7 @@ pub struct Map {
     pub extra_game_data: Vec<u8>,
     pub mru_textures: Vec<u16>,
     pub pvs: Option<ogz_rs::pvs::Pvs>,
-    pub blendmap: Option<Vec<u8>>,
+    pub blendmap: Option<ogz_rs::blendmap::BlendNode>,
 }
 
 impl Map {
@@ -284,9 +284,7 @@ impl Map {
         self.size *= 2;
         // Its view cells cover the old world size.
         self.pvs = None;
-        if let Some(data) = &self.blendmap {
-            self.blendmap = Some(ogz_rs::blendmap::enlarged(data));
-        }
+        self.blendmap = self.blendmap.take().map(|b| b.enlarged());
     }
 
     /// The bottom octants the engine fills with rock when enlarging to the
