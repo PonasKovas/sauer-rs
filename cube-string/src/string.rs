@@ -385,7 +385,7 @@ impl Index<RangeToInclusive<usize>> for CubeString {
 #[cfg(feature = "serde")]
 mod serde_impl {
     use crate::CubeString;
-    use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
     impl Serialize for super::CubeString {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

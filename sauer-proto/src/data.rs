@@ -107,7 +107,8 @@ impl crate::internal::SauerRead for SelInfo {
 }
 
 make_enum!([i32] SetTeamReason {
-    Switched = 0, Forced = 1,
+    /// Not announced (the engine uses it for spectators and the welcome).
+    Silent = -1, Switched = 0, Forced = 1,
 });
 
 make_enum!([i32] Gun {

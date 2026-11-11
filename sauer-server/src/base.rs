@@ -8,7 +8,7 @@ use crate::{
     players::{clear_player, init_player},
     plugin::{Context, Flow, Plugin},
 };
-use cube_string::{CubeString, IntoCubeStringLossy};
+use cube_string::{CubeStr, CubeString, IntoCubeStringLossy};
 use sauer_proto::{
     Client, channel0,
     channel1::{
@@ -30,6 +30,42 @@ pub(crate) struct Base<P: Plugin> {
 impl<P: Plugin> Base<P> {
     pub(crate) fn new(plugin: Weak<(P, Base<P>)>) -> Self {
         Self { plugin }
+    }
+
+    /// Engine `N_SWITCHTEAM`/`N_SETTEAM`: in team modes, moves `target` to the
+    /// filtered `team`, killing them first if alive.
+    async fn change_team(
+        &self,
+        ctx: &mut Context,
+        target: u64,
+        team: &CubeStr,
+        reason: SetTeamReason,
+    ) {
+        let server = ctx.server().clone();
+        let team = team.filter_text(false, MAX_TEAM_LEN);
+        if !server.game.read().mode.has_teams() || team.as_bytes().is_empty() {
+            return;
+        }
+        let Some((same, spectator)) = server
+            .players
+            .with(target, |p| (p.team == team, p.status == Status::Spectator))
+        else {
+            return;
+        };
+        if same {
+            return;
+        }
+        if server.kill_player(target) {
+            if let Some(plugin) = self.plugin.upgrade() {
+                plugin.on_player_died(ctx, target, target).await;
+            }
+        }
+        // A spectator switching teams is not announced.
+        let reason = match reason {
+            SetTeamReason::Switched if spectator => SetTeamReason::Silent,
+            r => r,
+        };
+        server.set_team(target, team, reason);
     }
 }
 
@@ -60,8 +96,20 @@ fn reopen_if_masterless(server: &Server) {
     }
 }
 
+/// Engine `MAXNAMELEN`.
+const MAX_NAME_LEN: usize = 15;
 /// Engine `MAXTEAMLEN`.
 const MAX_TEAM_LEN: usize = 4;
+
+/// A client's name the way the engine keeps it: filtered and never empty.
+fn clean_name(name: &CubeStr) -> CubeString {
+    let name = name.filter_text(false, MAX_NAME_LEN);
+    if name.as_bytes().is_empty() {
+        "unnamed".lossy_cubestring()
+    } else {
+        name
+    }
+}
 
 fn priv_name(p: Privilege) -> &'static str {
     match p {
@@ -337,7 +385,7 @@ impl<P: Plugin> Plugin for Base<P> {
             return Flow::Continue;
         }
 
-        server.init_name(id, packet.name.clone());
+        server.init_name(id, clean_name(&packet.name));
         server.init_model(id, packet.player_model);
 
         if server.master_mode() == MasterMode::Locked
@@ -562,7 +610,8 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn text(&self, ctx: &mut Context, packet: &channel1::Text) -> Flow {
         let id = ctx.id();
-        let bytes = packet.text.as_bytes();
+        let text = packet.text.filter_text(true, usize::MAX);
+        let bytes = text.as_bytes();
 
         if bytes.first() == Some(&b'#') {
             let args = parse_command_args(bytes);
@@ -592,7 +641,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 let _ = plugin.on_command(ctx, &args).await;
             }
         } else {
-            let mut text = packet.text.clone();
+            let mut text = text.clone();
             let flow = match self.plugin.upgrade() {
                 Some(plugin) => plugin.on_chat(ctx, &mut text).await,
                 None => Flow::Continue,
@@ -606,8 +655,40 @@ impl<P: Plugin> Plugin for Base<P> {
         Flow::Continue
     }
 
+    /// Engine `N_SAYTEAM`: in team modes, sent only to playing teammates.
+    async fn say_team(&self, ctx: &mut Context, packet: &channel1::SayTeamClient) -> Flow {
+        let id = ctx.id();
+        let server = ctx.server();
+        let Some(cn) = server.get_cn(id) else {
+            return Flow::Continue;
+        };
+        let Some((team, spectator)) = server
+            .players
+            .with(id, |p| (p.team.clone(), p.status == Status::Spectator))
+        else {
+            return Flow::Continue;
+        };
+        if (spectator && server.get_privilege(id) < Privilege::Master)
+            || !server.game.read().mode.has_teams()
+            || team.as_bytes().is_empty()
+        {
+            return Flow::Continue;
+        }
+        let packet = channel1::SayTeamServer {
+            client_num: cn,
+            text: packet.text.filter_text(true, usize::MAX),
+        };
+        info!("[TEAM {team}] {}: {}", server.player_name(id), packet.text);
+        for to in server.players.filter_map(|other, p| {
+            (other != id && p.status != Status::Spectator && p.team == team).then_some(other)
+        }) {
+            server.send(to, &packet);
+        }
+        Flow::Continue
+    }
+
     async fn switch_name(&self, ctx: &mut Context, packet: &channel1::SwitchName) -> Flow {
-        ctx.server().set_name(ctx.id(), packet.name.clone());
+        ctx.server().set_name(ctx.id(), clean_name(&packet.name));
         Flow::Continue
     }
 
@@ -617,8 +698,8 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn switch_team(&self, ctx: &mut Context, packet: &channel1::SwitchTeam) -> Flow {
-        ctx.server()
-            .set_team(ctx.id(), packet.team.clone(), SetTeamReason::Switched);
+        self.change_team(ctx, ctx.id(), &packet.team, SetTeamReason::Switched)
+            .await;
         Flow::Continue
     }
 
@@ -832,28 +913,14 @@ impl<P: Plugin> Plugin for Base<P> {
     /// Engine `N_SETTEAM`: masters move players between teams in team modes.
     async fn set_team(&self, ctx: &mut Context, packet: &channel1::SetTeamClient) -> Flow {
         let server = ctx.server();
-        if server.get_privilege(ctx.id()) < Privilege::Master
-            || !server.game.read().mode.has_teams()
-            || packet.team.as_bytes().is_empty()
-        {
+        if server.get_privilege(ctx.id()) < Privilege::Master {
             return Flow::Continue;
         }
         let Some(target) = server.get_id(packet.client_num) else {
             return Flow::Continue;
         };
-        let stripped = packet.team.strip_colors();
-        let team = CubeString::from_bytes(
-            stripped
-                .as_bytes()
-                .iter()
-                .take(MAX_TEAM_LEN)
-                .copied()
-                .collect(),
-        );
-        let same = server.players.with(target, |p| p.team == team);
-        if same == Some(false) {
-            server.set_team(target, team, SetTeamReason::Forced);
-        }
+        self.change_team(ctx, target, &packet.team, SetTeamReason::Forced)
+            .await;
         Flow::Continue
     }
 

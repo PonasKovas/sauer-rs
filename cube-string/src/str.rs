@@ -195,6 +195,36 @@ impl CubeStr {
         result
     }
 
+    /// Engine `filtertext`, applied to names, teams and chat from clients.
+    /// Drops `\f` color codes and control bytes. Whitespace (tab, newlines,
+    /// space) is kept as a plain space if `whitespace`, else dropped. Stops
+    /// after `max_len` bytes.
+    ///
+    /// ```
+    /// use cube_string::CubeString;
+    ///
+    /// let s = CubeString::from_str_lossy("\x0c3red\nnew line");
+    /// assert_eq!(s.filter_text(true, usize::MAX).to_utf8(), "red new line");
+    /// assert_eq!(s.filter_text(false, 6).to_utf8(), "rednew");
+    /// ```
+    pub fn filter_text(&self, whitespace: bool, max_len: usize) -> CubeString {
+        let mut result = CubeString::with_capacity(self.len().min(max_len));
+        let mut bytes = self.0.iter().copied();
+        while result.len() < max_len {
+            let Some(c) = bytes.next() else { break };
+            match c {
+                COLOR_ESCAPE => {
+                    bytes.next();
+                }
+                0 => break,
+                b'\t'..=b'\r' | b' ' if whitespace => result.push(b' '),
+                b'\t'..=b'\r' | b' ' => {}
+                _ => result.push(c),
+            }
+        }
+        result
+    }
+
     /// Returns an iterator over the color segments of this string.
     ///
     /// A color segment is a slice of text with an associated color.
