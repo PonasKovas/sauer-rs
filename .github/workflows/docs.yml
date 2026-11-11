@@ -34,8 +34,25 @@ jobs:
         run: cargo clean --doc
       - name: Build docs
         run: cargo doc --no-deps
-      - name: Add redirect
-        run: echo '<meta http-equiv="refresh" content="0;url=cube_string/index.html">' > target/doc/index.html
+      - name: Install rust-script
+        run: cargo install rust-script --locked
+      - name: Build Lua docs
+        run: ./gen-lua-docs.rs sauer-plugin-lua/src target/doc/lua-api
+      - name: Add index page
+        run: |
+          {
+            echo '<!doctype html><meta charset="utf-8"><title>sauer-rs docs</title>'
+            echo '<h1>sauer-rs docs</h1>'
+            echo '<h2>Lua plugin API</h2><ul>'
+            echo '<li><a href="lua-api/index.html">Reference</a></li>'
+            echo '<li><a href="lua-api/sauer.lua">sauer.lua</a> (EmmyLua stubs for your editor)</li>'
+            echo '</ul><h2>Rust crates</h2><ul>'
+            for f in target/doc/*/index.html; do
+              c=$(basename "$(dirname "$f")")
+              [ "$c" = lua-api ] || [ "$c" = src ] || [ "$c" = static.files ] || echo "<li><a href=\"$c/index.html\">$c</a></li>"
+            done
+            echo '</ul>'
+          } > target/doc/index.html
       - name: Remove lock file
         run: rm target/doc/.lock
       - name: Upload artifact
