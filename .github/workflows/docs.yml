@@ -18,6 +18,13 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@nightly
+      # Same lenet-rs and elan setup as rust.yml.
+      - name: Check out lenet-rs
+        run: git clone --depth 1 https://github.com/PonasKovas/lenet-rs ../lenet-rs
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Configure cache
         uses: Swatinem/rust-cache@v2
       - name: Setup pages

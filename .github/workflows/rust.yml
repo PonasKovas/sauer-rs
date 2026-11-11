@@ -16,6 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+      # The workspace uses lenet-rs from a sibling folder, and lenet-sys
+      # builds the Lean Lenet library, which needs elan.
+      - name: Check out lenet-rs
+        run: git clone --depth 1 https://github.com/PonasKovas/lenet-rs ../lenet-rs
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Build
         run: cargo build --verbose --workspace
       - name: Run tests
