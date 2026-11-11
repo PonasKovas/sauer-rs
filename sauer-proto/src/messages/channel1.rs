@@ -1,8 +1,8 @@
 use crate::ParseError;
 use crate::Session;
 use crate::data;
-use crate::data::*;
 use crate::data::tex_ref;
+use crate::data::*;
 use crate::error::ParseResultExt;
 use crate::internal::SauerReadStateful;
 use crate::internal::macros::{make_packet_enum, make_struct};
@@ -10,9 +10,8 @@ use crate::internal::{
     SauerRead, SauerWrite, check_tag,
     constants::*,
     primitives::{
-        read_neg_term_seq, read_nonpos_term_seq, read_vslot_block,
-        read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq,
-        write_vslot_block, write_varint_pref_seq,
+        read_neg_term_seq, read_nonpos_term_seq, read_varint_pref_seq, read_vslot_block,
+        write_neg_term_seq, write_nonpos_term_seq, write_varint_pref_seq, write_vslot_block,
     },
 };
 use crate::route::{C2S, Chan1, S2C};
@@ -703,10 +702,11 @@ make_struct!(
 });
 
 make_struct!(
-/// `N_CLIPBOARD` Pushes map clipboard data (for cooperative editing) to the client.
+/// `N_CLIPBOARD` Pushes a client's clipboard (for cooperative editing) to the others.
+/// `None` clears it.
 [N_CLIPBOARD] ClipboardServer {
     client_num: i32,
-    payload: ClipboardPayload,
+    payload: Option<ClipboardPayload>,
 });
 
 make_struct!(
@@ -1381,9 +1381,10 @@ make_struct!(
 });
 
 make_struct!(
-/// `N_CLIPBOARD` Coop Edit: Uploads raw clipboard geometry data.
+/// `N_CLIPBOARD` Coop Edit: Uploads the clipboard. `None` when the copy was too big
+/// to pack, which clears it.
 [N_CLIPBOARD] ClipboardClient {
-    payload: ClipboardPayload,
+    payload: Option<ClipboardPayload>,
 });
 
 make_struct!(

@@ -43,7 +43,7 @@ fn say(server: &Server, id: u64, text: String) {
 pub fn payload_size(payload: &ClipboardPayload) -> usize {
     let packet = channel1::ClipboardServer {
         client_num: 0,
-        payload: payload.clone(),
+        payload: Some(payload.clone()),
     };
     let mut buf = Vec::new();
     <channel1::ClipboardServer as Encode<S2C<Chan1>>>::encode(&packet, &mut buf);

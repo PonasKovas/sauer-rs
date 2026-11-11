@@ -1265,11 +1265,11 @@ impl Plugin for DeathrunEdit {
 }
 
 fn undo_redo(ctx: &Context, payload: &sauer_proto::data::UndoPayload) {
-    match &payload.data {
-        sauer_proto::data::UndoData::Cubes { sel, .. } => {
+    match payload {
+        sauer_proto::data::UndoPayload::Cubes { sel, .. } => {
             guard::geometry_edit(ctx, sel.bounds(), |map| map.apply_undo_redo(payload));
         }
-        sauer_proto::data::UndoData::Entities(ents) => {
+        sauer_proto::data::UndoPayload::Entities(ents) => {
             let ids: Vec<usize> = ents.iter().map(|ue| ue.index as usize).collect();
             guard::entity_edit(ctx, &ids, |map| map.apply_undo_redo(payload));
         }

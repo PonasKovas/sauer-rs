@@ -834,7 +834,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 id,
                 &ClipboardServer {
                     client_num: owner_cn,
-                    payload,
+                    payload: Some(payload),
                 },
             );
         }
@@ -1317,19 +1317,14 @@ impl<P: Plugin> Plugin for Base<P> {
             return;
         }
 
-        if packet.payload.nodes.is_empty() {
-            if let Some(mut p) = server.players.try_get_mut(id) {
-                p.clipboard = None;
-            }
-            return;
-        }
-
         if let Some(mut p) = server.players.try_get_mut(id) {
-            p.clipboard = Some(ClipboardData {
-                payload: packet.payload.clone(),
-            });
+            p.clipboard = packet
+                .payload
+                .clone()
+                .map(|payload| ClipboardData { payload });
         }
 
+        // An empty one is passed on too, so others drop their copy.
         if let Some(cn) = server.get_cn(id) {
             server.broadcast_except_chan1(
                 id,

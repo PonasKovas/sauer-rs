@@ -1,7 +1,7 @@
 use crate::{Map, Node};
 use ogz_rs::data::{VSlot, VSlotProps};
 use sauer_proto::data::ClipboardPayload;
-use sauer_proto::data::clipboard::VSlotData;
+use sauer_proto::data::VSlotData;
 
 pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VSlotData> {
     let mut used = vec![false; vslots.len().max(65536)];
@@ -71,7 +71,6 @@ pub fn generate_clipboard_for_region(
 
     let vs = extract_vslots(&nodes, &map.vslots);
     ClipboardPayload {
-        unpack_len: 0,
         sel: sauer_core::Selection {
             o: sauer_core::Vec3 {
                 x: padded_min[0],

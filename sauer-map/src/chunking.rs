@@ -2,7 +2,7 @@ use crate::Map;
 use sauer_proto::Encode;
 use sauer_proto::channel1::ClipboardServer;
 use sauer_proto::data::ClipboardPayload;
-use sauer_proto::data::clipboard::MAX_CLIENT_UNPACK_LEN;
+use sauer_proto::data::MAX_CLIENT_UNPACK_LEN;
 use sauer_proto::route::{Chan1, S2C};
 
 /// Splits the region into clipboards whose packets fit in `max_bytes`
@@ -54,7 +54,7 @@ fn do_chunk(
         && (max_bytes == usize::MAX || {
             let packet = ClipboardServer {
                 client_num: 0,
-                payload: payload.clone(),
+                payload: Some(payload.clone()),
             };
             let mut buf = Vec::new();
             <ClipboardServer as Encode<S2C<Chan1>>>::encode(&packet, &mut buf);

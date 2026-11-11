@@ -1,7 +1,7 @@
 use crate::Node;
 use ogz_rs::data::{VSlot, VSlotProps};
-use sauer_proto::data::clipboard::VSlotData;
 use sauer_proto::data::TexRef;
+use sauer_proto::data::VSlotData;
 use std::collections::HashMap;
 
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
@@ -155,10 +155,7 @@ pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &m
     }
     let mut map = HashMap::new();
     for (vd, root) in incoming {
-        map.insert(
-            vd.index,
-            resolve_vslot(vslots, root, &vd.vslot, false),
-        );
+        map.insert(vd.index, resolve_vslot(vslots, root, &vd.vslot, false));
     }
     if map.is_empty() {
         return;

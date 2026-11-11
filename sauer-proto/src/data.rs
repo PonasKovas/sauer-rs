@@ -8,7 +8,7 @@ use num_enum::TryFromPrimitive;
 
 mod base_info;
 mod base_spawn;
-pub mod clipboard;
+mod clipboard;
 mod direction;
 mod edit_var_value;
 mod flag_state;
@@ -18,7 +18,7 @@ mod vslot;
 
 pub use base_info::BaseInfo;
 pub use base_spawn::BaseSpawn;
-pub use clipboard::{ClipboardPayload, UndoData, UndoEntity, UndoPayload};
+pub use clipboard::{ClipboardPayload, MAX_CLIENT_UNPACK_LEN, UndoEntity, UndoPayload, VSlotData};
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
 pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};

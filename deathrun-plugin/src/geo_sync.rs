@@ -20,7 +20,7 @@ fn paste_packets(
         },
         channel1::ClipboardServer {
             client_num: owner_cn,
-            payload,
+            payload: Some(payload),
         },
         Client {
             client_num: owner_cn,

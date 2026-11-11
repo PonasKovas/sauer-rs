@@ -694,8 +694,8 @@ impl Map {
     /// Rolls geometry back to a previously stored Undo/Redo state snapshot.
     /// Returns `false` if the rollback was rejected because it intersected a protected region.
     pub fn apply_undo_redo(&mut self, payload: &sauer_proto::data::UndoPayload) -> bool {
-        match &payload.data {
-            sauer_proto::data::UndoData::Cubes {
+        match payload {
+            sauer_proto::data::UndoPayload::Cubes {
                 sel, nodes, vslots, ..
             } => {
                 let (min, max) = sel.bounds();
@@ -708,7 +708,7 @@ impl Map {
                 self.apply_block(sel, nodes, false);
                 true
             }
-            sauer_proto::data::UndoData::Entities(ents) => {
+            sauer_proto::data::UndoPayload::Entities(ents) => {
                 // Ensure none of the entities touch a protected region
                 for ue in ents {
                     let pos = ue.ent.position;
@@ -780,7 +780,6 @@ impl Map {
         let vslots = crate::clipboard::extract_vslots(&extracted_nodes, &self.vslots);
 
         sauer_proto::data::ClipboardPayload {
-            unpack_len: 0,
             sel: sel.clone(),
             nodes: extracted_nodes,
             vslots,

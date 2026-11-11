@@ -34,6 +34,9 @@ pub enum ParseError {
     #[error("Value {value} out of range (max {max})")]
     ValueOutOfRange { value: i32, max: i32 },
 
+    #[error("bad zlib data in an edit block")]
+    InvalidZlib,
+
     #[error("extinfo packet invalid")]
     InvalidExtInfo,
 

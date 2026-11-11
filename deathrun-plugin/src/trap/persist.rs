@@ -396,7 +396,8 @@ pub fn load(map: &Map) -> Loaded {
     let Some((generation, bytes)) = sauer_map::param_blob::find_latest(map, TAG) else {
         // Chunks of the pre-vault store had names starting with byte 1.
         let old_store = map.vslots.iter().flatten().any(|vs| {
-            vs.props.params
+            vs.props
+                .params
                 .iter()
                 .any(|p| p.name.as_bytes().first() == Some(&1))
         });
@@ -433,7 +434,6 @@ pub fn load(map: &Map) -> Loaded {
                 clip_s: g.clip_s,
                 clip_grid: g.clip_grid,
                 payload: ClipboardPayload {
-                    unpack_len: 0,
                     sel: vault::sel(g.clip_pos, g.clip_s, g.clip_grid),
                     nodes: Vec::new(),
                     vslots: Vec::new(),

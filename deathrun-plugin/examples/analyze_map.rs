@@ -105,7 +105,9 @@ fn main() {
         println!("\n=== Processing Output ===");
         if args.strip_traps {
             for vs in map.vslots.iter_mut().flatten() {
-                vs.props.params.retain(|p| !is_trap_param(p.name.as_bytes()));
+                vs.props
+                    .params
+                    .retain(|p| !is_trap_param(p.name.as_bytes()));
             }
             println!("Stripped all trap data from all VSlots.");
         }
