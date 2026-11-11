@@ -664,7 +664,7 @@ make_struct!(
     target_cn: Cn,
     gun: Gun,
     damage: i32,
-    dir: Vec3<f32> => data::vec3::write_quantized::<DMF>, data::vec3::read_quantized::<DMF>,
+    dir: Vec3<f32> => data::vec3::write_quantized::<DNF>, data::vec3::read_quantized::<DNF>,
 });
 
 make_struct!(
@@ -798,7 +798,7 @@ make_struct!(
 /// `N_AUTHCHAL` Sends the cryptographic challenge down to the client.
 [N_AUTHCHAL] AuthChal {
     desc: CubeString,
-    id: u32,
+    id: i32,
     challenge: CubeString,
 });
 
@@ -1144,7 +1144,7 @@ make_struct!(
 /// `N_AUTHANS` Provides the mathematical answer to a server's AuthChal.
 [N_AUTHANS] AuthAnswer {
     desc: CubeString,
-    id: u32,
+    id: i32,
     answer: CubeString,
 });
 

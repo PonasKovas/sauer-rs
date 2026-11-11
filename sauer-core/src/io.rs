@@ -101,25 +101,25 @@ pub fn getfloat(reader: &mut &[u8]) -> Option<f32> {
     Some(f32::from_le_bytes(s))
 }
 
+/// Engine `sendstring`: each char goes out with `putint` as a signed char,
+/// so bytes 0x80 and 0x81 take three bytes (they're putint's markers). Stops
+/// at a NUL, which would end the string early on the client.
 pub fn putstring(out: &mut Vec<u8>, s: &[u8]) {
-    for &c in s {
-        putint(out, c as i32);
+    for &c in s.iter().take_while(|&&c| c != 0) {
+        putint(out, c as i8 as i32);
     }
     putint(out, 0);
 }
 
+/// Engine `getstring`: each char comes in with `getint`, cut to a byte.
 pub fn getstring(reader: &mut &[u8]) -> Option<CubeString> {
     let mut string_bytes = Vec::new();
     loop {
-        if reader.is_empty() {
-            return None;
-        }
-        let b = reader[0];
-        *reader = &reader[1..];
-        if b == 0 {
+        let c = getint(reader)? as u8;
+        if c == 0 {
             break;
         }
-        string_bytes.push(b);
+        string_bytes.push(c);
     }
     Some(CubeString::from_bytes(string_bytes))
 }

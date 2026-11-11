@@ -28,7 +28,8 @@ impl<R> Writer<R> {
             main: Vec::new(),
             wrapper: Vec::new(),
             current_wrapper_client: None,
-            is_reliable: true,
+            // Set by the first reliable message; N_POS alone goes out unreliable.
+            is_reliable: false,
             _phantom: PhantomData,
         }
     }

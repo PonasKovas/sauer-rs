@@ -87,8 +87,7 @@ impl SauerRead for f32 {
 
 impl SauerWrite for &CubeStr {
     fn sauer_write(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(self);
-        out.push(0);
+        sauer_core::io::putstring(out, self);
     }
 }
 impl SauerWrite for CubeString {
