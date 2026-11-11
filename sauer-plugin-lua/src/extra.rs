@@ -10,9 +10,10 @@ use std::sync::Arc;
 ///
 /// # Ordering
 ///
-/// `LuaPlugin` must be the **rightmost** (newest) entry in the plugin tuple so
-/// its `init` runs first and `LuaExtraRegistry` is already in `server.extra`
-/// by the time other plugins initialise. Example: `(MyPlugin, LuaPlugin)`.
+/// A plugin tuple runs `init` left to right, and `ServerBuilder::plugin` adds
+/// to the right. So add `LuaPlugin` **before** any plugin that registers here,
+/// and `LuaExtraRegistry` is already in `server.extra` when that plugin
+/// initialises: `.plugin(lua).plugin(my_plugin)`.
 ///
 /// # Example
 ///
@@ -23,7 +24,7 @@ use std::sync::Arc;
 /// // 2. Register in Plugin::init (after LuaPlugin has already run its init).
 /// server.extra
 ///     .get_mut::<LuaExtraRegistry>()
-///     .expect("LuaPlugin must be added after this plugin in the tuple")
+///     .expect("LuaPlugin must be added before this plugin")
 ///     .register("my_data", {
 ///         let d = Arc::clone(&data);
 ///         move |lua| lua.create_userdata(MyWrapper(Arc::clone(&d)))
