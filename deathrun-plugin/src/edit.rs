@@ -862,7 +862,7 @@ impl Plugin for DeathrunEdit {
                     let map = state.map.as_ref().unwrap();
                     let world_size = map.size;
                     let out_bytes = map
-                        .to_ogz_bytes_with(flate2::Compression::fast())
+                        .to_ogz_bytes_merged(flate2::Compression::fast())
                         .map_err(|e: ogz_rs::OgzError| e.to_string())?;
 
                     tracing::info!(

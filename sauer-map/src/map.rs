@@ -135,6 +135,24 @@ impl Map {
         &self,
         compression: flate2::Compression,
     ) -> Result<Vec<u8>, ogz_rs::OgzError> {
+        self.serialize(compression, crate::octree::node_to_ogz(&self.root))
+    }
+
+    /// [`Map::to_ogz_bytes_with`], with faces merged like `remip` does, so
+    /// clients load it faster. Costs a pass over the octree.
+    pub fn to_ogz_bytes_merged(
+        &self,
+        compression: flate2::Compression,
+    ) -> Result<Vec<u8>, ogz_rs::OgzError> {
+        let octree = crate::facemerge::node_to_ogz_merged(&self.root, self.size);
+        self.serialize(compression, octree)
+    }
+
+    fn serialize(
+        &self,
+        compression: flate2::Compression,
+        octree: ogz_rs::data::OctreeNode,
+    ) -> Result<Vec<u8>, ogz_rs::OgzError> {
         let compacted_vslots = self.get_compacted_vslots();
 
         let config = MapConfig::Modern {
@@ -151,7 +169,7 @@ impl Map {
             mru_textures: self.mru_textures.clone(),
             entities: self.entities.clone(),
             vslots: compacted_vslots,
-            octree: crate::octree::node_to_ogz(&self.root),
+            octree,
             lightmaps: self.lightmaps.clone(),
             pvs: self.pvs.clone(),
             blendmap_resolution: self.blendmap_resolution,

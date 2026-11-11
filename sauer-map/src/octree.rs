@@ -1,5 +1,5 @@
 use crate::{Cube, Node};
-use ogz_rs::data::{CubeInfo, ModernSurfaceData, OctreeNode, Surfaces};
+use ogz_rs::data::{CubeInfo, ModernSurfaceData, ModernSurfaces, OctreeNode, Surfaces};
 
 pub fn extract_node_at(
     node: &Node,
@@ -188,30 +188,36 @@ pub fn node_to_ogz(node: &Node) -> OctreeNode {
             let converted = std::array::from_fn(|i| node_to_ogz(&children[i]));
             OctreeNode::Children(Box::new(converted))
         }
-        Node::Leaf(cube) => {
-            let surfaces = Surfaces::Modern(ModernSurfaceData {
-                material: if cube.material != Default::default() {
-                    Some(cube.material)
-                } else {
-                    None
-                },
-                merged: None,
-                surfaces: None,
-            });
-            let info = CubeInfo {
-                textures: cube.textures,
-                surfaces,
-            };
-            if cube.edges == [0x00; 12] {
-                OctreeNode::Empty(info)
-            } else if cube.edges == [0x80; 12] {
-                OctreeNode::Solid(info)
-            } else {
-                OctreeNode::Normal {
-                    info,
-                    edges: cube.edges,
-                }
-            }
+        Node::Leaf(cube) => leaf_to_ogz(cube, None, None),
+    }
+}
+
+pub(crate) fn leaf_to_ogz(
+    cube: &Cube,
+    merged: Option<u8>,
+    surfaces: Option<ModernSurfaces>,
+) -> OctreeNode {
+    let surfaces = Surfaces::Modern(ModernSurfaceData {
+        material: if cube.material != Default::default() {
+            Some(cube.material)
+        } else {
+            None
+        },
+        merged,
+        surfaces,
+    });
+    let info = CubeInfo {
+        textures: cube.textures,
+        surfaces,
+    };
+    if cube.edges == [0x00; 12] {
+        OctreeNode::Empty(info)
+    } else if cube.edges == [0x80; 12] {
+        OctreeNode::Solid(info)
+    } else {
+        OctreeNode::Normal {
+            info,
+            edges: cube.edges,
         }
     }
 }
