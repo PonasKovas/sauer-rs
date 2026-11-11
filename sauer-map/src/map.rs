@@ -195,91 +195,12 @@ impl Map {
         self.pvs.clear();
     }
 
+    /// The vslot table without its trailing empty entries. Unused variants
+    /// stay: emptying one would turn it into a slot base and shift the slot
+    /// of every base after it (see `vslot::slot_of_root`). Clients drop them
+    /// when they compact.
     pub fn get_compacted_vslots(&self) -> Vec<Option<VSlot>> {
-        let mut used = vec![false; self.vslots.len().max(65536)];
-        fn collect(node: &Node, used: &mut Vec<bool>) {
-            match node {
-                Node::Leaf(c) => {
-                    for &t in &c.textures {
-                        used[t as usize] = true;
-                    }
-                }
-                Node::Branch(ch) => {
-                    for c in ch.as_ref() {
-                        collect(c, used);
-                    }
-                }
-            }
-        }
-        collect(&self.root, &mut used);
-
         let mut vslots = self.vslots.clone();
-
-        for i in 0..used.len() {
-            if !used[i] {
-                continue;
-            }
-            let current = i as i32;
-            let mut fuel = 10000;
-            loop {
-                fuel -= 1;
-                if fuel == 0 {
-                    break;
-                }
-                let prev = if let Some(Some(vs)) = vslots.get(current as usize) {
-                    vs.prev
-                } else {
-                    -1
-                };
-                if prev < 0
-                    || (prev as usize) >= used.len()
-                    || used[prev as usize]
-                    || prev == current
-                {
-                    break;
-                }
-
-                let prev_prev = if let Some(Some(p)) = vslots.get(prev as usize) {
-                    p.prev
-                } else {
-                    -1
-                };
-
-                if prev_prev < 0 || prev_prev == prev {
-                    break;
-                }
-
-                if let Some(Some(vs)) = vslots.get_mut(current as usize) {
-                    vs.prev = prev_prev;
-                }
-            }
-        }
-
-        let mut to_check: Vec<usize> = (0..used.len()).filter(|&i| used[i]).collect();
-        while let Some(idx) = to_check.pop() {
-            if let Some(Some(vs)) = vslots.get(idx) {
-                if let Some(layer) = vs.layer {
-                    let l = layer as usize;
-                    if l < used.len() && !used[l] {
-                        used[l] = true;
-                        to_check.push(l);
-                    }
-                }
-                if vs.prev >= 0 {
-                    let p = vs.prev as usize;
-                    if p < used.len() && !used[p] {
-                        used[p] = true;
-                        to_check.push(p);
-                    }
-                }
-            }
-        }
-
-        for i in 0..vslots.len() {
-            if i < used.len() && !used[i] {
-                vslots[i] = None;
-            }
-        }
         while vslots.last() == Some(&None) {
             vslots.pop();
         }
@@ -370,7 +291,8 @@ impl Map {
         slot: u16,
         ds: &VSlotDelta,
     ) -> u16 {
-        let idx = crate::vslot::resolve_vslot(&mut self.vslots, slot, ds, false);
+        let root = crate::vslot::root_of_slot(&self.vslots, slot);
+        let idx = crate::vslot::resolve_vslot(&mut self.vslots, root, ds, false);
         self.set_texture(sel, idx, all_faces);
         idx
     }

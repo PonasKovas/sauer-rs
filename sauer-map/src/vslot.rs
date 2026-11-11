@@ -28,6 +28,31 @@ pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
     }
 }
 
+/// The texture slot whose base is the unchanged vslot `root` (an index the
+/// table has as `None`). The engine hands slots their base vslot by counting
+/// unchanged vslots in index order (`emptyvslot` in texture.cpp), so a map
+/// with variants stored below `root` (saved by a client with fewer texture
+/// slots) has them differ.
+pub fn slot_of_root(vslots: &[Option<VSlot>], root: i32) -> i32 {
+    let below = &vslots[..(root.max(0) as usize).min(vslots.len())];
+    root - below.iter().filter(|v| v.is_some()).count() as i32
+}
+
+/// The unchanged vslot that is the base of texture `slot`, the inverse of
+/// [`slot_of_root`].
+pub fn root_of_slot(vslots: &[Option<VSlot>], slot: u16) -> u16 {
+    let mut left = slot as usize;
+    for (i, v) in vslots.iter().enumerate() {
+        if v.is_none() {
+            if left == 0 {
+                return i as u16;
+            }
+            left -= 1;
+        }
+    }
+    (vslots.len() + left) as u16
+}
+
 pub fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
     let mut is_parent = vec![false; vslots.len()];
     for vs_opt in vslots.iter() {
@@ -171,26 +196,10 @@ pub fn lookup_vslot(
         return None;
     }
 
-    let mut insert_idx = None;
-    let min_safe_idx = 1704;
-    for i in min_safe_idx..vslots.len() {
-        if vslots[i].is_none() {
-            insert_idx = Some(i);
-            break;
-        }
-    }
-
-    if let Some(idx) = insert_idx {
-        vslots[idx] = Some(new_vs);
-        Some(idx as u16)
-    } else {
-        if vslots.len() < min_safe_idx {
-            vslots.resize(min_safe_idx, None);
-        }
-        let idx = vslots.len();
-        vslots.push(Some(new_vs));
-        Some(idx as u16)
-    }
+    // Always at the end: an empty entry is some slot's base (see
+    // `slot_of_root`), and filling it would shift every slot after it.
+    vslots.push(Some(new_vs));
+    Some((vslots.len() - 1) as u16)
 }
 
 /// The props of a vslot as a full (non-delta) description.
@@ -228,26 +237,33 @@ pub fn unpack_tex(
         return Some(tex as u16);
     }
     let ds = VSlotDelta::read(extra).ok()?;
-    let slot = (tex & 0xFFFF) as u16;
+    let root = root_of_slot(vslots, (tex & 0xFFFF) as u16);
     if ds.is_empty() {
-        return Some(slot);
+        return Some(root);
     }
-    lookup_vslot(vslots, slot, &ds, false, insert)
+    lookup_vslot(vslots, root, &ds, false, insert)
 }
 
 /// Brings a client's packed vslots (from a clipboard or undo block) into this
 /// table, like the engine's `unpackvslots`, and points `nodes` at them.
-/// Texture indices without packed data are the same on every client (plain
-/// slots), so they are left alone.
+/// Texture indices without packed data are left alone, like the engine does.
 pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &mut [Node]) {
-    let mut map = HashMap::new();
-    for vd in incoming {
-        if vd.index == 0 || vd.slot == 0 {
-            continue; // engine: end marker / sky can't be edited
+    let incoming: Vec<_> = incoming
+        .iter()
+        .filter(|vd| vd.index != 0 && vd.slot != 0) // engine: end marker / sky can't be edited
+        .map(|vd| (vd, root_of_slot(vslots, vd.slot)))
+        .collect();
+    // Bases past the end must exist before variants get appended there.
+    if let Some(max) = incoming.iter().map(|(_, r)| *r as usize).max() {
+        if vslots.len() <= max {
+            vslots.resize(max + 1, None);
         }
+    }
+    let mut map = HashMap::new();
+    for (vd, root) in incoming {
         map.insert(
             vd.index,
-            resolve_vslot(vslots, vd.slot, &to_delta(&vd.vslot), false),
+            resolve_vslot(vslots, root, &to_delta(&vd.vslot), false),
         );
     }
     if map.is_empty() {

@@ -23,18 +23,25 @@ pub(crate) fn extract_vslots(nodes: &[Node], vslots: &[Option<VSlot>]) -> Vec<VS
         collect(node, &mut used);
     }
 
+    // Slots go by the engine's slot number, not our base index (see
+    // `vslot::slot_of_root`). Plain textures are sent too where the two
+    // differ: clients that compacted their vslots number bases by slot.
     let mut out = Vec::new();
-    for idx in 0..used.len() {
-        if used[idx] {
-            if let Some(Some(vs)) = vslots.get(idx) {
-                let slot = crate::vslot::root_base_of(vslots, idx as u16);
-                out.push(VSlotData {
-                    index: idx as u16,
-                    slot: slot as u16,
-                    vslot: vs.clone(),
-                });
-            }
+    for idx in 1..used.len() {
+        if !used[idx] {
+            continue;
         }
+        let vslot = match vslots.get(idx) {
+            Some(Some(vs)) => vs.clone(),
+            _ if crate::vslot::slot_of_root(vslots, idx as i32) == idx as i32 => continue,
+            _ => VSlot::default(),
+        };
+        let root = crate::vslot::root_base_of(vslots, idx as u16);
+        out.push(VSlotData {
+            index: idx as u16,
+            slot: crate::vslot::slot_of_root(vslots, root) as u16,
+            vslot,
+        });
     }
     out
 }

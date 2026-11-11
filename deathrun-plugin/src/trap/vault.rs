@@ -175,7 +175,8 @@ pub fn sel(o: [i32; 3], s: [i32; 3], grid: i32) -> Selection {
 fn fill_rock(map: &mut Map, origin: [i32; 3], size: i32) {
     let s = sel(origin, [1; 3], size);
     map.fill(&s, true);
-    map.set_texture(&s, ANCHOR_SLOT, true);
+    let rock = sauer_map::vslot::root_of_slot(&map.vslots, ANCHOR_SLOT);
+    map.set_texture(&s, rock, true);
 }
 
 /// Removes a vault, leaving plain air (what enlarging adds).
