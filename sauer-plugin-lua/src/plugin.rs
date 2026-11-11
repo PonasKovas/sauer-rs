@@ -178,7 +178,7 @@ impl Plugin for LuaPlugin {
         self.dispatch(&self.callbacks.on_command, |_| {
             let table = self.lua.create_table()?;
             for (i, arg) in args.iter().enumerate() {
-                table.raw_set(i + 1, self.lua.create_string(arg.as_bytes())?)?;
+                table.raw_set(i + 1, &**arg)?;
             }
             (ctx.id(), table).into_lua_multi(&self.lua)
         })

@@ -379,8 +379,11 @@ impl Index<RangeToInclusive<usize>> for CubeString {
 }
 
 #[cfg(feature = "serde")]
+/// Every byte maps to its own char, color codes included, so a string
+/// comes back exactly as it was saved.
 mod serde_impl {
-    use crate::CubeString;
+    use crate::{CubeString, raw};
+    use alloc::string::String;
     use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
     impl Serialize for super::CubeString {
@@ -388,7 +391,8 @@ mod serde_impl {
         where
             S: Serializer,
         {
-            serializer.serialize_str(&self.to_utf8())
+            let s: String = self.as_bytes().iter().map(|&b| raw::cube2uni(b)).collect();
+            serializer.serialize_str(&s)
         }
     }
 
@@ -397,8 +401,9 @@ mod serde_impl {
         where
             D: Deserializer<'de>,
         {
-            let s = <&str>::deserialize(deserializer)?;
-            let cube = CubeString::from_str(s).map_err(Error::custom)?;
+            // Owned: a format that unescapes (TOML, JSON) can't lend a `&str`.
+            let s = String::deserialize(deserializer)?;
+            let cube = CubeString::from_str(&s).map_err(Error::custom)?;
 
             Ok(cube)
         }
