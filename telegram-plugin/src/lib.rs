@@ -1,5 +1,5 @@
 use cube_string::IntoCubeStringLossy;
-use sauer_server::{Context, Plugin, Server};
+use sauer_server::{Context, Flow, Plugin, Server};
 use std::sync::Arc;
 use teloxide::prelude::*;
 
@@ -118,14 +118,14 @@ impl Plugin for TelegramBridge {
         });
     }
 
-    async fn on_chat(&self, ctx: &mut Context, text: &mut cube_string::CubeString) {
+    async fn on_chat(&self, ctx: &mut Context, text: &mut cube_string::CubeString) -> Flow {
         if !self.enabled {
-            return;
+            return Flow::Continue;
         }
 
         // Do not forward messages from the TG bot itself
         if ctx.server().get_cn(ctx.id()) == Some(self.bot_cn) {
-            return;
+            return Flow::Continue;
         }
 
         let sender_name = ctx.server().player_name(ctx.id()).to_utf8();
@@ -140,5 +140,6 @@ impl Plugin for TelegramBridge {
                 tracing::error!("Failed to send chat message to Telegram: {}", e);
             }
         });
+        Flow::Continue
     }
 }

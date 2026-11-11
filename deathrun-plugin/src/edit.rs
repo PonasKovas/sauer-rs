@@ -13,9 +13,8 @@ use sauer_proto::{
     channel1::{self, EditMode},
     data::{Direction, EntityType, GameMode, MasterMode, PlayerState, Privilege},
 };
-use sauer_server::Status;
 use sauer_server::{
-    Server,
+    Flow, Server, Status,
     plugin::{Context, Plugin},
 };
 use tracing::{info, warn};
@@ -158,7 +157,7 @@ impl Plugin for DeathrunEdit {
         ]);
     }
 
-    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) -> Flow {
         let id = ctx.id();
         self.player_dirs.insert(id, packet.dir);
 
@@ -568,9 +567,10 @@ impl Plugin for DeathrunEdit {
                 }
             }
         }
+        Flow::Continue
     }
 
-    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
+    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) -> Flow {
         const TRAP_COMMANDS: [&str; 8] = [
             "#tnew",
             "#tmove",
@@ -583,7 +583,7 @@ impl Plugin for DeathrunEdit {
         ];
         let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
         if !TRAP_COMMANDS.contains(&cmd) {
-            return;
+            return Flow::Continue;
         }
 
         let id = ctx.id();
@@ -593,16 +593,16 @@ impl Plugin for DeathrunEdit {
             .players
             .with(id, |p| (p.status == Status::Spectator, p.position))
         else {
-            return;
+            return Flow::Continue;
         };
         if spectating {
             ui::send_warn(&server, id, "Cannot use trap commands while spectating.");
-            return;
+            return Flow::Continue;
         }
 
         let dir = match self.player_dirs.get(&id) {
             Some(d) => *d,
-            None => return,
+            None => return Flow::Continue,
         };
 
         let yaw_rad = (dir.yaw as f32).to_radians();
@@ -616,10 +616,12 @@ impl Plugin for DeathrunEdit {
 
         match cmd {
             "#tnew" => {
-                return crate::trap::place::command(&server, id, Kind::New, origin, ray);
+                crate::trap::place::command(&server, id, Kind::New, origin, ray);
+                return Flow::Continue;
             }
             "#tmove" => {
-                return crate::trap::place::command(&server, id, Kind::Move, origin, ray);
+                crate::trap::place::command(&server, id, Kind::Move, origin, ray);
+                return Flow::Continue;
             }
             _ => {}
         }
@@ -627,7 +629,7 @@ impl Plugin for DeathrunEdit {
         let hit_pt = {
             let state = get_server_state(&server).read();
             let map = match state.map.as_ref() {
-                None => return,
+                None => return Flow::Continue,
                 Some(m) => m,
             };
             sauer_map::raycast::raycast_with_filter(map, origin, ray, 2048.0, |c| {
@@ -644,10 +646,11 @@ impl Plugin for DeathrunEdit {
 
         // Finishing an edit works wherever the player aims.
         if cmd == "#tedit" {
-            return crate::trap::cmd_edittrap(ctx, hit_pt);
+            crate::trap::cmd_edittrap(ctx, hit_pt);
+            return Flow::Continue;
         }
         let Some(hit_pt) = hit_pt else {
-            return;
+            return Flow::Continue;
         };
 
         if cmd == "#tdel" {
@@ -675,9 +678,10 @@ impl Plugin for DeathrunEdit {
                 None => crate::trap::cmd_traptimeout_print(ctx, hit_pt),
             }
         }
+        Flow::Continue
     }
 
-    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
+    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) -> Flow {
         let id = ctx.id();
         let server = ctx.server().clone();
 
@@ -686,10 +690,10 @@ impl Plugin for DeathrunEdit {
         // Shooting while placing a button puts it down, like typing the command again.
         if let Some(kind) = crate::trap::place::placing_kind(&server, id) {
             let Some(pos) = server.players.with(id, |p| p.position) else {
-                return;
+                return Flow::Continue;
             };
             let Some(dir) = self.player_dirs.get(&id).map(|d| *d) else {
-                return;
+                return Flow::Continue;
             };
             let (yaw, pitch) = (
                 (dir.yaw as f32).to_radians(),
@@ -702,13 +706,13 @@ impl Plugin for DeathrunEdit {
             ];
             let origin = [pos.x, pos.y, pos.z + 14.0];
             crate::trap::place::command(&server, id, kind, origin, ray);
-            return;
+            return Flow::Continue;
         }
 
         let trap_to_trigger = {
             let state = crate::map_state::get_server_state(&server).read();
             if state.mode.editing().is_some() {
-                return;
+                return Flow::Continue;
             }
 
             state.traps.iter().position(|trap| {
@@ -728,9 +732,10 @@ impl Plugin for DeathrunEdit {
         if let Some(trap_idx) = trap_to_trigger {
             crate::trap::trigger_trap(&server, trap_idx, id);
         }
+        Flow::Continue
     }
 
-    async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) {
+    async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         // A freshly loaded map has every button solid again, and no placement preview.
@@ -766,9 +771,10 @@ impl Plugin for DeathrunEdit {
                 ui::send_welcome_edit(server, id);
             }
         }
+        Flow::Continue
     }
 
-    async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) {
+    async fn edit_mode(&self, ctx: &mut Context, _packet: &channel1::EditMode) -> Flow {
         let id = ctx.id();
         let cn = ctx.server().get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
         if is_waiting_for_map(ctx.server()) {
@@ -784,17 +790,19 @@ impl Plugin for DeathrunEdit {
                 id,
                 "Waiting for map upload. Use /sendmap to proceed.",
             );
-            ctx.cancel();
+            return Flow::Cancel;
         }
+        Flow::Continue
     }
 
-    async fn on_spawn(&self, ctx: &mut Context, _state: &mut PlayerState) {
+    async fn on_spawn(&self, ctx: &mut Context, _state: &mut PlayerState) -> Flow {
         if is_waiting_for_map(ctx.server()) {
-            ctx.cancel();
+            return Flow::Cancel;
         }
+        Flow::Continue
     }
 
-    async fn map(&self, ctx: &mut Context, data: &Bytes) {
+    async fn map(&self, ctx: &mut Context, data: &Bytes) -> Flow {
         let id = ctx.id();
 
         let busy = get_server_state(ctx.server()).read().mode.busy_reason();
@@ -804,10 +812,8 @@ impl Plugin for DeathrunEdit {
                 id,
                 &format!("Cannot upload a map while {why}."),
             );
-            ctx.cancel();
-            return;
+            return Flow::Cancel;
         }
-        ctx.cancel();
         let server = ctx.server();
 
         let is_spectator = server
@@ -818,7 +824,7 @@ impl Plugin for DeathrunEdit {
 
         if is_spectator && !is_master {
             ui::send_warn(server, id, "You must be unspectated to upload a map.");
-            return;
+            return Flow::Cancel;
         }
 
         let size_kb = data.len() / 1024;
@@ -927,8 +933,11 @@ impl Plugin for DeathrunEdit {
                     };
                     info!("id {id} uploaded a map (world_size={world_size}); state loaded");
 
-                    server_clone.game.write().map_name = uploading_map_name.clone();
-                    server_clone.game.write().mode = GameMode::CoopEdit;
+                    {
+                        let mut game = server_clone.game.write();
+                        game.map_name = uploading_map_name.clone();
+                        game.mode = GameMode::CoopEdit;
+                    }
 
                     server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
                         text: format!(
@@ -954,6 +963,7 @@ impl Plugin for DeathrunEdit {
                 Err(e) => warn!("id {id} sent an invalid map: {e}"),
             }
         });
+        Flow::Cancel
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
@@ -991,14 +1001,14 @@ impl Plugin for DeathrunEdit {
         self.pending_welcome.insert(id, WelcomeStep::InitialLoad);
     }
 
-    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
+    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) -> Flow {
         let id = ctx.id();
         crate::map_state::send_map_to_async(ctx.server(), id);
         info!("sent map state to id {id} on N_GETMAP");
-        ctx.cancel();
+        Flow::Cancel
     }
 
-    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
+    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) -> Flow {
         let id = ctx.id();
         if !packet.val && is_waiting_for_map(ctx.server()) {
             ui::send_warn(
@@ -1006,21 +1016,24 @@ impl Plugin for DeathrunEdit {
                 id,
                 "Waiting for map upload. Use /sendmap to proceed.",
             );
-            ctx.cancel();
+            return Flow::Cancel;
         }
+        Flow::Continue
     }
 
     // ── Coop-edit map tracking + Interceptors + Trap immunities ──────────────────────
 
-    async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
+    async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) -> Flow {
         guard::geometry_edit(ctx, packet.sel.bounds(), |map| map.apply_edit_tex(packet));
+        Flow::Continue
     }
 
-    async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
+    async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) -> Flow {
         guard::geometry_edit(ctx, packet.sel.bounds(), |map| map.apply_edit_mat(packet));
+        Flow::Continue
     }
 
-    async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
+    async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) -> Flow {
         guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
             let ok = map.apply_del_cube(packet);
             if ok {
@@ -1031,9 +1044,10 @@ impl Plugin for DeathrunEdit {
             }
             ok
         });
+        Flow::Continue
     }
 
-    async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
+    async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) -> Flow {
         let bounds = if packet.in_sel {
             packet.sel.bounds()
         } else {
@@ -1046,31 +1060,36 @@ impl Plugin for DeathrunEdit {
             ([0, 0, 0], [s, s, s])
         };
         guard::geometry_edit(ctx, bounds, |map| map.apply_replace(packet));
+        Flow::Continue
     }
 
-    async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
+    async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) -> Flow {
         guard::geometry_edit(ctx, guard::edit_face_bounds(packet), |map| {
             map.apply_edit_face(packet)
         });
+        Flow::Continue
     }
 
-    async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
+    async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) -> Flow {
         guard::entity_edit(ctx, &[packet.ent_id as usize], |map| {
             map.apply_edit_ent(packet)
         });
+        Flow::Continue
     }
 
-    async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
+    async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) -> Flow {
         with_map_state_mut(ctx, |state| state.apply_edit_var(packet));
+        Flow::Continue
     }
 
-    async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
+    async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) -> Flow {
         guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
             map.apply_edit_v_slot(packet)
         });
+        Flow::Continue
     }
 
-    async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
+    async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) -> Flow {
         let mut ok = true;
         let (min, max) = packet.sel.bounds();
         with_map_state_mut(ctx, |state| {
@@ -1083,9 +1102,10 @@ impl Plugin for DeathrunEdit {
         if !ok || covers {
             handle_edit_reject(ctx, min, max);
         }
+        Flow::Continue
     }
 
-    async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
+    async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) -> Flow {
         let mut ok = true;
         let (min, max) = packet.sel.bounds();
         with_map_state_mut(ctx, |state| {
@@ -1098,14 +1118,15 @@ impl Plugin for DeathrunEdit {
         if !ok || covers {
             handle_edit_reject(ctx, min, max);
         }
+        Flow::Continue
     }
 
-    async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
+    async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) -> Flow {
         let id = ctx.id();
         let server = ctx.server().clone();
 
         if server.game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
 
         server.players.with_mut(id, |p| p.clipboard = None);
@@ -1122,7 +1143,6 @@ impl Plugin for DeathrunEdit {
             });
         }
 
-        ctx.cancel();
         let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
         server.broadcast_except_chan1(
             id,
@@ -1133,9 +1153,10 @@ impl Plugin for DeathrunEdit {
                 },
             },
         );
+        Flow::Cancel
     }
 
-    async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
+    async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) -> Flow {
         let id = ctx.id();
         let server = ctx.server().clone();
 
@@ -1152,13 +1173,15 @@ impl Plugin for DeathrunEdit {
             ];
             guard::geometry_edit(ctx, (min, max), |map| map.apply_paste(packet, &payload));
         }
+        Flow::Continue
     }
 
-    async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
+    async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) -> Flow {
         undo_redo(ctx, &packet.payload);
+        Flow::Continue
     }
 
-    async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
+    async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -1166,8 +1189,7 @@ impl Plugin for DeathrunEdit {
         if let Some(why) = busy {
             ui::send_warn(server, id, &format!("Cannot use newmap while {why}."));
             crate::map_state::send_map_to_async(ctx.server(), id);
-            ctx.cancel();
-            return;
+            return Flow::Cancel;
         }
         let server = ctx.server();
         let mut state = get_server_state(server).write();
@@ -1179,7 +1201,7 @@ impl Plugin for DeathrunEdit {
             state.mode = Default::default();
             state.base_map = None;
             state.vault = None;
-            return;
+            return Flow::Continue;
         }
 
         // The base plugin already relayed the enlarge, so clients see it
@@ -1196,9 +1218,10 @@ impl Plugin for DeathrunEdit {
                 &format!("\x0C3[ERROR]\x0C7 Could not move the trap vault: {e}"),
             );
         }
+        Flow::Continue
     }
 
-    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
+    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) -> Flow {
         let id = ctx.id();
 
         let busy = get_server_state(ctx.server()).read().mode.busy_reason();
@@ -1208,15 +1231,12 @@ impl Plugin for DeathrunEdit {
                 id,
                 &format!("Cannot vote for a map while {why}."),
             );
-            ctx.cancel();
-            return;
+            return Flow::Cancel;
         }
         if packet.mode != GameMode::CoopEdit {
-            ctx.cancel();
-            return;
+            return Flow::Cancel;
         }
 
-        ctx.cancel();
         let server = ctx.server();
 
         let mut state = get_server_state(server).write();
@@ -1243,10 +1263,12 @@ impl Plugin for DeathrunEdit {
             .unwrap_or_else(|| "Someone".to_string());
         let map_str = packet.map_name.strip_colors().to_utf8();
         ui::broadcast_map_changed(server, &player_name, &map_str);
+        Flow::Cancel
     }
 
-    async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
+    async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) -> Flow {
         undo_redo(ctx, &packet.payload);
+        Flow::Continue
     }
 }
 

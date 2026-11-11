@@ -1,41 +1,69 @@
 use crate::{
     LuaPlugin,
+    callbacks::LuaCallback,
     extra::LuaExtraRegistry,
     userdata::{event::EventUD, server::LuaServer, spawn_state::SpawnStateUD},
 };
 use bytes::Bytes;
 use cube_string::CubeString;
-use sauer_proto::data::PlayerState;
+use mlua::{IntoLuaMulti, MultiValue, Scope, Value};
+use sauer_proto::data::{GameMode, PlayerState};
 use sauer_proto::server_query::{ExtInfoRequest, ServerQueryRequest};
-use sauer_proto::{channel0, channel1, data::GameMode};
-use sauer_server::{Context, Plugin, Server, ServerQueryContext};
+use sauer_server::{Context, Flow, Plugin, Server, ServerQueryContext};
 use std::sync::Arc;
 use tracing::error;
 
-macro_rules! make_callback_impl {
-    ( $( [$name:ident, $type:ty] ),* $(,)? ) => {
-        $(
-        async fn $name(&self, ctx: &mut Context, packet: &$type) {
-            let mut event = EventUD::new();
-
-            for callback in &self.callbacks.$name {
-                let r = self.lua.scope(|scope| {
-                    let packet = scope.create_userdata_ref(packet)?;
-                    let event = scope.create_userdata_ref_mut(&mut event)?;
-
-                    callback.callback.call::<()>((ctx.id(), packet, event))
-                });
-
-                if let Err(e) = r {
-                    error!(target: "lua", "[{}] {e}", callback.plugin_name);
-                }
-
-                if event.cancelled {
-                    ctx.cancel();
-                    break;
-                }
+impl LuaPlugin {
+    /// Calls each callback with what `args` builds plus an `Event` it can
+    /// cancel, and stops at the first one that does.
+    fn dispatch<'env>(
+        &self,
+        callbacks: &[LuaCallback],
+        args: impl for<'s> Fn(&'s Scope<'s, 'env>) -> mlua::Result<MultiValue>,
+    ) -> Flow {
+        for callback in callbacks {
+            let r = self.lua.scope(|scope| {
+                let event = self.lua.create_userdata(EventUD::new())?;
+                let mut values = args(scope)?;
+                values.push_back(Value::UserData(event.clone()));
+                callback.callback.call::<()>(values)?;
+                Ok(event.borrow::<EventUD>()?.cancelled)
+            });
+            match r {
+                Ok(true) => return Flow::Cancel,
+                Ok(false) => {}
+                Err(e) => error!(target: "lua", "[{}] {e}", callback.plugin_name),
             }
         }
+        Flow::Continue
+    }
+
+    /// Calls each callback with what `args` builds. For hooks that can't be
+    /// cancelled, so there's no `Event`.
+    fn notify(&self, callbacks: &[LuaCallback], args: impl Fn() -> mlua::Result<MultiValue>) {
+        for callback in callbacks {
+            if let Err(e) = args().and_then(|a| callback.callback.call::<()>(a)) {
+                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+            }
+        }
+    }
+}
+
+macro_rules! packet_callbacks {
+    (
+        ()
+        chan0 { $($c0:tt)* }
+        chan1 { $($c1:tt)* }
+    ) => {
+        packet_callbacks! { @each $($c0)* $($c1)* }
+    };
+    (@each $( [$msg_id:ident] $method:ident ($packet:path) $variant:ident, )*) => {
+        $(
+            async fn $method(&self, ctx: &mut Context, packet: &$packet) -> Flow {
+                self.dispatch(&self.callbacks.$method, |scope| {
+                    (ctx.id(), scope.create_userdata_ref(packet)?).into_lua_multi(&self.lua)
+                })
+            }
         )*
     };
 }
@@ -58,306 +86,118 @@ impl Plugin for LuaPlugin {
             error!("Error setting `server` global in lua: {e}");
         }
 
-        for callback in &self.callbacks.start {
-            if let Err(e) = callback.callback.call::<()>(()) {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-        }
+        self.notify(&self.callbacks.start, || Ok(MultiValue::new()));
     }
 
-    async fn connected(&self, ctx: &mut Context) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.connected {
-            let r = self.lua.scope(|scope| {
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.id(), event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
+    async fn connected(&self, ctx: &mut Context) -> Flow {
+        self.dispatch(&self.callbacks.connected, |_| {
+            ctx.id().into_lua_multi(&self.lua)
+        })
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.disconnected {
-            let r = self.lua.scope(|scope| {
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.id(), event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
+        self.notify(&self.callbacks.disconnected, || {
+            ctx.id().into_lua_multi(&self.lua)
+        });
     }
 
     async fn on_client_welcomed(&self, ctx: &mut Context) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.on_client_welcomed {
-            let r = self.lua.scope(|scope| {
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.id(), event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
+        self.notify(&self.callbacks.on_client_welcomed, || {
+            ctx.id().into_lua_multi(&self.lua)
+        });
     }
 
     async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.map_changed {
-            let r = self.lua.scope(|scope| {
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback
-                    .callback
-                    .call::<()>((ctx.id(), map_name.clone(), mode, event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
+        self.notify(&self.callbacks.map_changed, || {
+            (ctx.id(), map_name.clone(), mode).into_lua_multi(&self.lua)
+        });
     }
 
-    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
-        let mut ud = SpawnStateUD(state.clone());
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.on_spawn {
-            let r = self.lua.scope(|scope| {
-                let state_ref = scope.create_userdata_ref_mut(&mut ud)?;
-                let event_ref = scope.create_userdata_ref_mut(&mut event)?;
-                callback
-                    .callback
-                    .call::<()>((ctx.id(), state_ref, event_ref))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) -> Flow {
+        let ud = match self.lua.create_userdata(SpawnStateUD(state.clone())) {
+            Ok(ud) => ud,
+            Err(e) => {
+                error!(target: "lua", "{e}");
+                return Flow::Continue;
             }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
+        };
+        let flow = self.dispatch(&self.callbacks.on_spawn, |_| {
+            (ctx.id(), ud.clone()).into_lua_multi(&self.lua)
+        });
+        // Changes go back even when cancelled; a cancelled spawn drops them.
+        if let Ok(changed) = ud.borrow::<SpawnStateUD>() {
+            *state = changed.0.clone();
         }
-
-        // Copy any modifications back regardless of cancellation — the caller
-        // (handle_client) will drop the state if cancelled, so no harm done.
-        *state = ud.0;
+        flow
     }
 
-    async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.on_chat {
-            let r = self.lua.scope(|scope| {
-                let text_lua = self.lua.create_string(text.as_bytes())?;
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.id(), text_lua, event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+    async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
+        let text_lua = match self.lua.create_string(text.as_bytes()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(target: "lua", "{e}");
+                return Flow::Continue;
             }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
+        };
+        self.dispatch(&self.callbacks.on_chat, |_| {
+            (ctx.id(), text_lua.clone()).into_lua_multi(&self.lua)
+        })
     }
 
-    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
-        let mut event = EventUD::new();
+    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) -> Flow {
+        self.dispatch(&self.callbacks.on_command, |_| {
+            let table = self.lua.create_table()?;
+            for (i, arg) in args.iter().enumerate() {
+                table.raw_set(i + 1, self.lua.create_string(arg.as_bytes())?)?;
+            }
+            (ctx.id(), table).into_lua_multi(&self.lua)
+        })
+    }
 
-        for callback in &self.callbacks.on_command {
-            let r = self.lua.scope(|scope| {
-                let args_table = self.lua.create_table()?;
-                for (i, arg) in args.iter().enumerate() {
-                    args_table.raw_set(i + 1, self.lua.create_string(arg.as_bytes())?)?;
+    async fn map(&self, ctx: &mut Context, packet: &Bytes) -> Flow {
+        if self.callbacks.map.is_empty() {
+            return Flow::Continue;
+        }
+        let data = match self.lua.create_string(packet.as_ref()) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(target: "lua", "{e}");
+                return Flow::Continue;
+            }
+        };
+        self.dispatch(&self.callbacks.map, |_| {
+            (ctx.id(), data.clone()).into_lua_multi(&self.lua)
+        })
+    }
+
+    async fn server_query(
+        &self,
+        ctx: &mut ServerQueryContext,
+        request: &ServerQueryRequest,
+    ) -> Flow {
+        self.dispatch(&self.callbacks.server_query, |_| {
+            let req_table = self.lua.create_table()?;
+            match request {
+                ServerQueryRequest::ServerInfo { ping_id } => {
+                    req_table.set("type", "ServerInfo")?;
+                    req_table.set("ping_id", *ping_id)?;
                 }
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.id(), args_table, event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
-    }
-
-    async fn map(&self, ctx: &mut Context, packet: &Bytes) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.map {
-            let r = self.lua.scope(|scope| {
-                let data = self.lua.create_string(packet.as_ref())?;
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback.callback.call::<()>((ctx.id(), data, event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
-            }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
-    }
-
-    async fn server_query(&self, ctx: &mut ServerQueryContext, request: &ServerQueryRequest) {
-        let mut event = EventUD::new();
-
-        for callback in &self.callbacks.server_query {
-            let r = self.lua.scope(|scope| {
-                let req_table = self.lua.create_table()?;
-                match request {
-                    ServerQueryRequest::ServerInfo { ping_id } => {
-                        req_table.set("type", "ServerInfo")?;
-                        req_table.set("ping_id", *ping_id)?;
-                    }
-                    ServerQueryRequest::ExtInfo(ExtInfoRequest::Uptime) => {
-                        req_table.set("type", "Uptime")?;
-                    }
-                    ServerQueryRequest::ExtInfo(ExtInfoRequest::PlayerStats { client_number }) => {
-                        req_table.set("type", "PlayerStats")?;
-                        if let Some(cn) = client_number {
-                            req_table.set("client_number", *cn)?;
-                        }
-                    }
-                    ServerQueryRequest::ExtInfo(ExtInfoRequest::TeamScore) => {
-                        req_table.set("type", "TeamScore")?;
+                ServerQueryRequest::ExtInfo(ExtInfoRequest::Uptime) => {
+                    req_table.set("type", "Uptime")?;
+                }
+                ServerQueryRequest::ExtInfo(ExtInfoRequest::PlayerStats { client_number }) => {
+                    req_table.set("type", "PlayerStats")?;
+                    if let Some(cn) = client_number {
+                        req_table.set("client_number", *cn)?;
                     }
                 }
-
-                let event = scope.create_userdata_ref_mut(&mut event)?;
-                callback
-                    .callback
-                    .call::<()>((ctx.addr().to_string(), req_table, event))
-            });
-
-            if let Err(e) = r {
-                error!(target: "lua", "[{}] {e}", callback.plugin_name);
+                ServerQueryRequest::ExtInfo(ExtInfoRequest::TeamScore) => {
+                    req_table.set("type", "TeamScore")?;
+                }
             }
-
-            if event.cancelled {
-                ctx.cancel();
-                break;
-            }
-        }
+            (ctx.addr().to_string(), req_table).into_lua_multi(&self.lua)
+        })
     }
 
-    make_callback_impl! {
-        [pos, channel0::Position],
-        [teleport, channel0::Teleport],
-        [jumppad, channel0::JumpPad],
-
-        [connect, channel1::Connect],
-        [auth_answer, channel1::AuthAnswer],
-        [ping, channel1::Ping],
-        [from_ai, channel1::FromAi],
-        [sound, channel1::Sound],
-        [edit_mode, channel1::EditMode],
-        [map_crc, channel1::MapCrc],
-        [check_maps, channel1::CheckMaps],
-        [try_spawn, channel1::TrySpawn],
-        [gun_select, channel1::GunSelect],
-        [spawn_client, channel1::SpawnClient],
-        [suicide, channel1::Suicide],
-        [shoot, channel1::Shoot],
-        [explode, channel1::Explode],
-        [item_pickup, channel1::ItemPickup],
-        [text, channel1::Text],
-        [say_team, channel1::SayTeamClient],
-        [switch_name, channel1::SwitchName],
-        [switch_model, channel1::SwitchModel],
-        [switch_team, channel1::SwitchTeam],
-        [map_vote, channel1::MapVote],
-        [item_list, channel1::ItemList],
-        [edit_ent, channel1::EditEnt],
-        [edit_var, channel1::EditVar],
-        [client_ping, channel1::ClientPing],
-        [master_mode, channel1::MasterModeClient],
-        [clear_bans, channel1::ClearBans],
-        [kick, channel1::Kick],
-        [spectator, channel1::SpectatorClient],
-        [set_team, channel1::SetTeamClient],
-        [force_intermission, channel1::ForceIntermission],
-        [record_demo, channel1::RecordDemo],
-        [stop_demo, channel1::StopDemo],
-        [clear_demos, channel1::ClearDemos],
-        [list_demos, channel1::ListDemos],
-        [get_demo, channel1::GetDemo],
-        [get_map, channel1::GetMap],
-        [new_map, channel1::NewMap],
-        [set_master, channel1::SetMaster],
-        [add_bot, channel1::AddBot],
-        [del_bot, channel1::DelBot],
-        [bot_limit, channel1::BotLimit],
-        [bot_balance, channel1::BotBalance],
-        [auth_try, channel1::AuthTry],
-        [auth_kick, channel1::AuthKick],
-        [pause_game, channel1::PauseGameClient],
-        [game_speed, channel1::GameSpeedClient],
-        [copy, channel1::CopyClient],
-        [paste, channel1::PasteClient],
-        [clipboard, channel1::ClipboardClient],
-        [undo, channel1::UndoClient],
-        [redo, channel1::RedoClient],
-        [edit_face, channel1::EditFace],
-        [edit_tex, channel1::EditTex],
-        [edit_mat, channel1::EditMat],
-        [flip, channel1::Flip],
-        [rotate, channel1::Rotate],
-        [replace, channel1::Replace],
-        [del_cube, channel1::DelCube],
-        [edit_v_slot, channel1::EditVSlot],
-        [remip, channel1::Remip],
-        [serv_cmd, channel1::ServCmd],
-        [bases, channel1::BasesClient],
-        [rep_ammo, channel1::RepAmmoClient],
-        [try_drop_flag, channel1::TryDropFlag],
-        [take_flag, channel1::TakeFlagClient],
-        [init_flags, channel1::InitFlagsClient],
-        [init_tokens, channel1::InitTokensClient],
-        [take_token, channel1::TakeTokenClient],
-        [deposit_tokens, channel1::DepositTokensClient],
-        [taunt, channel1::Taunt],
-    }
+    sauer_server::for_each_packet_hook!(packet_callbacks);
 }

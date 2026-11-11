@@ -2,7 +2,6 @@ use crate::map_state::{DeathrunState, Trap, get_server_state};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
-use sauer_server::Status;
 
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
@@ -12,7 +11,7 @@ use sauer_proto::{
     data::{EntityType, GameMode, MasterMode, SetTeamReason},
 };
 use sauer_server::{
-    Server,
+    Flow, Server, Status,
     plugin::{Context, Plugin},
 };
 use serde::{Deserialize, Serialize};
@@ -832,7 +831,7 @@ impl Plugin for DeathrunPlay {
         }
     }
 
-    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
@@ -1316,6 +1315,7 @@ impl Plugin for DeathrunPlay {
                 check_win_conditions(server, maps, None);
             }
         }
+        Flow::Continue
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
@@ -1360,7 +1360,7 @@ impl Plugin for DeathrunPlay {
         check_win_conditions(server, &maps, None);
     }
 
-    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) -> Flow {
         let id = ctx.id();
         let maps = self.maps.read();
         let is_evil = maps.evil_id == Some(id);
@@ -1369,25 +1369,33 @@ impl Plugin for DeathrunPlay {
         if is_evil {
             state.ammo.grenade_launcher = 0;
         }
+        Flow::Continue
     }
 
-    async fn on_damage(&self, ctx: &mut Context, target_id: u64, actor_id: u64, _damage: &mut i32) {
+    async fn on_damage(
+        &self,
+        ctx: &mut Context,
+        target_id: u64,
+        actor_id: u64,
+        _damage: &mut i32,
+    ) -> Flow {
         let server = ctx.server();
         let target_team = server.players.with(target_id, |p| p.team.clone());
         let actor_team = server.players.with(actor_id, |p| p.team.clone());
 
         if target_team.is_some() && target_team == actor_team {
-            ctx.cancel();
+            return Flow::Cancel;
         }
 
         // The terrorist can only kill with traps, never by shooting.
         let actor_is_evil = self.maps.read().evil_id == Some(actor_id);
         if actor_is_evil && target_id != actor_id {
-            ctx.cancel();
+            return Flow::Cancel;
         }
+        Flow::Continue
     }
 
-    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
+    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
@@ -1411,11 +1419,12 @@ impl Plugin for DeathrunPlay {
             }
         }
         if cancel {
-            ctx.cancel();
+            return Flow::Cancel;
         }
+        Flow::Continue
     }
 
-    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
+    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -1424,14 +1433,14 @@ impl Plugin for DeathrunPlay {
             maps.read().evil_id == Some(id)
         };
         if !is_evil {
-            return;
+            return Flow::Continue;
         }
 
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
         let trap_idx = {
             let state = crate::map_state::get_server_state(server).read();
             if state.mode.editing().is_some() {
-                return;
+                return Flow::Continue;
             }
             state.traps.iter().position(|trap| {
                 let b_min = trap.button_pos;
@@ -1450,17 +1459,18 @@ impl Plugin for DeathrunPlay {
         if let Some(idx) = trap_idx {
             crate::trap::trigger_trap(server, idx, id);
         }
+        Flow::Continue
     }
 
-    async fn switch_team(&self, ctx: &mut Context, _packet: &channel1::SwitchTeam) {
-        ctx.cancel();
+    async fn switch_team(&self, _ctx: &mut Context, _packet: &channel1::SwitchTeam) -> Flow {
+        Flow::Cancel
     }
 
-    async fn map_vote(&self, ctx: &mut Context, _packet: &channel1::MapVote) {
-        ctx.cancel(); // Map rotation is strictly managed by PlayMaps
+    async fn map_vote(&self, _ctx: &mut Context, _packet: &channel1::MapVote) -> Flow {
+        Flow::Cancel // Map rotation is strictly managed by PlayMaps
     }
 
-    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
+    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) -> Flow {
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
         let round_state = maps.read().round_state;
@@ -1468,12 +1478,13 @@ impl Plugin for DeathrunPlay {
         // Prevent self-unspectating during the game (even for masters to prevent cheating the 1-life limit).
         if round_state == RoundState::Playing || round_state == RoundState::MapLoading {
             if !packet.val {
-                ctx.cancel();
+                return Flow::Cancel;
             }
         }
+        Flow::Continue
     }
 
-    async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) {
+    async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) -> Flow {
         // Only admin (with the password) here: rounds set the master mode, and
         // players handing master around would fight them. Giving up admin and
         // the admin managing others go through to the base handler.
@@ -1484,19 +1495,20 @@ impl Plugin for DeathrunPlay {
             && packet.val
             && server.check_admin_pass(id, packet.hash.as_bytes());
         if is_admin || claims_admin {
-            return;
+            return Flow::Continue;
         }
         ui::send_warn(server, id, "Master is disabled on this server.");
-        ctx.cancel();
+        Flow::Cancel
     }
 
-    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
+    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         if send_map_to_client(Arc::clone(server), id, &maps, false) {
             info!("Sending map rebuild to id {id} on N_GETMAP");
-            ctx.cancel();
+            return Flow::Cancel;
         }
+        Flow::Continue
     }
 }

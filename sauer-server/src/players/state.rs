@@ -1,5 +1,4 @@
-use crate::Server;
-use crate::Status;
+use crate::{Server, Status};
 use sauer_proto::{
     channel1::SpawnState,
     data::{ArmourType, Gun, PlayerAmmo, PlayerState},

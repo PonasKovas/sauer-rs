@@ -3,7 +3,7 @@ use crate::{
     base::Base,
     handle_client::handle_client,
     peer::Peer,
-    plugin::{Context, Plugin},
+    plugin::{Context, Flow, Plugin},
 };
 use lenet::HostBuilder;
 use lenet_tokio::{Endpoint, EventQueuePolicy, LenetConfig};
@@ -175,9 +175,8 @@ pub(crate) async fn run<P: Plugin>(
                             let mut ctx = crate::plugin::ServerQueryContext {
                                 server: Arc::clone(&ext_server),
                                 addr,
-                                cancelled: false,
                             };
-                            ext_plugin.server_query(&mut ctx, &req).await;
+                            let _ = ext_plugin.server_query(&mut ctx, &req).await;
                         }
                         Err(e) => {
                             tracing::debug!(target: "sauer_server", "Failed to parse ServerQuery UDP packet from {}: {:?}", addr, e);
@@ -222,11 +221,7 @@ pub(crate) async fn run<P: Plugin>(
                 let server = Arc::clone(&server);
                 let plugin = Arc::clone(&plugin);
                 async move {
-                    let mut ctx = Context {
-                        server,
-                        id,
-                        cancelled: false,
-                    };
+                    let mut ctx = Context { server, id };
                     plugin.disconnected(&mut ctx).await;
                 }
             });
@@ -250,12 +245,9 @@ async fn client_session<P: Plugin>(
     let mut ctx = Context {
         server: Arc::clone(&server),
         id,
-        cancelled: false,
     };
 
-    plugin.connected(&mut ctx).await;
-
-    if !ctx.cancelled {
+    if plugin.connected(&mut ctx).await == Flow::Continue {
         if let Err(e) = handle_client(&server, &plugin, rx, id).await {
             error!("handling peer: {e}");
         }

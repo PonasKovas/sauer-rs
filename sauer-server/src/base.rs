@@ -1,13 +1,12 @@
 //! The built-in Sauerbraten base plugin, always present as the innermost plugin.
 //! User plugins run before it and can cancel any handler.
 
-use crate::Status;
 use crate::{
-    Server,
+    Server, Status,
     items::{apply_pickup, canpickup},
     players::combat::{explosion_damage, gun_damage_per_ray},
     players::{ClipboardData, clear_player, init_player},
-    plugin::{Context, Plugin},
+    plugin::{Context, Flow, Plugin},
 };
 use cube_string::{CubeString, IntoCubeStringLossy};
 use sauer_proto::{
@@ -157,7 +156,7 @@ impl<P: Plugin> Plugin for Base<P> {
         });
     }
 
-    async fn connected(&self, ctx: &mut Context) {
+    async fn connected(&self, ctx: &mut Context) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -169,8 +168,7 @@ impl<P: Plugin> Plugin for Base<P> {
             None => {
                 clear_player(&server.players, id);
                 server.disconnect(id);
-                ctx.cancel();
-                return;
+                return Flow::Cancel;
             }
         };
 
@@ -185,13 +183,14 @@ impl<P: Plugin> Plugin for Base<P> {
                 server_auth: server.config.read().auth.clone(),
             },
         );
+        Flow::Continue
     }
 
     async fn server_query(
         &self,
         ctx: &mut crate::plugin::ServerQueryContext,
         request: &sauer_proto::server_query::ServerQueryRequest,
-    ) {
+    ) -> Flow {
         use sauer_proto::server_query::{
             ExtInfoRequest, ExtInfoResponse, ServerQueryRequest, ServerQueryResponse,
         };
@@ -245,7 +244,7 @@ impl<P: Plugin> Plugin for Base<P> {
                                         client_number: Some(*cn),
                                         ok: false,
                                     });
-                                    return;
+                                    return Flow::Continue;
                                 }
                             },
                             None => server.client_ids(),
@@ -284,6 +283,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 }
             }
         }
+        Flow::Continue
     }
 
     async fn disconnected(&self, ctx: &mut Context) {
@@ -314,7 +314,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
     }
 
-    async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) {
+    async fn connect(&self, ctx: &mut Context, packet: &channel1::Connect) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -330,7 +330,7 @@ impl<P: Plugin> Plugin for Base<P> {
         {
             info!("{} (cn {}) is banned, disconnecting.", packet.name, cn_str);
             server.disconnect_with(id, crate::bans::DISC_IPBAN);
-            return;
+            return Flow::Continue;
         }
 
         server.init_name(id, packet.name.clone());
@@ -345,31 +345,34 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         if matches!(server.master_mode(), MasterMode::Private) {
-            return;
+            return Flow::Continue;
         }
 
         server.welcome(id);
 
         if let Some(plugin) = self.plugin.upgrade() {
-            ctx.cancelled = false;
             plugin.on_client_welcomed(ctx).await;
         }
+        Flow::Continue
     }
 
-    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) -> Flow {
         ctx.server().apply_spawn_state(ctx.id(), state.clone());
+        Flow::Continue
     }
 
-    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) {
+    async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) -> Flow {
         let id = ctx.id();
         if let Some(mut state) = ctx.server().compute_spawn_state(id) {
             if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_spawn(ctx, &mut state).await;
+                // Base applies the spawn at the end of the chain, so a cancel already stopped it.
+                let _ = plugin.on_spawn(ctx, &mut state).await;
             }
         }
+        Flow::Continue
     }
 
-    async fn spawn_client(&self, ctx: &mut Context, packet: &channel1::SpawnClient) {
+    async fn spawn_client(&self, ctx: &mut Context, packet: &channel1::SpawnClient) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -396,35 +399,38 @@ impl<P: Plugin> Plugin for Base<P> {
                 );
             }
         }
+        Flow::Continue
     }
 
-    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
+    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let Some(target_id) = server.get_id(packet.spectator_cn) else {
-            return;
+            return Flow::Continue;
         };
 
         let has_privilege = server.get_privilege(id) >= Privilege::Master;
         let locked = server.master_mode() == MasterMode::Locked;
 
         if !has_privilege && (target_id != id || locked) {
-            return;
+            return Flow::Continue;
         }
 
         server.set_spectator(target_id, packet.val);
+        Flow::Continue
     }
 
-    async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) {
+    async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) -> Flow {
         let id = ctx.id();
         if ctx.server().kill_player(id) {
             if let Some(plugin) = self.plugin.upgrade() {
                 plugin.on_player_died(ctx, id, id).await;
             }
         }
+        Flow::Continue
     }
 
-    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) {
+    async fn shoot(&self, ctx: &mut Context, packet: &channel1::Shoot) -> Flow {
         let id = ctx.id();
         let server = ctx.server().clone();
 
@@ -446,7 +452,7 @@ impl<P: Plugin> Plugin for Base<P> {
             true
         });
         if fired != Some(true) {
-            return;
+            return Flow::Continue;
         }
 
         if let Some(cn) = server.get_cn(id) {
@@ -471,11 +477,11 @@ impl<P: Plugin> Plugin for Base<P> {
             }
             let mut damage = hit.rays * gun_damage_per_ray(packet.gun);
 
-            ctx.cancelled = false;
-            if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_damage(ctx, target_id, id, &mut damage).await;
-            }
-            if ctx.cancelled || damage <= 0 {
+            let flow = match self.plugin.upgrade() {
+                Some(plugin) => plugin.on_damage(ctx, target_id, id, &mut damage).await,
+                None => Flow::Continue,
+            };
+            if flow == Flow::Cancel || damage <= 0 {
                 continue;
             }
 
@@ -485,15 +491,16 @@ impl<P: Plugin> Plugin for Base<P> {
                 }
             }
         }
+        Flow::Continue
     }
 
-    async fn explode(&self, ctx: &mut Context, packet: &channel1::Explode) {
+    async fn explode(&self, ctx: &mut Context, packet: &channel1::Explode) -> Flow {
         let id = ctx.id();
         let server = ctx.server().clone();
 
         let alive = server.players.with(id, |p| p.status == Status::Alive);
         if alive != Some(true) {
-            return;
+            return Flow::Continue;
         }
 
         if let Some(cn) = server.get_cn(id) {
@@ -513,11 +520,11 @@ impl<P: Plugin> Plugin for Base<P> {
             }
             let mut damage = explosion_damage(packet.gun, hit.dist, target_id == id);
 
-            ctx.cancelled = false;
-            if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_damage(ctx, target_id, id, &mut damage).await;
-            }
-            if ctx.cancelled || damage <= 0 {
+            let flow = match self.plugin.upgrade() {
+                Some(plugin) => plugin.on_damage(ctx, target_id, id, &mut damage).await,
+                None => Flow::Continue,
+            };
+            if flow == Flow::Cancel || damage <= 0 {
                 continue;
             }
 
@@ -527,33 +534,37 @@ impl<P: Plugin> Plugin for Base<P> {
                 }
             }
         }
+        Flow::Continue
     }
 
-    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) {
+    async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) -> Flow {
         // Like the engine, a client only moves itself: the cn inside the
         // packet is passed on as is, so it must be the sender's.
         if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
-            return;
+            return Flow::Continue;
         }
         ctx.server().set_position(ctx.id(), packet.pos);
         ctx.server().broadcast_except_chan0(ctx.id(), packet);
+        Flow::Continue
     }
 
-    async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) {
+    async fn teleport(&self, ctx: &mut Context, packet: &channel0::Teleport) -> Flow {
         if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
-            return;
+            return Flow::Continue;
         }
         ctx.server().broadcast_except_chan0(ctx.id(), packet);
+        Flow::Continue
     }
 
-    async fn jumppad(&self, ctx: &mut Context, packet: &channel0::JumpPad) {
+    async fn jumppad(&self, ctx: &mut Context, packet: &channel0::JumpPad) -> Flow {
         if ctx.server().get_cn(ctx.id()) != Some(packet.client_num) {
-            return;
+            return Flow::Continue;
         }
         ctx.server().broadcast_except_chan0(ctx.id(), packet);
+        Flow::Continue
     }
 
-    async fn text(&self, ctx: &mut Context, packet: &channel1::Text) {
+    async fn text(&self, ctx: &mut Context, packet: &channel1::Text) -> Flow {
         let id = ctx.id();
         let bytes = packet.text.as_bytes();
 
@@ -582,14 +593,15 @@ impl<P: Plugin> Plugin for Base<P> {
                     &format!("Unknown command {cmd}. Type #help to see all commands."),
                 );
             } else if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_command(ctx, &args).await;
+                let _ = plugin.on_command(ctx, &args).await;
             }
         } else {
             let mut text = packet.text.clone();
-            if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_chat(ctx, &mut text).await;
-            }
-            if !ctx.cancelled {
+            let flow = match self.plugin.upgrade() {
+                Some(plugin) => plugin.on_chat(ctx, &mut text).await,
+                None => Flow::Continue,
+            };
+            if flow == Flow::Continue {
                 let name = ctx.server().player_name(id);
                 info!("[CHAT] {name}: {text}");
                 if let Some(cn) = ctx.server().get_cn(id) {
@@ -603,27 +615,32 @@ impl<P: Plugin> Plugin for Base<P> {
                 }
             }
         }
+        Flow::Continue
     }
 
-    async fn switch_name(&self, ctx: &mut Context, packet: &channel1::SwitchName) {
+    async fn switch_name(&self, ctx: &mut Context, packet: &channel1::SwitchName) -> Flow {
         ctx.server().set_name(ctx.id(), packet.name.clone());
+        Flow::Continue
     }
 
-    async fn switch_model(&self, ctx: &mut Context, packet: &channel1::SwitchModel) {
+    async fn switch_model(&self, ctx: &mut Context, packet: &channel1::SwitchModel) -> Flow {
         ctx.server().set_model(ctx.id(), packet.model);
+        Flow::Continue
     }
 
-    async fn switch_team(&self, ctx: &mut Context, packet: &channel1::SwitchTeam) {
+    async fn switch_team(&self, ctx: &mut Context, packet: &channel1::SwitchTeam) -> Flow {
         ctx.server()
             .set_team(ctx.id(), packet.team.clone(), SetTeamReason::Switched);
+        Flow::Continue
     }
 
-    async fn ping(&self, ctx: &mut Context, packet: &channel1::Ping) {
+    async fn ping(&self, ctx: &mut Context, packet: &channel1::Ping) -> Flow {
         ctx.server()
             .send_chan1(ctx.id(), &channel1::Pong { ping: packet.time });
+        Flow::Continue
     }
 
-    async fn client_ping(&self, ctx: &mut Context, packet: &channel1::ClientPing) {
+    async fn client_ping(&self, ctx: &mut Context, packet: &channel1::ClientPing) -> Flow {
         let id = ctx.id();
         ctx.server().players.with_mut(id, |p| p.ping = packet.ping);
         if let Some(cn) = ctx.server().get_cn(id) {
@@ -635,9 +652,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn taunt(&self, ctx: &mut Context, packet: &channel1::Taunt) {
+    async fn taunt(&self, ctx: &mut Context, packet: &channel1::Taunt) -> Flow {
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
             ctx.server().broadcast_except_chan1(
@@ -648,9 +666,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn sound(&self, ctx: &mut Context, packet: &channel1::Sound) {
+    async fn sound(&self, ctx: &mut Context, packet: &channel1::Sound) -> Flow {
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
             ctx.server().broadcast_except_chan1(
@@ -661,9 +680,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn map(&self, ctx: &mut Context, data: &bytes::Bytes) {
+    async fn map(&self, ctx: &mut Context, data: &bytes::Bytes) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -680,14 +700,17 @@ impl<P: Plugin> Plugin for Base<P> {
             text: format!("[{name} uploaded the map, use \"/getmap\" to receive it]")
                 .lossy_cubestring(),
         });
+        Flow::Continue
     }
 
-    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) {
+    async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
         let map_bytes = server.game.read().map_data.clone();
-        let Some(data) = map_bytes else { return };
+        let Some(data) = map_bytes else {
+            return Flow::Continue;
+        };
 
         server.send_chan2(
             id,
@@ -713,20 +736,22 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn master_mode(&self, ctx: &mut Context, packet: &channel1::MasterModeClient) {
+    async fn master_mode(&self, ctx: &mut Context, packet: &channel1::MasterModeClient) -> Flow {
         if ctx.server().get_privilege(ctx.id()) >= Privilege::Master {
             ctx.server().set_master_mode(packet.mode);
         }
+        Flow::Continue
     }
 
     /// Mirrors the engine's `N_SETMASTER` handling (no passwords or auth).
-    async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) {
+    async fn set_master(&self, ctx: &mut Context, packet: &channel1::SetMaster) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let Some(target) = server.get_id(packet.client_num) else {
-            return;
+            return Flow::Continue;
         };
         let own = server.get_privilege(id);
         let theirs = server.get_privilege(target);
@@ -735,7 +760,7 @@ impl<P: Plugin> Plugin for Base<P> {
             // Give or take another player's master.
             if own < Privilege::Master || theirs >= own || (packet.val && theirs != Privilege::None)
             {
-                return;
+                return Flow::Continue;
             }
             if packet.val {
                 Privilege::Master
@@ -750,7 +775,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 Privilege::Master
             };
             if own >= want {
-                return;
+                return Flow::Continue;
             }
             if want == Privilege::Master {
                 let spectating = server
@@ -759,19 +784,19 @@ impl<P: Plugin> Plugin for Base<P> {
                     .unwrap_or(true);
                 if spectating {
                     crate::ui::send_warn(server, id, "Spectators may not claim master.");
-                    return;
+                    return Flow::Continue;
                 }
                 let taken = server
                     .players
                     .any(|other, p| other != id && p.privilege != Privilege::None);
                 if taken {
                     crate::ui::send_warn(server, id, "Master is already claimed.");
-                    return;
+                    return Flow::Continue;
                 }
             }
             want
         } else if own == Privilege::None {
-            return;
+            return Flow::Continue;
         } else {
             Privilege::None
         };
@@ -786,22 +811,23 @@ impl<P: Plugin> Plugin for Base<P> {
         });
         server.set_privilege(target, new);
         reopen_if_masterless(server);
+        Flow::Continue
     }
 
     /// Engine `trykick`: kicks and bans the IP for 4 hours. Admins can't be kicked.
-    async fn kick(&self, ctx: &mut Context, packet: &channel1::Kick) {
+    async fn kick(&self, ctx: &mut Context, packet: &channel1::Kick) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let own = server.get_privilege(id);
         let Some(victim) = server.get_id(packet.victim_cn) else {
-            return;
+            return Flow::Continue;
         };
         let theirs = server.get_privilege(victim);
         if own < Privilege::Master || victim == id || theirs > own || theirs >= Privilege::Admin {
-            return;
+            return Flow::Continue;
         }
         let Some(ip) = server.peer_addr(victim).map(|a| a.ip()) else {
-            return;
+            return Flow::Continue;
         };
 
         let kicker = server.player_name(id).to_utf8();
@@ -825,9 +851,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 server.disconnect_with(other, crate::bans::DISC_KICK);
             }
         }
+        Flow::Continue
     }
 
-    async fn clear_bans(&self, ctx: &mut Context, _packet: &channel1::ClearBans) {
+    async fn clear_bans(&self, ctx: &mut Context, _packet: &channel1::ClearBans) -> Flow {
         let server = ctx.server();
         if server.get_privilege(ctx.id()) >= Privilege::Master {
             server.clear_bans();
@@ -835,19 +862,20 @@ impl<P: Plugin> Plugin for Base<P> {
                 text: "cleared all bans".lossy_cubestring(),
             });
         }
+        Flow::Continue
     }
 
     /// Engine `N_SETTEAM`: masters move players between teams in team modes.
-    async fn set_team(&self, ctx: &mut Context, packet: &channel1::SetTeamClient) {
+    async fn set_team(&self, ctx: &mut Context, packet: &channel1::SetTeamClient) -> Flow {
         let server = ctx.server();
         if server.get_privilege(ctx.id()) < Privilege::Master
             || !server.game.read().mode.has_teams()
             || packet.team.as_bytes().is_empty()
         {
-            return;
+            return Flow::Continue;
         }
         let Some(target) = server.get_id(packet.client_num) else {
-            return;
+            return Flow::Continue;
         };
         let stripped = packet.team.strip_colors();
         let team = CubeString::from_bytes(
@@ -862,96 +890,95 @@ impl<P: Plugin> Plugin for Base<P> {
         if same == Some(false) {
             server.set_team(target, team, SetTeamReason::Forced);
         }
+        Flow::Continue
     }
 
-    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
+    async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
-        let privilege = server.get_privilege(id);
-        let prev_map = server.game.read().map_name.clone();
 
-        match server.master_mode() {
+        let change = match server.master_mode() {
             MasterMode::Open => {
                 let total_clients = server.client_count();
-                let passed = {
-                    let mut game = server.game.write();
-                    game.map_votes.insert(id, packet.map_name.clone());
-                    let votes = game.map_votes.values().filter(|v| **v == packet.map_name);
-                    votes.count() * 2 > total_clients
-                };
-                if passed {
-                    do_map_change(server, packet.map_name.clone(), packet.mode);
-                }
+                let mut game = server.game.write();
+                game.map_votes.insert(id, packet.map_name.clone());
+                let votes = game.map_votes.values().filter(|v| **v == packet.map_name);
+                votes.count() * 2 > total_clients
             }
-            _ => {
-                if privilege >= Privilege::Master {
-                    do_map_change(server, packet.map_name.clone(), packet.mode);
-                }
-            }
-        }
-
-        let new_map = server.game.read().map_name.clone();
-        if new_map != prev_map {
-            let mode = server.game.read().mode;
+            _ => server.get_privilege(id) >= Privilege::Master,
+        };
+        if change {
+            do_map_change(server, packet.map_name.clone(), packet.mode);
             if let Some(plugin) = self.plugin.upgrade() {
-                ctx.cancelled = false;
-                plugin.map_changed(ctx, &new_map, mode).await;
+                plugin.map_changed(ctx, &packet.map_name, packet.mode).await;
             }
         }
+        Flow::Continue
     }
 
     // ── Coop-edit ─────────────────────────────────────────────────────────────
 
-    async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) {
+    async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) {
+    async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
+    async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) {
+    async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) {
+    async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) {
+    async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) {
+    async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn edit_mode(&self, ctx: &mut Context, packet: &channel1::EditMode) {
+    async fn edit_mode(&self, ctx: &mut Context, packet: &channel1::EditMode) -> Flow {
         let server = ctx.server();
         if server.game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
         let changed = server
             .players
             .with_mut(ctx.id(), |p| p.status.set_editing(packet.is_editing));
         if changed != Some(true) {
-            return;
+            return Flow::Continue;
         }
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
+    async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) {
+    async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
-    async fn remip(&self, ctx: &mut Context, packet: &channel1::Remip) {
+    async fn remip(&self, ctx: &mut Context, packet: &channel1::Remip) -> Flow {
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
 
-    async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) {
+    async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
         if server.game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
 
         let idx = packet.ent_id as usize;
@@ -976,16 +1003,18 @@ impl<P: Plugin> Plugin for Base<P> {
                 item_index: idx as i32,
             });
         }
+        Flow::Continue
     }
 
-    async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
+    async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) -> Flow {
         if packet.size >= 0 {
             ctx.server().game.write().items.clear();
         }
         relay_coop(ctx.server(), ctx.id(), packet);
+        Flow::Continue
     }
 
-    async fn item_list(&self, ctx: &mut Context, packet: &channel1::ItemList) {
+    async fn item_list(&self, ctx: &mut Context, packet: &channel1::ItemList) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -997,7 +1026,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let num_players = server.client_count();
         let mut game = server.game.write();
         if !game.items.is_awaiting_list() || is_spectator {
-            return;
+            return Flow::Continue;
         }
         game.items.load(
             packet
@@ -1006,9 +1035,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 .map(|item| (item.item_index as usize, item.item_type)),
             num_players,
         );
+        Flow::Continue
     }
 
-    async fn item_pickup(&self, ctx: &mut Context, packet: &channel1::ItemPickup) {
+    async fn item_pickup(&self, ctx: &mut Context, packet: &channel1::ItemPickup) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
         let idx = packet.item_index as usize;
@@ -1055,11 +1085,12 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             ),
         }
+        Flow::Continue
     }
 
-    async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
+    async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) -> Flow {
         if ctx.server().game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
@@ -1071,11 +1102,12 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
+    async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) -> Flow {
         if ctx.server().game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
@@ -1087,11 +1119,12 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
+    async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) -> Flow {
         if ctx.server().game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
         let id = ctx.id();
         ctx.server().players.with_mut(id, |p| p.clipboard = None);
@@ -1106,11 +1139,12 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
+    async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) -> Flow {
         if ctx.server().game.read().mode != GameMode::CoopEdit {
-            return;
+            return Flow::Continue;
         }
         let id = ctx.id();
         if let Some(cn) = ctx.server().get_cn(id) {
@@ -1124,9 +1158,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 
-    async fn clipboard(&self, ctx: &mut Context, packet: &channel1::ClipboardClient) {
+    async fn clipboard(&self, ctx: &mut Context, packet: &channel1::ClipboardClient) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
 
@@ -1135,7 +1170,7 @@ impl<P: Plugin> Plugin for Base<P> {
             .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(false);
         if is_spectator {
-            return;
+            return Flow::Continue;
         }
 
         server.players.with_mut(id, |p| {
@@ -1155,6 +1190,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 },
             );
         }
+        Flow::Continue
     }
 }
 
