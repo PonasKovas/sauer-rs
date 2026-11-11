@@ -1454,7 +1454,7 @@ impl Plugin for DeathrunPlay {
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
         let trap_idx = {
             let state = crate::map_state::get_server_state(server).read().unwrap();
-            if state.trap_edit.is_some() {
+            if state.mode.editing().is_some() {
                 return;
             }
             state.traps.iter().position(|trap| {

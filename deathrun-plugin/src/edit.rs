@@ -1,7 +1,7 @@
 use crate::map_state::{
     DeathrunState, get_server_state, is_waiting_for_map, update_server_items, with_map_state_mut,
 };
-use crate::trap::{cmd_deltrap, cmd_newtrap, guard};
+use crate::trap::{cmd_deltrap, guard, place::Kind};
 use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
@@ -82,6 +82,7 @@ impl Plugin for DeathrunEdit {
         self.trap_highlights.remove(&id);
         self.pending_welcome.remove(&id);
         crate::trap::placement::forget_seethrough(ctx.server(), id);
+        crate::trap::place::cancel_for(ctx.server(), id, "the player left");
 
         let mut state_w = get_server_state(ctx.server()).write().unwrap();
         if let Some(map) = state_w.map.as_mut() {
@@ -115,15 +116,27 @@ impl Plugin for DeathrunEdit {
             .extra
             .insert(crate::trap::placement::SeeThrough::default());
 
-        server.register_command("#newtrap", "create a trap at the aimed surface", "");
-        server.register_command("#deltrap", "remove the trap at the aimed surface", "");
-        server.register_command("#settrap", "reset and enter edit mode for a trap", "");
         server.register_command(
-            "#edittrap",
-            "enter edit mode for a trap without resetting",
+            "#newtrap",
+            "place a new trap button (type again to put it down)",
             "",
         );
-        server.register_command("#endtrap", "finish editing the trap", "");
+        server.register_command(
+            "#movetrap",
+            "move the aimed trap button (type again to put it down)",
+            "",
+        );
+        server.register_command("#deltrap", "remove the trap at the aimed surface", "");
+        server.register_command(
+            "#cleartrap",
+            "remove what the aimed trap does, keep its button",
+            "",
+        );
+        server.register_command(
+            "#edittrap",
+            "edit the aimed trap; type again to save and finish",
+            "",
+        );
         server.register_command(
             "#trapinfo",
             "print info about the trap (size, overhead)",
@@ -167,17 +180,22 @@ impl Plugin for DeathrunEdit {
         let seethrough_target;
 
         let origin = [packet.pos.x, packet.pos.y, packet.pos.z + 14.0];
+        let yaw_rad = (packet.dir.yaw as f32).to_radians();
+        let pitch_rad = (packet.dir.pitch as f32).to_radians();
+        let forward = [
+            -yaw_rad.sin() * pitch_rad.cos(),
+            yaw_rad.cos() * pitch_rad.cos(),
+            pitch_rad.sin(),
+        ];
+
+        if is_spectator {
+            crate::trap::place::cancel_for(server, id, "the player went spectator");
+        } else {
+            crate::trap::place::follow(server, id, origin, forward);
+        }
 
         {
             let state = get_server_state(server).read().unwrap();
-
-            let yaw_rad = (packet.dir.yaw as f32).to_radians();
-            let pitch_rad = (packet.dir.pitch as f32).to_radians();
-            let forward = [
-                -yaw_rad.sin() * pitch_rad.cos(),
-                yaw_rad.cos() * pitch_rad.cos(),
-                pitch_rad.sin(),
-            ];
 
             let mut dist = 2048.0;
             if let Some(map) = state.map.as_ref() {
@@ -204,9 +222,14 @@ impl Plugin for DeathrunEdit {
                     .position(|trap| trap.contains_button_point(hit_pt, 0.5))
             };
 
-            let edited_trap = state.trap_edit.as_ref().map(|e| e.trap_idx);
-            target_trap = edited_trap.or(hit_trap);
-            is_trap_edit_active = state.trap_edit.is_some();
+            let edited_trap = state.mode.editing().map(|e| e.trap_idx);
+            let moving_trap = state
+                .mode
+                .placing()
+                .filter(|p| p.player == id)
+                .and_then(|p| p.trap);
+            target_trap = edited_trap.or(moving_trap).or(hit_trap);
+            is_trap_edit_active = edited_trap.is_some();
             seethrough_target =
                 hit_trap.map(|idx| crate::trap::placement::button_key(&state.traps[idx]));
 
@@ -216,15 +239,14 @@ impl Plugin for DeathrunEdit {
 
                 let trap = &state.traps[idx];
                 let live = state
-                    .trap_edit
-                    .as_ref()
+                    .mode
+                    .editing()
                     .filter(|e| e.trap_idx == idx)
                     .and_then(|edit| {
-                        let old = trap.geom.as_ref().filter(|_| edit.is_edit);
                         crate::trap::commands::geometry_bounds(
                             &edit.original_map,
                             state.map.as_ref()?,
-                            old,
+                            trap.geom.as_ref(),
                         )
                     });
                 let shown = live.or_else(|| trap.geom.as_ref().map(|g| g.clip_box()));
@@ -553,47 +575,23 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) {
+        const TRAP_COMMANDS: [&str; 8] = [
+            "#newtrap",
+            "#movetrap",
+            "#deltrap",
+            "#cleartrap",
+            "#edittrap",
+            "#trapinfo",
+            "#traptime",
+            "#traptimeout",
+        ];
         let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
-
-        if cmd != "#newtrap"
-            && cmd != "#deltrap"
-            && cmd != "#settrap"
-            && cmd != "#edittrap"
-            && cmd != "#endtrap"
-            && cmd != "#trapinfo"
-            && cmd != "#traptime"
-            && cmd != "#traptimeout"
-        {
+        if !TRAP_COMMANDS.contains(&cmd) {
             return;
         }
 
         let id = ctx.id();
         let server = ctx.server().clone();
-
-        if cmd == "#endtrap" {
-            crate::trap::cmd_endtrap(ctx);
-            return;
-        }
-
-        if cmd == "#newtrap" || cmd == "#deltrap" || cmd == "#settrap" || cmd == "#edittrap" {
-            let state = get_server_state(&server).read().unwrap();
-            if state.trap_edit.is_some() {
-                ui::send_warn(
-                    &server,
-                    id,
-                    "Cannot edit traps while #edittrap is active. Use #endtrap first.",
-                );
-                return;
-            }
-            if !state.active_trap_stack.is_empty() {
-                ui::send_warn(
-                    &server,
-                    id,
-                    "Cannot edit traps while a trap is currently activated. Wait for it to reset.",
-                );
-                return;
-            }
-        }
 
         let pos = match server.players.try_get(id) {
             Some(p) => {
@@ -620,37 +618,46 @@ impl Plugin for DeathrunEdit {
         ];
         let origin = [pos.x, pos.y, pos.z + 14.0];
 
-        let hit_orient;
-        let hit_pt;
-        {
+        match cmd {
+            "#newtrap" => {
+                return crate::trap::place::command(&server, id, Kind::New, origin, ray);
+            }
+            "#movetrap" => {
+                return crate::trap::place::command(&server, id, Kind::Move, origin, ray);
+            }
+            _ => {}
+        }
+
+        let hit_pt = {
             let state = get_server_state(&server).read().unwrap();
             let map = match state.map.as_ref() {
                 None => return,
                 Some(m) => m,
             };
-
-            let hit = match sauer_map::raycast::raycast_with_filter(map, origin, ray, 2048.0, |c| {
+            sauer_map::raycast::raycast_with_filter(map, origin, ray, 2048.0, |c| {
                 !c.is_empty() || c.material.volume == sauer_core::Volume::Glass
-            }) {
-                None => return,
-                Some(h) => h,
-            };
-            hit_orient = hit.orient;
-            hit_pt = [
-                origin[0] + ray[0] * hit.dist,
-                origin[1] + ray[1] * hit.dist,
-                origin[2] + ray[2] * hit.dist,
-            ];
+            })
+            .map(|hit| {
+                [
+                    origin[0] + ray[0] * hit.dist,
+                    origin[1] + ray[1] * hit.dist,
+                    origin[2] + ray[2] * hit.dist,
+                ]
+            })
+        };
+
+        // Finishing an edit works wherever the player aims.
+        if cmd == "#edittrap" {
+            return crate::trap::cmd_edittrap(ctx, hit_pt);
         }
+        let Some(hit_pt) = hit_pt else {
+            return;
+        };
 
         if cmd == "#deltrap" {
             cmd_deltrap(ctx, hit_pt);
-        } else if cmd == "#newtrap" {
-            cmd_newtrap(ctx, hit_pt, hit_orient);
-        } else if cmd == "#settrap" {
-            crate::trap::cmd_settrap(ctx, hit_pt);
-        } else if cmd == "#edittrap" {
-            crate::trap::cmd_edittrap(ctx, hit_pt);
+        } else if cmd == "#cleartrap" {
+            crate::trap::cmd_cleartrap(ctx, hit_pt);
         } else if cmd == "#trapinfo" {
             crate::trap::cmd_trapinfo(ctx, hit_pt);
         } else if cmd == "#traptime" {
@@ -682,7 +689,7 @@ impl Plugin for DeathrunEdit {
 
         let trap_to_trigger = {
             let state = crate::map_state::get_server_state(&server).read().unwrap();
-            if state.trap_edit.is_some() {
+            if state.mode.editing().is_some() {
                 return;
             }
 
@@ -708,8 +715,9 @@ impl Plugin for DeathrunEdit {
     async fn map_crc(&self, ctx: &mut Context, _packet: &channel1::MapCrc) {
         let id = ctx.id();
         let server = ctx.server();
-        // A freshly loaded map has every button solid again.
+        // A freshly loaded map has every button solid again, and no placement preview.
         crate::trap::placement::mark_seethrough_stale_for(server, id);
+        crate::trap::place::reshow_for(server, id);
         // A locked server keeps non-masters spectating, like vanilla.
         let locked = matches!(
             server.master_mode(),
@@ -771,13 +779,17 @@ impl Plugin for DeathrunEdit {
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
         let id = ctx.id();
 
-        if get_server_state(ctx.server())
+        let busy = get_server_state(ctx.server())
             .read()
             .unwrap()
-            .trap_edit
-            .is_some()
-        {
-            ui::send_warn(ctx.server(), id, "Cannot upload map while editing a trap.");
+            .mode
+            .busy_reason();
+        if let Some(why) = busy {
+            ui::send_warn(
+                ctx.server(),
+                id,
+                &format!("Cannot upload a map while {why}."),
+            );
             ctx.cancel();
             return;
         }
@@ -878,11 +890,21 @@ impl Plugin for DeathrunEdit {
 
             match parse_result {
                 Ok((loaded, warnings, out_bytes, world_size)) => {
-                    update_server_items(loaded.map.as_ref().unwrap(), &server_clone);
                     let loaded_traps_len = loaded.traps.len();
 
                     let uploading_map_name = {
                         let mut s = get_server_state(&server_clone).write().unwrap();
+                        // Someone started editing or placing while the map was parsed.
+                        if let Some(why) = s.mode.busy_reason() {
+                            drop(s);
+                            ui::send_warn(
+                                &server_clone,
+                                id,
+                                &format!("Map upload dropped: {why}. Send it again later."),
+                            );
+                            return;
+                        }
+                        update_server_items(loaded.map.as_ref().unwrap(), &server_clone);
                         let name = s
                             .uploading_map_name
                             .take()
@@ -1044,7 +1066,11 @@ impl Plugin for DeathrunEdit {
                 ok = false;
             }
         });
-        if !ok {
+        let covers = crate::trap::place::covers_preview(
+            &get_server_state(ctx.server()).read().unwrap(),
+            (min, max),
+        );
+        if !ok || covers {
             handle_edit_reject(ctx, min, max);
         }
     }
@@ -1057,7 +1083,11 @@ impl Plugin for DeathrunEdit {
                 ok = false;
             }
         });
-        if !ok {
+        let covers = crate::trap::place::covers_preview(
+            &get_server_state(ctx.server()).read().unwrap(),
+            (min, max),
+        );
+        if !ok || covers {
             handle_edit_reject(ctx, min, max);
         }
     }
@@ -1127,8 +1157,9 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server();
 
-        if get_server_state(server).read().unwrap().trap_edit.is_some() {
-            ui::send_warn(server, id, "Cannot use newmap while editing a trap.");
+        let busy = get_server_state(server).read().unwrap().mode.busy_reason();
+        if let Some(why) = busy {
+            ui::send_warn(server, id, &format!("Cannot use newmap while {why}."));
             crate::map_state::send_map_to_async(ctx.server(), id);
             ctx.cancel();
             return;
@@ -1140,7 +1171,7 @@ impl Plugin for DeathrunEdit {
             state.map = Some(Map::new_empty(world_size));
             state.traps.clear();
             state.active_trap_stack.clear();
-            state.trap_edit = None;
+            state.mode = Default::default();
             state.base_map = None;
             state.vault = None;
             return;
@@ -1165,13 +1196,17 @@ impl Plugin for DeathrunEdit {
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
         let id = ctx.id();
 
-        if get_server_state(ctx.server())
+        let busy = get_server_state(ctx.server())
             .read()
             .unwrap()
-            .trap_edit
-            .is_some()
-        {
-            ui::send_warn(ctx.server(), id, "Cannot vote map while editing a trap.");
+            .mode
+            .busy_reason();
+        if let Some(why) = busy {
+            ui::send_warn(
+                ctx.server(),
+                id,
+                &format!("Cannot vote for a map while {why}."),
+            );
             ctx.cancel();
             return;
         }

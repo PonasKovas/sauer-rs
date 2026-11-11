@@ -2,14 +2,15 @@ pub mod commands;
 pub mod ents;
 pub mod guard;
 pub mod persist;
+pub mod place;
 pub mod placement;
 pub mod record;
 pub mod trigger;
 pub mod vault;
 
 pub use commands::{
-    cmd_deltrap, cmd_edittrap, cmd_endtrap, cmd_newtrap, cmd_settrap, cmd_trapinfo, cmd_traptime,
-    cmd_traptime_print, cmd_traptimeout, cmd_traptimeout_print,
+    cmd_cleartrap, cmd_deltrap, cmd_edittrap, cmd_trapinfo, cmd_traptime, cmd_traptime_print,
+    cmd_traptimeout, cmd_traptimeout_print,
 };
 pub use ents::EntChange;
 pub use placement::{rebuild_all_trap_buttons, reset_button_colors_by_pos};
@@ -22,6 +23,10 @@ pub const BUTTON_SIDE_TEX: u16 = 351;
 pub const BUTTON_SIDE_SCALE: f32 = 0.125;
 pub const BUTTON_COLOR_READY: [f32; 3] = [1.0, 1.0, 1.0];
 pub const BUTTON_COLOR_ACTIVE: [f32; 3] = [0.2, 0.2, 0.2];
+/// Preview tints while placing a button: fine, inside a trap's frame, can't go there.
+pub const BUTTON_COLOR_GOOD: [f32; 3] = [0.2, 1.0, 0.2];
+pub const BUTTON_COLOR_WARN: [f32; 3] = [1.0, 0.9, 0.1];
+pub const BUTTON_COLOR_BAD: [f32; 3] = [1.0, 0.15, 0.15];
 /// Button alpha while someone aims at it. Only takes effect on clients the
 /// button was made see-through for (see `placement::update_seethrough_button`).
 pub const BUTTON_SEETHROUGH_ALPHA: f32 = 0.3;
@@ -32,7 +37,44 @@ pub const TRAP_BUDGET: usize = 1024 * 1024;
 pub struct TrapEditState {
     pub trap_idx: usize,
     pub original_map: Box<sauer_map::Map>,
-    pub is_edit: bool,
+}
+
+/// What the shared trap tools are doing. Editing a trap and placing a button
+/// never happen at once: an edit records every change to the map, and
+/// placing a button is one.
+#[derive(Default)]
+pub enum TrapMode {
+    #[default]
+    Idle,
+    /// `#edittrap`: every player's edits go into this trap's active state.
+    Editing(TrapEditState),
+    /// `#newtrap` or `#movetrap`: one player is choosing a spot for a button.
+    Placing(place::Placing),
+}
+
+impl TrapMode {
+    pub fn editing(&self) -> Option<&TrapEditState> {
+        match self {
+            Self::Editing(e) => Some(e),
+            _ => None,
+        }
+    }
+
+    pub fn placing(&self) -> Option<&place::Placing> {
+        match self {
+            Self::Placing(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Why map-wide actions (map upload, vote, /newmap) have to wait, if they do.
+    pub fn busy_reason(&self) -> Option<&'static str> {
+        match self {
+            Self::Idle => None,
+            Self::Editing(_) => Some("a trap is being edited (#edittrap to finish)"),
+            Self::Placing(_) => Some("a trap button is being placed"),
+        }
+    }
 }
 
 /// The geometry a trap pastes over its clip box when it fires.

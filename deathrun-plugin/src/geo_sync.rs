@@ -35,6 +35,9 @@ pub async fn broadcast_payloads(
     payloads: Vec<ClipboardPayload>,
     delay_ms: u64,
 ) {
+    if payloads.is_empty() {
+        return;
+    }
     for payload in payloads {
         server.broadcast_chan1(paste_packets(owner_cn, payload));
 
@@ -42,8 +45,22 @@ pub async fn broadcast_payloads(
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
     }
-    // The paste turned any see-through trap buttons in it solid again.
+    after_paste(server);
+}
+
+/// Sends right away, for callers that track what they paste themselves
+/// (the button placement preview).
+pub fn broadcast_now(server: &Server, owner_cn: i32, payloads: Vec<ClipboardPayload>) {
+    for payload in payloads {
+        server.broadcast_chan1(paste_packets(owner_cn, payload));
+    }
+}
+
+fn after_paste(server: &Server) {
+    // The paste turned any see-through trap buttons in it solid again, and
+    // may have covered the placement preview.
     crate::trap::placement::mark_seethrough_stale(server);
+    crate::trap::place::repaint(server);
 }
 
 pub async fn send_payloads_to_clients(
@@ -53,6 +70,9 @@ pub async fn send_payloads_to_clients(
     payloads: Vec<ClipboardPayload>,
     delay_ms: u64,
 ) {
+    if payloads.is_empty() {
+        return;
+    }
     for payload in payloads {
         let packets = paste_packets(owner_cn, payload);
         for &target_id in target_ids {
@@ -63,6 +83,5 @@ pub async fn send_payloads_to_clients(
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
     }
-    // The paste turned any see-through trap buttons in it solid again.
-    crate::trap::placement::mark_seethrough_stale(server);
+    after_paste(server);
 }

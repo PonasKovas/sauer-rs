@@ -16,7 +16,7 @@ pub fn broadcast_trap_edit_started(server: &Server, trap_idx: usize) {
             body("  You are now editing this trap's active state."),
             body("  Any geometry, texture, and entity changes you make"),
             body("  within the bounds of your edits will be recorded."),
-            tip("#endtrap", "save your changes and return to normal mode"),
+            tip("#edittrap", "save your changes and return to normal mode"),
         ],
     );
 }
@@ -154,14 +154,14 @@ pub fn send_welcome_edit(server: &Server, id: u64) {
         tip("#traptimeout <ms>", "set trap timeout (default 20 000ms)"),
         tip("#traptime <ms>", "extend duration  (default 2 000ms)"),
         tip("#trapinfo", "print info about the trap (size, overhead)"),
-        tip("#endtrap", "finish editing the trap"),
-        tip("#edittrap", "enter edit mode for a trap without resetting"),
-        tip(
-            "#settrap",
-            "reset and enter edit mode for a trap (just make edits now)",
-        ),
+        tip("#cleartrap", "remove what the trap does, keep its button"),
         tip("#deltrap", "remove the trap at the aimed surface"),
-        tip("#newtrap", "create a trap at the aimed surface"),
+        tip("#edittrap", "edit the trap; type again to save and finish"),
+        tip("#movetrap", "move the button; type again to put it down"),
+        tip(
+            "#newtrap",
+            "place a new trap button; type again to put it down",
+        ),
         section("Getting started"),
         body("  Just start editing, or"),
         tip(

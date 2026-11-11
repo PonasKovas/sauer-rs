@@ -148,9 +148,18 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     }
 }
 
+pub fn trap_triggerable(state: &crate::map_state::DeathrunState, trap_idx: usize) -> bool {
+    // A button being moved is off limits until it is placed.
+    state.mode.editing().is_none()
+        && state
+            .mode
+            .placing()
+            .is_none_or(|p| p.trap != Some(trap_idx))
+}
+
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
     let mut state = get_server_state(server).write().unwrap();
-    if state.trap_edit.is_some() {
+    if !trap_triggerable(&state, trap_idx) {
         return;
     }
 

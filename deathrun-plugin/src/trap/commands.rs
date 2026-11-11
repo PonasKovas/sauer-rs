@@ -1,7 +1,7 @@
-use super::{BUTTON_SIZE, Trap, TrapEditState, TrapGeom, persist};
+use super::{Trap, TrapEditState, TrapGeom, TrapMode, persist};
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
-use sauer_map::{Map, Selection};
+use sauer_map::Map;
 use sauer_proto::{
     Client, Encode,
     channel1::{self, ServMsg},
@@ -91,13 +91,10 @@ pub fn capture_geometry(current: &Map, (min, max): Box3) -> TrapGeom {
 
 /// Size of the trap being edited if it were recorded right now.
 pub fn edit_size(state: &DeathrunState) -> usize {
-    let (Some(edit), Some(current)) = (state.trap_edit.as_ref(), state.map.as_ref()) else {
+    let (Some(edit), Some(current)) = (state.mode.editing(), state.map.as_ref()) else {
         return 0;
     };
-    let old = edit
-        .is_edit
-        .then(|| state.traps.get(edit.trap_idx).and_then(|t| t.geom.as_ref()))
-        .flatten();
+    let old = state.traps.get(edit.trap_idx).and_then(|t| t.geom.as_ref());
     geometry_bounds(&edit.original_map, current, old)
         .map_or(0, |b| payload_size(&capture_geometry(current, b).payload))
 }
@@ -145,11 +142,35 @@ fn spawn_payloads(server: &Arc<Server>, payloads: Vec<ClipboardPayload>) {
     });
 }
 
+/// Why trap `idx` can't be changed right now, if it can't.
+fn locked(server: &Server, state: &DeathrunState, idx: usize) -> Option<String> {
+    let p = state.mode.placing()?;
+    (p.trap == Some(idx)).then(|| super::place::busy_message(server, state).unwrap_or_default())
+}
+
+/// Why traps can't be added or removed right now, if they can't.
+fn busy(server: &Server, state: &DeathrunState) -> Option<String> {
+    if let Some(e) = state.mode.editing() {
+        return Some(format!(
+            "Trap {} is being edited. Type #edittrap to finish editing first.",
+            e.trap_idx
+        ));
+    }
+    if let Some(msg) = super::place::busy_message(server, state) {
+        return Some(msg);
+    }
+    (!state.active_trap_stack.is_empty()).then(|| "Wait for the active traps to reset.".to_string())
+}
+
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
 
+    if let Some(msg) = busy(server, &state) {
+        crate::ui::send_warn(server, id, &msg);
+        return;
+    }
     let Some(trap_idx) = find_trap(&state, hit_pt) else {
         not_looking(server, id);
         return;
@@ -157,103 +178,72 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let trap = state.traps.remove(trap_idx);
 
     let mut sync = persist::Sync::default();
+    let key = super::placement::button_key(&trap);
+    if let Err(e) = super::place::set_button_cells(&mut state, Some(key), None, &mut sync) {
+        state.traps.insert(trap_idx, trap);
+        drop(state);
+        crate::ui::send_warn(server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
+        return;
+    }
     if let Some(geom) = &trap.geom {
         persist::free_shelf(&mut state, geom, &mut sync);
     }
-
-    let map = state.map.as_mut().unwrap();
-    let sel = Selection {
-        o: Vec3 {
-            x: trap.button_pos[0],
-            y: trap.button_pos[1],
-            z: trap.button_pos[2],
-        },
-        s: Vec3 { x: 1, y: 1, z: 1 },
-        grid: trap.button_size,
-        orient: sauer_proto::data::Orient::try_from(trap.button_orient as i32)
-            .unwrap_or(sauer_proto::data::Orient::Left),
-        cx: 0,
-        cxs: 2,
-        cy: 0,
-        cys: 2,
-        corner: 0,
-    };
-    let (b_min, b_max) = trap.button_box();
-    map.unprotect_region(b_min, b_max);
-    map.fill(&sel, false);
-    map.set_material(&sel, Default::default());
-    let payloads = map.generate_restore_packets(b_min, b_max);
 
     let result = persist::save(&mut state, &mut sync);
     let out = persist::packets(&state, sync);
     drop(state);
 
-    spawn_payloads(server, payloads);
     persist::send(server, out);
     if let Err(e) = result {
         crate::ui::send_warn(server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
     }
 }
 
-pub fn cmd_newtrap(ctx: &Context, hit_pt: [f32; 3], hit_orient: u8) {
+/// Removes what a trap does, keeping its button and settings.
+pub fn cmd_cleartrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
-    let server = ctx.server().clone();
-    let mut state = get_server_state(&server).write().unwrap();
+    let server = ctx.server();
+    let mut state = get_server_state(server).write().unwrap();
 
-    let map = match state.map.as_mut() {
-        None => return,
-        Some(m) => m,
-    };
-
-    let d = (hit_orient >> 1) as usize;
-    let dc = (hit_orient & 1) as usize;
-    let r_axis = [1usize, 2, 0][d];
-    let c_axis = [2usize, 0, 1][d];
-
-    let snap = |v: f32| -> i32 { (v / BUTTON_SIZE as f32).floor() as i32 * BUTTON_SIZE };
-    let snap_d = if dc == 0 {
-        (hit_pt[d] / BUTTON_SIZE as f32).floor() as i32 * BUTTON_SIZE
-    } else {
-        ((hit_pt[d] - 0.001) / BUTTON_SIZE as f32).ceil() as i32 * BUTTON_SIZE
-    };
-
-    let mut adj = [0i32; 3];
-    adj[d] = if dc == 0 {
-        snap_d - BUTTON_SIZE
-    } else {
-        snap_d
-    };
-    adj[r_axis] = snap(hit_pt[r_axis]);
-    adj[c_axis] = snap(hit_pt[c_axis]);
-
-    let ws = map.size;
-    if adj.iter().any(|&v| v < 0 || v >= ws)
-        || adj[r_axis] + BUTTON_SIZE > ws
-        || adj[c_axis] + BUTTON_SIZE > ws
-    {
+    if let Some(msg) = busy(server, &state) {
+        crate::ui::send_warn(server, id, &msg);
         return;
     }
-    let b_max = adj.map(|v| v + BUTTON_SIZE);
-    if map.is_protected(adj, b_max) {
-        crate::ui::send_warn(&server, id, "A trap can't be placed here.");
+    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+        not_looking(server, id);
+        return;
+    };
+    if state.traps[trap_idx].is_active {
+        crate::ui::send_warn(server, id, "That trap is active. Wait for it to reset.");
         return;
     }
-
-    crate::trap::placement::build_button_geometry(map, adj, BUTTON_SIZE, hit_orient);
-    map.protect_region(adj, b_max);
-    let payloads = map.generate_restore_packets(adj, b_max);
-
-    state.traps.push(Trap::new(adj, BUTTON_SIZE, hit_orient));
+    if !state.traps[trap_idx].does_anything() {
+        drop(state);
+        say(server, id, format!("Trap {trap_idx} does nothing yet."));
+        return;
+    }
 
     let mut sync = persist::Sync::default();
+    if let Some(geom) = state.traps[trap_idx].geom.take() {
+        persist::free_shelf(&mut state, &geom, &mut sync);
+    }
+    state.traps[trap_idx].ents.clear();
     let result = persist::save(&mut state, &mut sync);
     let out = persist::packets(&state, sync);
     drop(state);
 
-    persist::send(&server, out);
-    spawn_payloads(&server, payloads);
+    persist::send(server, out);
+    let name = server
+        .players
+        .try_get(id)
+        .map(|p| p.name.strip_colors().to_utf8())
+        .unwrap_or_else(|| "Someone".to_string());
+    server.broadcast_chan1(&ServMsg {
+        text: format!("\x0C6[TRAP]\x0C7 {name} cleared trap {trap_idx}. Its button stays.")
+            .lossy_cubestring(),
+    });
     if let Err(e) = result {
-        crate::ui::send_warn(&server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
+        crate::ui::send_warn(server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
     }
 }
 
@@ -265,6 +255,10 @@ fn set_trap_value(ctx: &Context, hit_pt: [f32; 3], f: impl FnOnce(&mut Trap) -> 
         not_looking(server, id);
         return;
     };
+    if let Some(msg) = locked(server, &state, trap_idx) {
+        crate::ui::send_warn(server, id, &msg);
+        return;
+    }
     let msg = f(&mut state.traps[trap_idx]);
     drop(state);
     say(server, id, msg);
@@ -363,20 +357,32 @@ pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
     say(server, id, msg);
 }
 
-pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
+/// `#edittrap`: starts editing the aimed trap, or finishes the edit going on.
+pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
     let id = ctx.id();
     let server = ctx.server();
     let mut state = get_server_state(server).write().unwrap();
+    let aimed = hit_pt.and_then(|p| find_trap(&state, p));
 
-    if state.trap_edit.is_some() {
-        say(
-            server,
-            id,
-            "A trap is already being edited. Use #endtrap first.".into(),
-        );
+    if let Some(edit) = state.mode.editing() {
+        // Someone aiming at another trap most likely meant to edit that one.
+        if let Some(other) = aimed.filter(|&i| i != edit.trap_idx) {
+            let msg = format!(
+                "Trap {} is being edited, not trap {other}. Aim at it, or away from other traps, and type #edittrap to finish.",
+                edit.trap_idx
+            );
+            drop(state);
+            crate::ui::send_warn(server, id, &msg);
+            return;
+        }
+        end_edit(server, id, state);
         return;
     }
-    let Some(trap_idx) = find_trap(&state, hit_pt) else {
+    if let Some(msg) = busy(server, &state) {
+        crate::ui::send_warn(server, id, &msg);
+        return;
+    }
+    let Some(trap_idx) = aimed else {
         not_looking(server, id);
         return;
     };
@@ -397,10 +403,9 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
         }
         None => Vec::new(),
     };
-    state.trap_edit = Some(TrapEditState {
+    state.mode = TrapMode::Editing(TrapEditState {
         trap_idx,
         original_map,
-        is_edit: true,
     });
     drop(state);
 
@@ -408,42 +413,13 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: [f32; 3]) {
     crate::ui::broadcast_trap_edit_started(server, trap_idx);
 }
 
-pub fn cmd_settrap(ctx: &Context, hit_pt: [f32; 3]) {
-    let id = ctx.id();
-    let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
-
-    if state.trap_edit.is_some() {
-        say(
-            server,
-            id,
-            "A trap is already being edited. Use #endtrap first.".into(),
-        );
-        return;
-    }
-    let Some(trap_idx) = find_trap(&state, hit_pt) else {
-        not_looking(server, id);
-        return;
-    };
-
-    let original_map = Box::new(state.map.clone().unwrap());
-    state.trap_edit = Some(TrapEditState {
-        trap_idx,
-        original_map,
-        is_edit: false,
-    });
-    drop(state);
-
-    crate::ui::broadcast_trap_edit_started(server, trap_idx);
-}
-
-pub fn cmd_endtrap(ctx: &Context) {
-    let id = ctx.id();
-    let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
-
-    let Some(edit_state) = state.trap_edit.take() else {
-        say(server, id, "No trap is currently being edited.".into());
+/// Records the trap being edited and puts the map back to its base state.
+fn end_edit(
+    server: &Arc<Server>,
+    id: u64,
+    mut state: std::sync::RwLockWriteGuard<'_, DeathrunState>,
+) {
+    let TrapMode::Editing(edit_state) = std::mem::take(&mut state.mode) else {
         return;
     };
 
@@ -471,11 +447,7 @@ pub fn cmd_endtrap(ctx: &Context) {
     let pool = current_map.virt_state.global_pool.clone();
     let old_geom = state.traps[edit_state.trap_idx].geom.clone();
 
-    let geom_bounds = geometry_bounds(
-        original,
-        current_map,
-        old_geom.as_ref().filter(|_| edit_state.is_edit),
-    );
+    let geom_bounds = geometry_bounds(original, current_map, old_geom.as_ref());
     let ent_changes = super::ents::diff(&original.entities, &current_map.entities, &pool);
     let changed_ent_ids: Vec<usize> = (0..original.entities.len().max(current_map.entities.len()))
         .filter(|i| !pool.contains(i) && original.entities.get(*i) != current_map.entities.get(*i))

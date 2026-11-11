@@ -44,7 +44,7 @@ pub struct DeathrunState {
     pub waiting_for_map: bool,
     pub uploading_map_name: Option<cube_string::CubeString>,
     pub traps: Vec<Trap>,
-    pub trap_edit: Option<crate::trap::TrapEditState>,
+    pub mode: crate::trap::TrapMode,
     pub base_map: Option<Box<sauer_map::Map>>,
     pub active_trap_stack: Vec<usize>,
     /// Where trap geometry and the trap record live in the map, once created.
@@ -60,7 +60,7 @@ impl Default for DeathrunState {
             waiting_for_map: false,
             uploading_map_name: None,
             traps: Vec::new(),
-            trap_edit: None,
+            mode: Default::default(),
             base_map: None,
             active_trap_stack: Vec::new(),
             vault: None,

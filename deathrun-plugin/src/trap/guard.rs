@@ -39,7 +39,12 @@ pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
 /// the budget.
 pub fn geometry_edit(ctx: &Context, bounds: Box3, mut apply: impl FnMut(&mut Map) -> bool) {
     let mut state = get_server_state(ctx.server()).write().unwrap();
-    let snapshot = match (&state.trap_edit, &state.map) {
+    if super::place::covers_preview(&state, bounds) {
+        drop(state);
+        reject(ctx, bounds, "A trap button is being placed there.");
+        return;
+    }
+    let snapshot = match (state.mode.editing(), &state.map) {
         (Some(_), Some(map)) => Some(sauer_map::clipboard::generate_region_clipboard(
             map, bounds.0, bounds.1,
         )),
@@ -137,7 +142,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
         })
         .collect();
 
-    let watch = state.trap_edit.is_none();
+    let watch = state.mode.editing().is_none();
     let before: Vec<Option<ogz_rs::data::Entity>> = ids
         .iter()
         .map(|&i| base_entities(&state).and_then(|e| e.get(i).cloned()))
@@ -241,7 +246,7 @@ const HALF: i32 = 8;
 
 /// Entity changes of a trap, live while it is being edited.
 pub fn trap_ent_changes(state: &DeathrunState, idx: usize) -> Vec<EntChange> {
-    match (&state.trap_edit, &state.map) {
+    match (state.mode.editing(), &state.map) {
         (Some(edit), Some(map)) if edit.trap_idx == idx => ents::diff(
             &edit.original_map.entities,
             &map.entities,

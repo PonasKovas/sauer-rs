@@ -37,16 +37,20 @@ impl Sync {
     }
 }
 
-fn maps(state: &mut DeathrunState) -> Vec<&mut Map> {
+pub fn maps(state: &mut DeathrunState) -> Vec<&mut Map> {
     let DeathrunState {
         map,
         base_map,
-        trap_edit,
+        mode,
         ..
     } = state;
+    let edit = match mode {
+        super::TrapMode::Editing(e) => Some(&mut *e.original_map),
+        _ => None,
+    };
     map.iter_mut()
         .chain(base_map.iter_mut().map(|m| &mut **m))
-        .chain(trap_edit.iter_mut().map(|e| &mut *e.original_map))
+        .chain(edit)
         .collect()
 }
 

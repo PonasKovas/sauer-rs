@@ -164,6 +164,34 @@ pub fn get_outer_faces_vslot_packets(
 }
 
 pub fn build_button_geometry(map: &mut sauer_map::Map, adj: [i32; 3], size: i32, orient: u8) {
+    build_button(
+        map,
+        adj,
+        size,
+        orient,
+        crate::trap::BUTTON_COLOR_READY,
+        false,
+    );
+}
+
+/// Clears a button's cell: the whole cell belongs to the button.
+pub fn clear_button_cell(map: &mut sauer_map::Map, adj: [i32; 3], size: i32) {
+    let cell = super::vault::sel(adj, [1, 1, 1], size);
+    map.fill(&cell, false);
+    map.set_material(&cell, Default::default());
+}
+
+/// Builds a button's cell: air, with the button on the `orient` side.
+/// `seethrough` gives the button alpha material, for placement previews.
+pub fn build_button(
+    map: &mut sauer_map::Map,
+    adj: [i32; 3],
+    size: i32,
+    orient: u8,
+    color: [f32; 3],
+    seethrough: bool,
+) {
+    clear_button_cell(map, adj, size);
     let d = (orient >> 1) as usize;
     let dc = orient & 1;
     let mut min = adj;
@@ -197,11 +225,15 @@ pub fn build_button_geometry(map: &mut sauer_map::Map, adj: [i32; 3], size: i32,
     map.fill(&sel, true);
     map.set_texture(&sel, crate::trap::BUTTON_SIDE_TEX, true);
     map.set_texture(&sel, crate::trap::BUTTON_FRONT_TEX, false);
-    // Solid for everyone. This also undoes the alpha material in maps saved by
-    // someone who was looking through a button at the time.
-    map.set_material(&sel, Default::default());
+    // Solid unless it's a preview. This also undoes the alpha material in maps
+    // saved by someone who was looking through a button at the time.
+    let mat = ogz_rs::data::Material {
+        alpha: seethrough,
+        ..Default::default()
+    };
+    map.set_material(&sel, mat);
 
-    for pkt in get_outer_faces_vslot_packets(adj, size, orient, crate::trap::BUTTON_COLOR_READY) {
+    for pkt in get_outer_faces_vslot_packets(adj, size, orient, color) {
         map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
     }
 }
