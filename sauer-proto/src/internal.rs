@@ -2,10 +2,9 @@ use crate::{ParseError, Session};
 
 pub(crate) mod constants;
 pub(crate) mod macros;
-mod msg_id_to_name;
 pub(crate) mod primitives;
 
-pub(crate) use msg_id_to_name::msg_id_to_name;
+pub(crate) use constants::msg_id_to_name;
 
 pub(crate) trait SauerWrite {
     fn sauer_write(&self, out: &mut Vec<u8>);
