@@ -12,7 +12,7 @@ pub mod state;
 mod status;
 pub mod team;
 
-pub use data::{ClipboardData, PlayerData};
+pub use data::PlayerData;
 pub use status::Status;
 
 /// Per-player data, keyed by client id.

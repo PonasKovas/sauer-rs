@@ -2,12 +2,6 @@ use super::Status;
 use cube_string::CubeString;
 use sauer_proto::data::{PlayerModel, PlayerState, Privilege, Vec3};
 
-/// Stored clipboard geometry data for coop edit clipboard relay.
-#[derive(Clone, Debug)]
-pub struct ClipboardData {
-    pub payload: sauer_proto::data::ClipboardPayload,
-}
-
 #[derive(Clone, Debug)]
 pub struct PlayerData {
     pub session_id: i32,
@@ -24,7 +18,7 @@ pub struct PlayerData {
     pub deaths: i32,
     pub teamkills: i32,
     /// Compressed clipboard geometry, set when N_CLIPBOARD is received.
-    pub clipboard: Option<ClipboardData>,
+    pub clipboard: Option<sauer_proto::data::ClipboardPayload>,
     /// Remaining quad damage milliseconds. Decremented each server tick.
     pub quad_millis: i32,
     pub privilege: Privilege,

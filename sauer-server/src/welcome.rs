@@ -88,7 +88,7 @@ impl Server {
                 };
                 let clipboard = pd.clipboard.as_ref().map(|cb| ClipboardServer {
                     client_num: other_cn,
-                    payload: Some(cb.payload.clone()),
+                    payload: Some(cb.clone()),
                 });
                 (init, clipboard)
             }) else {

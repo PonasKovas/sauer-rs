@@ -31,7 +31,7 @@ pub use game::{Config, Game};
 pub use items::{
     ItemState, Items, MAX_ENTS, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
 };
-pub use players::{ClipboardData, PlayerData, Players, Status};
+pub use players::{PlayerData, Players, Status};
 
 pub use plugin::{Context, Flow, Plugin, ServerQueryContext};
 pub use sauer_proto;

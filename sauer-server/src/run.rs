@@ -50,6 +50,7 @@ pub(crate) async fn run<P: Plugin>(
     // can fire semantic hooks through the complete plugin chain.
     let plugin = Arc::new_cyclic(|weak: &Weak<(P, Base<P>)>| (plugin, Base::new(weak.clone())));
     let mut server = Server::new();
+    server.config.get_mut().max_clients = max_peers;
     plugin.init(&mut server).await;
 
     let mut extinfo_addr = bind_addr;

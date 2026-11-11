@@ -6,7 +6,7 @@ use anyhow::{Result, bail};
 use bytes::Bytes;
 use lenet_tokio::{ConnEvent, ConnectionReceiver};
 use sauer_proto::{
-    Chan0Client, Chan1Client, Reader, Session,
+    Chan0Client, Chan1Client, Decode, Reader, Session,
     route::{C2S, Chan0, Chan1},
 };
 use std::{collections::VecDeque, sync::Arc};
@@ -76,6 +76,28 @@ fn log_bad_packet(channel: u8, data: &[u8], err: &impl std::fmt::Display) {
     );
 }
 
+/// Decodes every message in a packet into `buffer`. A message that fails to
+/// parse (odd values, modded clients) drops the rest of its packet instead of
+/// the player: the engine reads plain ints and never kicks for their values.
+fn decode_into<R, T: Decode<R>>(
+    data: &[u8],
+    session: &mut Session,
+    buffer: &mut VecDeque<Packet>,
+    channel: u8,
+    wrap: fn(T) -> Packet,
+) {
+    let mut reader = Reader::<R>::new(data, session);
+    while let Some(msg) = reader.next() {
+        match msg {
+            Ok(msg) => buffer.push_back(wrap(msg)),
+            Err(e) => {
+                log_bad_packet(channel, data, &e);
+                break;
+            }
+        }
+    }
+}
+
 struct SauerReceiver {
     rx: ConnectionReceiver,
     session: Session,
@@ -113,34 +135,21 @@ impl SauerReceiver {
                 None => bail!("connection closed"),
             };
 
-            // A message that fails to parse (odd values, modded clients) drops
-            // the rest of its packet instead of the player: the engine reads
-            // plain ints and never kicks for their values.
             match channel {
-                sauer_proto::CHANNEL_POSITIONS => {
-                    let mut reader = Reader::<C2S<Chan0>>::new(&data, &mut self.session);
-                    while let Some(msg) = reader.next() {
-                        match msg {
-                            Ok(msg) => self.buffer.push_back(Packet::Chan0(msg)),
-                            Err(e) => {
-                                log_bad_packet(channel, &data, &e);
-                                break;
-                            }
-                        }
-                    }
-                }
-                sauer_proto::CHANNEL_MESSAGES => {
-                    let mut reader = Reader::<C2S<Chan1>>::new(&data, &mut self.session);
-                    while let Some(msg) = reader.next() {
-                        match msg {
-                            Ok(msg) => self.buffer.push_back(Packet::Chan1(msg)),
-                            Err(e) => {
-                                log_bad_packet(channel, &data, &e);
-                                break;
-                            }
-                        }
-                    }
-                }
+                sauer_proto::CHANNEL_POSITIONS => decode_into::<C2S<Chan0>, _>(
+                    &data,
+                    &mut self.session,
+                    &mut self.buffer,
+                    channel,
+                    Packet::Chan0,
+                ),
+                sauer_proto::CHANNEL_MESSAGES => decode_into::<C2S<Chan1>, _>(
+                    &data,
+                    &mut self.session,
+                    &mut self.buffer,
+                    channel,
+                    Packet::Chan1,
+                ),
                 sauer_proto::CHANNEL_MAPS => {
                     self.buffer.push_back(Packet::Chan2(data));
                 }

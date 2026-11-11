@@ -1138,9 +1138,7 @@ impl Plugin for DeathrunEdit {
         {
             let payload = state.copy_selection(&packet.sel);
 
-            server.players.with_mut(id, |p| {
-                p.clipboard = Some(sauer_server::ClipboardData { payload })
-            });
+            server.players.with_mut(id, |p| p.clipboard = Some(payload));
         }
 
         let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
@@ -1160,10 +1158,7 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        let payload = server
-            .players
-            .with(id, |p| p.clipboard.as_ref().map(|cb| cb.payload.clone()))
-            .flatten();
+        let payload = server.players.with(id, |p| p.clipboard.clone()).flatten();
         if let Some(payload) = payload {
             let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
             let max = [

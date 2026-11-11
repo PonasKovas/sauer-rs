@@ -5,7 +5,7 @@ use crate::{
     Server, Status,
     items::{apply_pickup, canpickup},
     players::combat::{explosion_damage, gun_damage_per_ray},
-    players::{ClipboardData, clear_player, init_player},
+    players::{clear_player, init_player},
     plugin::{Context, Flow, Plugin},
 };
 use cube_string::{CubeString, IntoCubeStringLossy};
@@ -203,7 +203,7 @@ impl<P: Plugin> Plugin for Base<P> {
                     protocol_version: sauer_proto::PROTOCOL_VERSION,
                     game_mode: gamemode,
                     remaining_time: 0, // TODO
-                    max_clients: 128,
+                    max_clients: server.config.read().max_clients as i32,
                     master_mode: mm,
                     is_paused: false, // TODO
                     game_speed: 100,  // TODO
@@ -677,7 +677,7 @@ impl<P: Plugin> Plugin for Base<P> {
             }
             let cb = p.clipboard.as_ref()?;
             let cn = server.get_cn(owner_id)?;
-            Some((cn, cb.payload.clone()))
+            Some((cn, cb.clone()))
         });
         for (owner_cn, payload) in clipboard_packets {
             server.send(
@@ -1098,10 +1098,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         server.players.with_mut(id, |p| {
-            p.clipboard = packet
-                .payload
-                .clone()
-                .map(|payload| ClipboardData { payload });
+            p.clipboard = packet.payload.clone();
         });
 
         // An empty one is passed on too, so others drop their copy.

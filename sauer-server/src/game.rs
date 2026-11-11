@@ -55,6 +55,8 @@ pub struct Config {
     /// Whether the master mode goes back to open once nobody holds master
     /// (engine behavior). Off for servers whose plugin sets the mode itself.
     pub reopen_when_masterless: bool,
+    /// How many clients can connect, as shown in the server browser.
+    pub max_clients: usize,
 }
 
 impl Default for Config {
@@ -68,6 +70,7 @@ impl Default for Config {
             master_port: 28787,
             admin_pass: String::new(),
             reopen_when_masterless: true,
+            max_clients: 128,
         }
     }
 }
