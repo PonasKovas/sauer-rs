@@ -337,7 +337,7 @@ impl Plugin for DeathrunPlay {
         Flow::Cancel // Map rotation is strictly managed by PlayMaps
     }
 
-    async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) -> Flow {
+    async fn spectator(&self, _ctx: &mut Context, packet: &channel1::SpectatorClient) -> Flow {
         let maps = &self.maps;
         let round_state = maps.read().round_state;
 
