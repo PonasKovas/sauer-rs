@@ -7,6 +7,10 @@ use sauer_proto::channel1;
 use sauer_proto::data::{EditVarValue, VSlotDelta};
 use std::collections::{HashMap, HashSet};
 
+/// Where [`Map::normalize_vslots`] puts variants: past the texture slots of
+/// any client (Sauerbraten installs have about 1700).
+pub const MIN_VARIANT_INDEX: usize = 4096;
+
 /// Represents the complete, live state of a Sauerbraten map.
 ///
 /// This structure encapsulates both the geometric octree (`Node`s and `Cube`s) and
@@ -120,6 +124,7 @@ impl Map {
         };
 
         map.compact_vslots();
+        map.normalize_vslots();
         while map.size < 1024 {
             map.enlarge();
         }
@@ -209,6 +214,83 @@ impl Map {
 
     pub fn compact_vslots(&mut self) {
         self.vslots = self.get_compacted_vslots();
+    }
+
+    /// Renumbers the vslots so every texture slot's base is at its slot
+    /// number, when a texture the map uses has variants stored below its
+    /// base (see `vslot::slot_of_root`). Clients number bases by slot once
+    /// they compact, and send plain textures as raw indices, so otherwise
+    /// those would mean other textures here. Variants move to
+    /// [`MIN_VARIANT_INDEX`] and up, past any client's slots. Returns whether
+    /// anything changed.
+    pub fn normalize_vslots(&mut self) -> bool {
+        let len = self.vslots.len();
+        // Variants stored below each index.
+        let mut below = vec![0usize; len + 1];
+        for i in 0..len {
+            below[i + 1] = below[i] + self.vslots[i].is_some() as usize;
+        }
+        let variants_below = |i: usize| below[i.min(len)];
+
+        let mut used = vec![false; 0x10000];
+        fn collect(node: &Node, used: &mut [bool]) {
+            match node {
+                Node::Leaf(c) => c.textures.iter().for_each(|&t| used[t as usize] = true),
+                Node::Branch(ch) => ch.iter().for_each(|c| collect(c, used)),
+            }
+        }
+        collect(&self.root, &mut used);
+        // Only real slots count: indices past any client's slots (junk some
+        // maps have) draw as the default texture either way.
+        let offset = MIN_VARIANT_INDEX;
+        let needs = (0..used.len()).filter(|&t| used[t]).any(|t| {
+            let base = match self.vslots.get(t) {
+                Some(Some(_)) => crate::vslot::root_base_of(&self.vslots, t as u16) as usize,
+                _ => t,
+            };
+            let below = variants_below(base);
+            below > 0 && base - below < offset
+        });
+        let nvar = below[len];
+        if !needs || offset + nvar > 0x10000 {
+            return false;
+        }
+        // Keeps every entry's slot: base k goes to k, or past the moved
+        // variants if k is beyond them.
+        let remap = |i: usize| -> usize {
+            match self.vslots.get(i) {
+                Some(Some(_)) => offset + below[i],
+                _ => {
+                    let slot = i - variants_below(i);
+                    if slot < offset { slot } else { slot + nvar }
+                }
+            }
+        };
+        let mut vslots: Vec<Option<VSlot>> = vec![None; offset + nvar];
+        for (i, vs) in self.vslots.iter().enumerate() {
+            let Some(vs) = vs else { continue };
+            let mut vs = vs.clone();
+            if vs.prev >= 0 {
+                vs.prev = remap(vs.prev as usize) as i32;
+            }
+            if let Some(layer) = vs.layer {
+                vs.layer = Some(remap(layer.max(0) as usize) as i32);
+            }
+            vslots[remap(i)] = Some(vs);
+        }
+        let table: Vec<u16> = (0..0x10000).map(|i| remap(i) as u16).collect();
+        fn apply(node: &mut Node, table: &[u16]) {
+            match node {
+                Node::Leaf(c) => c.textures.iter_mut().for_each(|t| *t = table[*t as usize]),
+                Node::Branch(ch) => ch.iter_mut().for_each(|c| apply(c, table)),
+            }
+        }
+        apply(&mut self.root, &table);
+        for t in &mut self.mru_textures {
+            *t = table[*t as usize];
+        }
+        self.vslots = vslots;
+        true
     }
 
     /// Doubles the world, keeping the old one in the origin octant. Unlike the
