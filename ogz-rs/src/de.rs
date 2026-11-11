@@ -515,7 +515,7 @@ fn read_legacy_surfaces(
 ) -> Result<LegacySurfaceData, OgzError> {
     let mask = cursor.read_u8()?;
     let material = if (mask & 0x80) != 0 {
-        Some(Material::from_bits(cursor.read_u8()? as u16))
+        Some(old_material(cursor.read_u8()?, version))
     } else {
         None
     };
@@ -587,11 +587,11 @@ fn read_modern_surfaces(
     octsav: u8,
 ) -> Result<ModernSurfaceData, OgzError> {
     let material = if (octsav & 0x40) != 0 {
-        Some(Material::from_bits(if version == 32 {
-            cursor.read_u8()? as u16
+        Some(if version == 32 {
+            old_material(cursor.read_u8()?, version)
         } else {
-            cursor.read_u16::<LittleEndian>()?
-        }))
+            Material::from_bits(cursor.read_u16::<LittleEndian>()?)
+        })
     } else {
         None
     };
@@ -732,4 +732,33 @@ fn read_modern_surfaces(
         merged,
         surfaces,
     })
+}
+
+/// A material from before v33, when it was one byte: the engine's
+/// `convertoldmaterial`, or before v27 its `matconv` table.
+fn old_material(mat: u8, version: i32) -> Material {
+    const WATER: u16 = 1 << 2;
+    const LAVA: u16 = 2 << 2;
+    const GLASS: u16 = 3 << 2;
+    const NOCLIP: u16 = 1 << 5;
+    const CLIP: u16 = 2 << 5;
+    const GAMECLIP: u16 = 3 << 5;
+    const DEATH: u16 = 1 << 8;
+    let mat = u16::from(mat);
+    let bits = if version < 27 {
+        const MATCONV: [u16; 8] = [
+            0,
+            WATER,
+            CLIP,
+            GLASS | CLIP,
+            NOCLIP,
+            LAVA | DEATH,
+            GAMECLIP,
+            DEATH,
+        ];
+        MATCONV.get(mat as usize).copied().unwrap_or(0)
+    } else {
+        ((mat & 7) << 2) | (((mat >> 3) & 3) << 5) | (((mat >> 5) & 7) << 8)
+    };
+    Material::from_bits(bits)
 }

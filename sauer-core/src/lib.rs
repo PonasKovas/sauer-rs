@@ -372,22 +372,28 @@ pub enum Clip {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Material {
+    /// Which variant of the volume (`water2`, `glass3`, ...), 0 to 3.
+    pub index: u8,
     pub volume: Volume,
     pub clip: Clip,
     pub death: bool,
     pub alpha: bool,
 }
 impl Material {
+    /// From the engine's material bits: index in 0-1, volume in 2-4, clip in
+    /// 5-7, flags from 8.
     pub fn from_bits(bits: u16) -> Self {
         Self {
-            volume: Volume::from(((bits >> 2) as u8) & 0b11),
-            clip: Clip::from((bits >> 5) as u8 & 0b11),
+            index: (bits & 0b11) as u8,
+            volume: Volume::from(((bits >> 2) as u8) & 0b111),
+            clip: Clip::from((bits >> 5) as u8 & 0b111),
             death: (bits & (1 << 8)) != 0,
             alpha: (bits & (1 << 10)) != 0,
         }
     }
     pub fn to_bits(self) -> u16 {
-        ((self.volume as u16) << 2)
+        u16::from(self.index & 0b11)
+            | ((self.volume as u16) << 2)
             | ((self.clip as u16) << 5)
             | ((self.death as u16) << 8)
             | ((self.alpha as u16) << 10)
