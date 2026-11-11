@@ -332,8 +332,7 @@ pub fn reshow_for(server: &Server, id: u64) {
 fn name(server: &Server, id: u64) -> String {
     server
         .players
-        .try_get(id)
-        .map(|p| p.name.strip_colors().to_utf8())
+        .with(id, |p| p.name.strip_colors().to_utf8())
         .unwrap_or_else(|| "Someone".to_string())
 }
 

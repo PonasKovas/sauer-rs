@@ -235,8 +235,7 @@ pub fn cmd_cleartrap(ctx: &Context, hit_pt: [f32; 3]) {
     persist::send(server, out);
     let name = server
         .players
-        .try_get(id)
-        .map(|p| p.name.strip_colors().to_utf8())
+        .with(id, |p| p.name.strip_colors().to_utf8())
         .unwrap_or_else(|| "Someone".to_string());
     server.broadcast_chan1(&ServMsg {
         text: format!("\x0C6[TRAP]\x0C7 {name} cleared trap {trap_idx}. Its button stays.")

@@ -45,77 +45,72 @@ impl Server {
         self.send_current_master(id);
 
         // Notify existing players of the new player.
-        if let Some(my_cn) = self.get_cn(id) {
-            let p = self.players.get(id);
-            self.broadcast_except_chan1(
-                id,
-                &InitClient {
-                    client_num: my_cn as i32,
-                    name: p.name.clone(),
-                    player_model: p.model,
-                    team: p.team.clone(),
-                },
-            );
+        if let Some(my_cn) = self.get_cn(id)
+            && let Some(init) = self.players.with(id, |p| InitClient {
+                client_num: my_cn as i32,
+                name: p.name.clone(),
+                player_model: p.model,
+                team: p.team.clone(),
+            })
+        {
+            self.broadcast_except_chan1(id, &init);
         }
 
         // Send the new player a resume snapshot of all existing players.
-        {
-            let p = &self.players;
-            self.send_chan1(
-                id,
-                &Resume {
-                    clients: self
-                        .client_ids()
-                        .into_iter()
-                        .filter(|&other| other != id)
-                        .filter_map(|other| {
-                            let other_cn = self.get_cn(other)?;
-                            let pd = p.get(other);
-                            pd.state.clone().map(|player_state| ClientResumeState {
-                                client_num: other_cn as i32,
-                                state: pd.client_state,
-                                frags: pd.frags,
-                                flags: pd.flags,
-                                deaths: pd.deaths,
-                                quad_millis: pd.quad_millis,
-                                player_state,
-                            })
+        let clients = self
+            .client_ids()
+            .into_iter()
+            .filter(|&other| other != id)
+            .filter_map(|other| {
+                let other_cn = self.get_cn(other)?;
+                self.players
+                    .with(other, |pd| {
+                        pd.state.clone().map(|player_state| ClientResumeState {
+                            client_num: other_cn as i32,
+                            state: pd.client_state,
+                            frags: pd.frags,
+                            flags: pd.flags,
+                            deaths: pd.deaths,
+                            quad_millis: pd.quad_millis,
+                            player_state,
                         })
-                        .collect(),
-                },
-            );
-        }
+                    })
+                    .flatten()
+            })
+            .collect();
+        self.send_chan1(id, &Resume { clients });
 
         // Introduce all existing players to the new player and send their clipboards.
         for other_id in self.client_ids().into_iter().filter(|&other| other != id) {
             let Some(other_cn) = self.get_cn(other_id) else {
                 continue;
             };
-            let pd = self.players.get(other_id);
-            let name = pd.name.clone();
-            let player_model = pd.model;
-            let team = pd.team.clone();
-            let clipboard = pd.clipboard.as_ref().map(|cb| ClipboardServer {
-                client_num: other_cn as i32,
-                payload: Some(cb.payload.clone()),
-            });
-            drop(pd);
-
-            self.send_chan1(
-                id,
-                &InitClient {
+            let Some((init, clipboard)) = self.players.with(other_id, |pd| {
+                let init = InitClient {
                     client_num: other_cn as i32,
-                    name,
-                    player_model,
-                    team,
-                },
-            );
+                    name: pd.name.clone(),
+                    player_model: pd.model,
+                    team: pd.team.clone(),
+                };
+                let clipboard = pd.clipboard.as_ref().map(|cb| ClipboardServer {
+                    client_num: other_cn as i32,
+                    payload: Some(cb.payload.clone()),
+                });
+                (init, clipboard)
+            }) else {
+                continue;
+            };
+
+            self.send_chan1(id, &init);
             if let Some(cb) = clipboard {
                 self.send_chan1(id, &cb);
             }
         }
 
-        let is_spectator = self.players.get(id).client_state == ClientState::Spectator;
+        let is_spectator = self
+            .players
+            .with(id, |p| p.client_state == ClientState::Spectator)
+            .unwrap_or(false);
 
         if is_spectator {
             if let Some(my_cn) = self.get_cn(id) {

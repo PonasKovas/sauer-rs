@@ -17,18 +17,15 @@ impl Server {
 
     fn build_current_master(&self) -> CurrentMaster {
         let master_mode = self.master_mode();
-        let clients: Vec<MasterClient> = self
-            .players
-            .map
-            .iter()
-            .filter(|e| e.privilege != Privilege::None)
-            .filter_map(|e| {
-                self.get_cn(*e.key()).map(|cn| MasterClient {
-                    client_num: cn as i32,
-                    privilege: e.privilege,
-                })
+        let clients = self.players.filter_map(|id, p| {
+            if p.privilege == Privilege::None {
+                return None;
+            }
+            self.get_cn(id).map(|cn| MasterClient {
+                client_num: cn as i32,
+                privilege: p.privilege,
             })
-            .collect();
+        });
         CurrentMaster {
             master_mode,
             clients,
@@ -48,15 +45,13 @@ impl Server {
     /// Returns a player's current privilege level.
     pub fn get_privilege(&self, id: u64) -> Privilege {
         self.players
-            .try_get(id)
-            .map_or(Privilege::None, |p| p.privilege)
+            .with(id, |p| p.privilege)
+            .unwrap_or(Privilege::None)
     }
 
     /// Sets a player's privilege level and broadcasts the updated master list to everyone.
     pub fn set_privilege(&self, id: u64, privilege: Privilege) {
-        if let Some(mut p) = self.players.try_get_mut(id) {
-            p.privilege = privilege;
-        }
+        self.players.with_mut(id, |p| p.privilege = privilege);
         self.broadcast_current_master();
     }
 }

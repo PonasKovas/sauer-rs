@@ -161,8 +161,8 @@ impl Plugin for DeathrunEdit {
         let server = ctx.server();
         let is_spectator = server
             .players
-            .try_get(id)
-            .map_or(true, |p| p.client_state == ClientState::Spectator);
+            .with(id, |p| p.client_state == ClientState::Spectator)
+            .unwrap_or(true);
 
         // --- READ PHASE 1: Target Trap & AABB ---
         let target_trap;
@@ -585,16 +585,15 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        let pos = match server.players.try_get(id) {
-            Some(p) => {
-                if p.client_state == ClientState::Spectator {
-                    ui::send_warn(&server, id, "Cannot use trap commands while spectating.");
-                    return;
-                }
-                p.position
-            }
-            None => return,
+        let Some((spectating, pos)) = server.players.with(id, |p| {
+            (p.client_state == ClientState::Spectator, p.position)
+        }) else {
+            return;
         };
+        if spectating {
+            ui::send_warn(&server, id, "Cannot use trap commands while spectating.");
+            return;
+        }
 
         let dir = match self.player_dirs.get(&id) {
             Some(d) => *d,
@@ -681,7 +680,7 @@ impl Plugin for DeathrunEdit {
 
         // Shooting while placing a button puts it down, like typing the command again.
         if let Some(kind) = crate::trap::place::placing_kind(&server, id) {
-            let Some(pos) = server.players.try_get(id).map(|p| p.position) else {
+            let Some(pos) = server.players.with(id, |p| p.position) else {
                 return;
             };
             let Some(dir) = self.player_dirs.get(&id).map(|d| *d) else {
@@ -740,8 +739,8 @@ impl Plugin for DeathrunEdit {
         if !is_waiting_for_map(server) && !locked {
             let is_spectator = server
                 .players
-                .try_get(id)
-                .map_or(false, |p| p.client_state == ClientState::Spectator);
+                .with(id, |p| p.client_state == ClientState::Spectator)
+                .unwrap_or(false);
             if is_spectator {
                 server.set_spectator(id, false);
                 ui::send(
@@ -808,8 +807,8 @@ impl Plugin for DeathrunEdit {
 
         let is_spectator = server
             .players
-            .try_get(id)
-            .map_or(false, |p| p.client_state == ClientState::Spectator);
+            .with(id, |p| p.client_state == ClientState::Spectator)
+            .unwrap_or(false);
         let is_master = server.get_privilege(id) >= Privilege::Master;
 
         if is_spectator && !is_master {
@@ -820,8 +819,7 @@ impl Plugin for DeathrunEdit {
         let size_kb = data.len() / 1024;
         let player_name = server
             .players
-            .try_get(id)
-            .map(|p| p.name.strip_colors().to_utf8())
+            .with(id, |p| p.name.strip_colors().to_utf8())
             .unwrap_or_else(|| "Someone".to_string());
 
         server.broadcast_chan1(&sauer_proto::channel1::ServMsg {
@@ -1105,9 +1103,7 @@ impl Plugin for DeathrunEdit {
             return;
         }
 
-        if let Some(mut p) = server.players.try_get_mut(id) {
-            p.clipboard = None;
-        }
+        server.players.with_mut(id, |p| p.clipboard = None);
 
         if let Some(state) = crate::map_state::get_server_state(&server)
             .write()
@@ -1116,9 +1112,9 @@ impl Plugin for DeathrunEdit {
         {
             let payload = state.copy_selection(&packet.sel);
 
-            if let Some(mut p) = server.players.try_get_mut(id) {
-                p.clipboard = Some(sauer_server::ClipboardData { payload });
-            }
+            server.players.with_mut(id, |p| {
+                p.clipboard = Some(sauer_server::ClipboardData { payload })
+            });
         }
 
         ctx.cancel();
@@ -1140,8 +1136,8 @@ impl Plugin for DeathrunEdit {
 
         let payload = server
             .players
-            .try_get(id)
-            .and_then(|p| p.clipboard.as_ref().map(|cb| cb.payload.clone()));
+            .with(id, |p| p.clipboard.as_ref().map(|cb| cb.payload.clone()))
+            .flatten();
         if let Some(payload) = payload {
             let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
             let max = [
@@ -1238,8 +1234,7 @@ impl Plugin for DeathrunEdit {
 
         let player_name = server
             .players
-            .try_get(id)
-            .map(|p| p.name.strip_colors().to_utf8())
+            .with(id, |p| p.name.strip_colors().to_utf8())
             .unwrap_or_else(|| "Someone".to_string());
         let map_str = packet.map_name.strip_colors().to_utf8();
         ui::broadcast_map_changed(server, &player_name, &map_str);

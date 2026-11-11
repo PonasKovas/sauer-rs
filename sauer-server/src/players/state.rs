@@ -27,29 +27,28 @@ impl Server {
     /// Initialises the player's spawn state when first welcomed. Only call from `welcome()`.
     pub(crate) fn set_initial_state(&self, id: u64) {
         let insta = self.game_mode.read().is_insta();
-        if let Some(mut p) = self.players.try_get_mut(id) {
-            p.state = Some(make_spawn_state(insta, 0));
-        }
+        self.players
+            .with_mut(id, |p| p.state = Some(make_spawn_state(insta, 0)));
     }
 
     /// Computes the new spawn state for `id` without applying any side effects.
     /// Returns `None` if the player is not in `Dead` state or hasn't been initialised yet.
     pub fn compute_spawn_state(&self, id: u64) -> Option<PlayerState> {
         let insta = self.game_mode.read().is_insta();
-        let p = self.players.try_get(id)?;
-        if p.client_state != ClientState::Dead {
-            return None;
-        }
-        let old_seq = p.state.as_ref()?.life_sequence;
+        let old_seq = self.players.with(id, |p| {
+            (p.client_state == ClientState::Dead)
+                .then(|| p.state.as_ref().map(|s| s.life_sequence))
+                .flatten()
+        })??;
         Some(make_spawn_state(insta, (old_seq + 1) & 0x7F))
     }
 
     /// Applies a previously computed spawn state to `id` and sends `N_SPAWNSTATE`.
     pub fn apply_spawn_state(&self, id: u64, state: PlayerState) {
-        if let Some(mut p) = self.players.try_get_mut(id) {
+        self.players.with_mut(id, |p| {
             p.state = Some(state.clone());
             p.quad_millis = 0;
-        }
+        });
         if let Some(cn) = self.get_cn(id) {
             self.send_chan1(
                 id,
@@ -85,12 +84,9 @@ impl Server {
 
     /// Broadcasts N_SPAWNSTATE for a newly welcomed player to everyone.
     pub(crate) fn broadcast_spawn_state(&self, id: u64) {
-        let state = self
-            .players
-            .get(id)
-            .state
-            .clone()
-            .expect("broadcast_spawn_state called before state was initialized");
+        let Some(state) = self.players.with(id, |p| p.state.clone()).flatten() else {
+            return;
+        };
         if let Some(cn) = self.get_cn(id) {
             self.broadcast_chan1(&SpawnState {
                 client_num: cn as i32,

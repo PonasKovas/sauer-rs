@@ -19,9 +19,7 @@ impl Server {
                 CubeString::new()
             }
         };
-        if let Some(mut p) = self.players.try_get_mut(id) {
-            p.team = team;
-        }
+        self.players.with_mut(id, |p| p.team = team);
     }
 
     /// Sets a player's team and broadcasts N_SETTEAM to all clients.
@@ -33,17 +31,11 @@ impl Server {
                 reason,
             };
             self.broadcast_chan1(&pkt);
-            if let Some(mut p) = self.players.try_get_mut(id) {
-                p.team = pkt.team;
-            }
+            self.players.with_mut(id, |p| p.team = pkt.team);
         }
     }
 
     pub fn count_players_in(&self, team: &CubeStr) -> u32 {
-        self.players
-            .map
-            .iter()
-            .filter(|entry| &entry.team == team)
-            .count() as u32
+        self.players.count(|_, p| &p.team == team) as u32
     }
 }

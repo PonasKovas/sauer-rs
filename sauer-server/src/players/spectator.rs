@@ -5,25 +5,26 @@ impl Server {
     /// Sets a player's spectator state and broadcasts `N_SPECTATOR` to all clients.
     /// Does nothing if the player is not found or already in the target state.
     pub fn set_spectator(&self, id: u64, spectate: bool) {
-        let changed = if let Some(mut p) = self.players.try_get_mut(id) {
-            if spectate {
-                if p.client_state != ClientState::Spectator {
-                    p.client_state = ClientState::Spectator;
-                    true
+        let changed = self
+            .players
+            .with_mut(id, |p| {
+                if spectate {
+                    if p.client_state != ClientState::Spectator {
+                        p.client_state = ClientState::Spectator;
+                        true
+                    } else {
+                        false
+                    }
                 } else {
-                    false
+                    if p.client_state == ClientState::Spectator {
+                        p.client_state = ClientState::Dead;
+                        true
+                    } else {
+                        false
+                    }
                 }
-            } else {
-                if p.client_state == ClientState::Spectator {
-                    p.client_state = ClientState::Dead;
-                    true
-                } else {
-                    false
-                }
-            }
-        } else {
-            false
-        };
+            })
+            .unwrap_or(false);
 
         if changed {
             if let Some(cn) = self.get_cn(id) {

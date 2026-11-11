@@ -125,7 +125,7 @@ impl Plugin for TelegramBridge {
             return;
         }
 
-        let sender_name = ctx.server().players.get(ctx.id()).name.to_utf8();
+        let sender_name = ctx.server().player_name(ctx.id()).to_utf8();
         let msg = text.to_utf8();
         let text_to_send = format!("{}: {}", sender_name, msg);
 

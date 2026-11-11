@@ -56,10 +56,12 @@ impl Server {
             return false;
         }
         let pass = self.admin_pass.read();
-        let (Some(cn), Some(p)) = (self.get_cn(id), self.players.try_get(id)) else {
+        let (Some(cn), Some(session_id)) =
+            (self.get_cn(id), self.players.with(id, |p| p.session_id))
+        else {
             return false;
         };
-        let ok = !pass.is_empty() && hash == hash_password(cn, p.session_id, &pass).as_bytes();
+        let ok = !pass.is_empty() && hash == hash_password(cn, session_id, &pass).as_bytes();
         let result = match (pass.is_empty(), ok) {
             (true, _) => "no admin_pass is configured",
             (false, true) => "accepted",

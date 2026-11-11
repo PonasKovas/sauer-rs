@@ -365,7 +365,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         }
 
         for &id in &ids {
-            if server.players.try_get(id).is_none() {
+            if server.players.contains(id) == false {
                 continue;
             }
 
@@ -389,12 +389,11 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         }
 
         let evil_name = current_evil
-            .and_then(|id| server.players.try_get(id))
-            .map(|p| p.name.strip_colors().to_utf8());
+            .and_then(|id| server.players.with(id, |p| p.name.strip_colors().to_utf8()));
 
         // Send the generic connection welcome rules to the new player first
         if let Some(w_id) = welcome_id {
-            if server.players.try_get(w_id).is_some() {
+            if server.players.contains(w_id) {
                 let (is_solo, map_name) = {
                     let lock = maps_clone.read();
                     (lock.evil_id.is_none(), lock.current_map.clone())
@@ -458,7 +457,7 @@ fn check_win_conditions(
             return;
         }
 
-        let evil_state = server.players.try_get(e_id).map(|p| p.client_state);
+        let evil_state = server.players.with(e_id, |p| p.client_state);
         if evil_state == Some(ClientState::Dead) || evil_state == Some(ClientState::Spectator) {
             let mut top = Vec::new();
             let mut sorted = lock.finished_players.clone();
@@ -466,29 +465,12 @@ fn check_win_conditions(
             for (f_id, dur) in sorted.into_iter().take(3) {
                 let name = server
                     .players
-                    .try_get(f_id)
-                    .map(|p| p.name.strip_colors().to_utf8())
+                    .with(f_id, |p| p.name.strip_colors().to_utf8())
                     .unwrap_or_else(|| "Unknown".to_string());
                 top.push((name, dur.as_secs_f32()));
             }
             declare_win(server, maps, &mut lock, "\x0C1Good\x0C7 (Evil died)", &top);
             return;
-        }
-    }
-
-    for &id in &ids {
-        if Some(id) == evil_id {
-            continue;
-        }
-        if lock.spawned_this_round.contains(&id) {
-            let is_finished = lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
-            if let Some(p) = server.players.try_get(id) {
-                if p.client_state == ClientState::Alive {
-                    if !is_finished {
-                        // Unfinished alive player found
-                    }
-                }
-            }
         }
     }
 
@@ -502,11 +484,13 @@ fn check_win_conditions(
             if !is_finished {
                 // If they are still connected and alive, the round is still playing
                 if ids.contains(&id) {
-                    if let Some(p) = server.players.try_get(id) {
-                        if p.client_state == ClientState::Alive {
-                            good_still_playing = true;
-                            break;
-                        }
+                    if server
+                        .players
+                        .with(id, |p| p.client_state == ClientState::Alive)
+                        == Some(true)
+                    {
+                        good_still_playing = true;
+                        break;
                     }
                 }
             }
@@ -521,8 +505,7 @@ fn check_win_conditions(
                 for (f_id, dur) in sorted.into_iter().take(3) {
                     let name = server
                         .players
-                        .try_get(f_id)
-                        .map(|p| p.name.strip_colors().to_utf8())
+                        .with(f_id, |p| p.name.strip_colors().to_utf8())
                         .unwrap_or_else(|| "Unknown".to_string());
                     top.push((name, dur.as_secs_f32()));
                 }
@@ -561,7 +544,7 @@ fn end_if_decided_at_start(
     if lock.round_epoch != epoch || lock.round_state != RoundState::Playing {
         return false;
     }
-    let here = |id: u64| server.players.try_get(id).is_some();
+    let here = |id: u64| server.players.contains(id);
     let anyone_here = lock.spawned_this_round.iter().any(|&id| here(id));
     if !anyone_here {
         lock.round_state = RoundState::NotStarted;
@@ -722,8 +705,8 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
         for id in ids {
             if !server
                 .players
-                .try_get(id)
-                .map_or(false, |p| p.client_state == ClientState::Alive)
+                .with(id, |p| p.client_state == ClientState::Alive)
+                .unwrap_or(false)
             {
                 continue;
             }
@@ -755,8 +738,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
     for id in &to_spectate {
         let name = server
             .players
-            .try_get(*id)
-            .map(|p| p.name.strip_colors().to_utf8())
+            .with(*id, |p| p.name.strip_colors().to_utf8())
             .unwrap_or_default();
         ui::broadcast(
             server,
@@ -1228,8 +1210,7 @@ impl Plugin for DeathrunPlay {
                 if reached_flag {
                     let name = server
                         .players
-                        .try_get(id)
-                        .map(|p| p.name.strip_colors().to_utf8())
+                        .with(id, |p| p.name.strip_colors().to_utf8())
                         .unwrap_or_else(|| "Someone".to_string());
                     let secs = time_taken.as_secs_f32();
                     ui::broadcast(
@@ -1395,8 +1376,8 @@ impl Plugin for DeathrunPlay {
 
     async fn on_damage(&self, ctx: &mut Context, target_id: u64, actor_id: u64, _damage: &mut i32) {
         let server = ctx.server();
-        let target_team = server.players.try_get(target_id).map(|p| p.team.clone());
-        let actor_team = server.players.try_get(actor_id).map(|p| p.team.clone());
+        let target_team = server.players.with(target_id, |p| p.team.clone());
+        let actor_team = server.players.with(actor_id, |p| p.team.clone());
 
         if target_team.is_some() && target_team == actor_team {
             ctx.cancel();

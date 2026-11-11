@@ -95,7 +95,7 @@ impl UserData for LuaServer {
         /// ServInfo sent later must repeat it: the client stores it again and
         /// uses it to hash passwords (`/setmaster PASSWORD`).
         methods.add_method("get_session_id", |_lua, this, id: u64| {
-            Ok(this.inner.players.try_get(id).map(|p| p.session_id))
+            Ok(this.inner.players.with(id, |p| p.session_id))
         });
 
         /// Register a server command visible in `/help`. `usage` is optional.

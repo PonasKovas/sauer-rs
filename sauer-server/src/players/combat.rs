@@ -61,30 +61,27 @@ impl Server {
         let damage = damage
             * self
                 .players
-                .try_get(actor_id)
-                .map_or(1, |p| if p.quad_millis > 0 { 4 } else { 1 });
+                .with(actor_id, |p| if p.quad_millis > 0 { 4 } else { 1 })
+                .unwrap_or(1);
 
-        let Some(mut p) = self.players.try_get_mut(target_id) else {
-            return false;
-        };
-        if p.client_state != ClientState::Alive {
-            return false;
-        }
-        // Inner block: drops the &mut PlayerState borrow before we modify client_state.
-        let (health, armour, killed) = {
-            let Some(state) = p.state.as_mut() else {
-                return false;
-            };
+        let hit = self.players.with_mut(target_id, |p| {
+            if p.client_state != ClientState::Alive {
+                return None;
+            }
+            let state = p.state.as_mut()?;
             // Armour absorbs: blue=25%, green=50%, yellow=75%
             let absorbed = ((damage * (state.armour_type as i32 + 1) * 25) / 100).min(state.armour);
             state.armour -= absorbed;
             state.health -= damage - absorbed;
-            (state.health, state.armour, state.health <= 0)
+            let (health, armour, killed) = (state.health, state.armour, state.health <= 0);
+            if killed {
+                p.client_state = ClientState::Dead;
+            }
+            Some((health, armour, killed))
+        });
+        let Some((health, armour, killed)) = hit.flatten() else {
+            return false;
         };
-        if killed {
-            p.client_state = ClientState::Dead;
-        }
-        drop(p);
 
         if let (Some(t_cn), Some(a_cn)) = (self.get_cn(target_id), self.get_cn(actor_id)) {
             self.broadcast_chan1(&Damage {
@@ -113,41 +110,31 @@ impl Server {
 
     /// Kill a player by suicide (frags -= 1). Returns true if successful.
     pub fn kill_player(&self, id: u64) -> bool {
-        let Some(mut p) = self.players.try_get_mut(id) else {
-            return false;
-        };
-        if p.client_state != ClientState::Alive {
+        let killed = self.players.with_mut(id, |p| {
+            let alive = p.client_state == ClientState::Alive;
+            if alive {
+                p.client_state = ClientState::Dead;
+            }
+            alive
+        });
+        if killed != Some(true) {
             return false;
         }
-        p.client_state = ClientState::Dead;
-        drop(p);
         self.do_kill(id, id);
         true
     }
 
     fn do_kill(&self, victim_id: u64, actor_id: u64) {
-        let actor_frags = if actor_id != victim_id {
-            self.players
-                .try_get_mut(actor_id)
-                .map(|mut p| {
-                    p.frags += 1;
-                    p.frags
-                })
-                .unwrap_or(0)
-        } else {
-            // suicide: costs a frag
-            self.players
-                .try_get_mut(victim_id)
-                .map(|mut p| {
-                    p.frags -= 1;
-                    p.frags
-                })
-                .unwrap_or(0)
-        };
-
-        if let Some(mut p) = self.players.try_get_mut(victim_id) {
-            p.deaths += 1;
-        }
+        // A suicide costs a frag.
+        let frag_change = if actor_id != victim_id { 1 } else { -1 };
+        let actor_frags = self
+            .players
+            .with_mut(actor_id, |p| {
+                p.frags += frag_change;
+                p.frags
+            })
+            .unwrap_or(0);
+        self.players.with_mut(victim_id, |p| p.deaths += 1);
 
         if let (Some(v_cn), Some(a_cn)) = (self.get_cn(victim_id), self.get_cn(actor_id)) {
             self.broadcast_chan1(&Died {

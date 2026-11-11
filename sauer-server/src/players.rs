@@ -1,6 +1,5 @@
 use dashmap::DashMap;
 use rand::random;
-use std::ops::{Deref, DerefMut};
 
 pub mod combat;
 mod data;
@@ -14,16 +13,15 @@ pub mod team;
 
 pub use data::{ClipboardData, PlayerData};
 
+/// Per-player data, keyed by client id.
+///
+/// Access goes through closures, so a lock on a player's entry can't outlive
+/// the call or be held across an `.await`. The entry stays locked while the
+/// closure runs: don't touch `Players` (or call `Server` methods that do) from
+/// inside one, since two entries can share a lock.
+#[derive(Default)]
 pub struct Players {
-    pub(crate) map: DashMap<u64, PlayerData>,
-}
-
-impl Default for Players {
-    fn default() -> Self {
-        Self {
-            map: DashMap::new(),
-        }
-    }
+    map: DashMap<u64, PlayerData>,
 }
 
 impl Players {
@@ -31,18 +29,45 @@ impl Players {
         Self::default()
     }
 
-    pub fn try_get(&self, id: u64) -> Option<impl Deref<Target = PlayerData> + '_> {
-        self.map.get(&id)
+    /// Runs `f` on the player's data. `None` if there is no such player.
+    pub fn with<R>(&self, id: u64, f: impl FnOnce(&PlayerData) -> R) -> Option<R> {
+        self.map.get(&id).map(|p| f(&p))
     }
 
-    pub fn get(&self, id: u64) -> impl Deref<Target = PlayerData> + '_ {
+    /// Runs `f` on the player's data, mutably. `None` if there is no such player.
+    pub fn with_mut<R>(&self, id: u64, f: impl FnOnce(&mut PlayerData) -> R) -> Option<R> {
+        self.map.get_mut(&id).map(|mut p| f(&mut p))
+    }
+
+    /// Collects what `f` returns for each player, skipping `None`.
+    pub fn filter_map<R>(&self, mut f: impl FnMut(u64, &PlayerData) -> Option<R>) -> Vec<R> {
         self.map
-            .get(&id)
-            .unwrap_or_else(|| panic!("id {id} not in Players"))
+            .iter()
+            .filter_map(|e| f(*e.key(), e.value()))
+            .collect()
     }
 
-    pub fn try_get_mut(&self, id: u64) -> Option<impl DerefMut<Target = PlayerData> + '_> {
-        self.map.get_mut(&id)
+    /// Whether the player exists.
+    pub fn contains(&self, id: u64) -> bool {
+        self.map.contains_key(&id)
+    }
+
+    /// Whether `f` holds for any player.
+    pub fn any(&self, mut f: impl FnMut(u64, &PlayerData) -> bool) -> bool {
+        self.map.iter().any(|e| f(*e.key(), e.value()))
+    }
+
+    /// How many players `f` holds for.
+    pub fn count(&self, mut f: impl FnMut(u64, &PlayerData) -> bool) -> usize {
+        self.map.iter().filter(|e| f(*e.key(), e.value())).count()
+    }
+
+    /// Runs `f` on every player's data, mutably.
+    pub fn for_each_mut(&self, mut f: impl FnMut(u64, &mut PlayerData)) {
+        for mut e in self.map.iter_mut() {
+            let id = *e.key();
+            f(id, e.value_mut());
+        }
     }
 }
 

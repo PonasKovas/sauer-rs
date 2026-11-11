@@ -24,11 +24,11 @@ pub async fn visual_rebuild_map<F>(
     for &id in target_ids {
         if send_newmap {
             // The client resets all map vars to defaults on a new map.
-            if let Some(mut p) = server.players.try_get_mut(id) {
+            server.players.with_mut(id, |p| {
                 p.known_vars = sauer_map::map_vars::new_map_vars()
                     .map(|var| (var_name(&var).clone(), var))
-                    .collect();
-            }
+                    .collect()
+            });
             let cn = server.get_cn(id).unwrap_or(0) as i32;
             server.send_chan1(
                 id,
@@ -67,17 +67,13 @@ pub async fn visual_rebuild_map<F>(
                 continue;
             }
 
-            let mut send = true;
-            if let Some(mut p) = server.players.try_get_mut(id) {
-                if let Some(known) = p.known_vars.get(&name) {
-                    if known == var {
-                        send = false;
-                    }
-                }
-                if send {
-                    p.known_vars.insert(name.clone(), var.clone());
-                }
-            }
+            // Only vars the client doesn't already have go out.
+            let send = server
+                .players
+                .with_mut(id, |p| {
+                    p.known_vars.insert(name.clone(), var.clone()).as_ref() != Some(var)
+                })
+                .unwrap_or(true);
 
             if send {
                 let val = match var {

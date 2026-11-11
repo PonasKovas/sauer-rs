@@ -58,11 +58,7 @@ where
 /// Like the engine's `setmaster`: once nobody holds master, the mode goes back
 /// to open. Unlike the engine, bans go too: nobody left can lift them.
 fn reopen_if_masterless(server: &Server) {
-    let has_master = server
-        .players
-        .map
-        .iter()
-        .any(|p| p.privilege >= Privilege::Master);
+    let has_master = server.players.any(|_, p| p.privilege >= Privilege::Master);
     if !has_master {
         server.clear_bans();
         let reopen = *server.reopen_when_masterless.read();
@@ -86,10 +82,13 @@ fn priv_name(p: Privilege) -> &'static str {
 /// Returns true if `target_id` is alive with a matching `life_sequence`.
 /// Guards against hitting a player who has already respawned.
 fn check_hit(server: &Server, target_id: u64, life_sequence: i32) -> bool {
-    server.players.try_get(target_id).map_or(false, |p| {
-        p.client_state == ClientState::Alive
-            && matches!(p.state.as_ref(), Some(s) if s.life_sequence == life_sequence)
-    })
+    server
+        .players
+        .with(target_id, |p| {
+            p.client_state == ClientState::Alive
+                && matches!(p.state.as_ref(), Some(s) if s.life_sequence == life_sequence)
+        })
+        .unwrap_or(false)
 }
 
 // ── Map change helper ─────────────────────────────────────────────────────────
@@ -143,11 +142,11 @@ impl<P: Plugin> Plugin for Base<P> {
             loop {
                 interval.tick().await;
 
-                for mut entry in server.players.map.iter_mut() {
-                    if entry.quad_millis > 0 {
-                        entry.quad_millis = (entry.quad_millis - 100).max(0);
+                server.players.for_each_mut(|_, p| {
+                    if p.quad_millis > 0 {
+                        p.quad_millis = (p.quad_millis - 100).max(0);
                     }
-                }
+                });
 
                 let spawning: Vec<usize> = {
                     let mut items = server.items.write();
@@ -255,136 +254,37 @@ impl<P: Plugin> Plugin for Base<P> {
                         );
                     }
                     ExtInfoRequest::PlayerStats { client_number } => {
-                        if let Some(cn_i32) = client_number {
-                            if let Some(id) = server.get_id(*cn_i32 as u8) {
-                                if let Some(p) = server.players.try_get(id) {
-                                    server.send_server_query(
-                                        ctx.addr(),
-                                        &ServerQueryResponse::ExtInfo(
-                                            ExtInfoResponse::PlayerStats {
-                                                client_number: Some(*cn_i32),
-                                                ok: true,
-                                            },
-                                        ),
-                                    );
-                                    server.send_server_query(
-                                        ctx.addr(),
-                                        &ServerQueryResponse::ExtInfo(
-                                            ExtInfoResponse::PlayerStatsIds { ids: vec![*cn_i32] },
-                                        ),
-                                    );
-
-                                    let state = p.state.clone().unwrap_or_else(|| {
-                                        crate::players::state::make_spawn_state(
-                                            server.game_mode.read().is_insta(),
-                                            0,
-                                        )
-                                    });
-                                    let ip = server.peer_addr(id).map(|a| match a.ip() {
-                                        std::net::IpAddr::V4(v4) => {
-                                            let octets = v4.octets();
-                                            [octets[0], octets[1], octets[2]]
-                                        }
-                                        _ => [0, 0, 0],
-                                    });
-
-                                    server.send_server_query(
-                                        ctx.addr(),
-                                        &ServerQueryResponse::ExtInfo(
-                                            ExtInfoResponse::PlayerStatsStats {
-                                                client_num: *cn_i32,
-                                                ping: p.ping,
-                                                name: p.name.clone(),
-                                                team: p.team.clone(),
-                                                frags: p.frags,
-                                                flags: p.flags,
-                                                deaths: p.deaths,
-                                                teamkills: p.teamkills,
-                                                damage: 0, // TODO
-                                                health: state.health,
-                                                armour: state.armour,
-                                                gunselect: state.gun_select,
-                                                privilege: p.privilege,
-                                                state: p.client_state,
-                                                ip,
-                                            },
-                                        ),
-                                    );
-                                }
-                            } else {
-                                server.send_server_query(
-                                    ctx.addr(),
-                                    &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                                        client_number: Some(*cn_i32),
+                        let send = |resp| {
+                            server
+                                .send_server_query(ctx.addr(), &ServerQueryResponse::ExtInfo(resp))
+                        };
+                        let ids = match client_number {
+                            Some(cn) => match u8::try_from(*cn).ok().and_then(|c| server.get_id(c))
+                            {
+                                Some(id) => vec![id],
+                                None => {
+                                    send(ExtInfoResponse::PlayerStats {
+                                        client_number: Some(*cn),
                                         ok: false,
-                                    }),
-                                );
-                            }
-                        } else {
-                            server.send_server_query(
-                                ctx.addr(),
-                                &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStats {
-                                    client_number: None,
-                                    ok: true,
-                                }),
-                            );
-
-                            let mut ids = Vec::new();
-                            for e in server.players.map.iter() {
-                                if let Some(cn) = server.get_cn(*e.key()) {
-                                    ids.push(cn as i32);
+                                    });
+                                    return;
                                 }
-                            }
-                            server.send_server_query(
-                                ctx.addr(),
-                                &ServerQueryResponse::ExtInfo(ExtInfoResponse::PlayerStatsIds {
-                                    ids,
-                                }),
-                            );
-
-                            for e in server.players.map.iter() {
-                                let id = *e.key();
-                                let Some(cn) = server.get_cn(id) else {
-                                    continue;
-                                };
-                                let p = e.value();
-                                let state = p.state.clone().unwrap_or_else(|| {
-                                    crate::players::state::make_spawn_state(
-                                        server.game_mode.read().is_insta(),
-                                        0,
-                                    )
-                                });
-                                let ip = server.peer_addr(id).map(|a| match a.ip() {
-                                    std::net::IpAddr::V4(v4) => {
-                                        let octets = v4.octets();
-                                        [octets[0], octets[1], octets[2]]
-                                    }
-                                    _ => [0, 0, 0],
-                                });
-
-                                server.send_server_query(
-                                    ctx.addr(),
-                                    &ServerQueryResponse::ExtInfo(
-                                        ExtInfoResponse::PlayerStatsStats {
-                                            client_num: cn as i32,
-                                            ping: p.ping,
-                                            name: p.name.clone(),
-                                            team: p.team.clone(),
-                                            frags: p.frags,
-                                            flags: p.flags,
-                                            deaths: p.deaths,
-                                            teamkills: p.teamkills,
-                                            damage: 0, // TODO
-                                            health: state.health,
-                                            armour: state.armour,
-                                            gunselect: state.gun_select,
-                                            privilege: p.privilege,
-                                            state: p.client_state,
-                                            ip,
-                                        },
-                                    ),
-                                );
-                            }
+                            },
+                            None => server.client_ids(),
+                        };
+                        let stats: Vec<(i32, ExtInfoResponse)> = ids
+                            .into_iter()
+                            .filter_map(|id| ext_player_stats(server, id))
+                            .collect();
+                        send(ExtInfoResponse::PlayerStats {
+                            client_number: *client_number,
+                            ok: true,
+                        });
+                        send(ExtInfoResponse::PlayerStatsIds {
+                            ids: stats.iter().map(|(cn, _)| *cn).collect(),
+                        });
+                        for (_, resp) in stats {
+                            send(resp);
                         }
                     }
                     ExtInfoRequest::TeamScore => {
@@ -414,8 +314,8 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let had_privilege = server
             .players
-            .try_get(id)
-            .map_or(false, |p| p.privilege != Privilege::None);
+            .with(id, |p| p.privilege != Privilege::None)
+            .unwrap_or(false);
 
         server.map_votes.write().remove(&id);
 
@@ -464,9 +364,9 @@ impl<P: Plugin> Plugin for Base<P> {
         if server.master_mode() == MasterMode::Locked
             && server.get_privilege(id) < Privilege::Master
         {
-            if let Some(mut p) = server.players.try_get_mut(id) {
-                p.client_state = ClientState::Spectator;
-            }
+            server
+                .players
+                .with_mut(id, |p| p.client_state = ClientState::Spectator);
         }
 
         if matches!(server.master_mode(), MasterMode::Private) {
@@ -498,24 +398,19 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
 
-        let spawned_state = {
-            let Some(mut p) = server.players.try_get_mut(id) else {
-                return;
-            };
+        let spawned_state = server.players.with_mut(id, |p| {
             if p.client_state != ClientState::Dead {
-                return;
+                return None;
             }
-            let Some(state) = p.state.as_mut() else {
-                return;
-            };
+            let state = p.state.as_mut()?;
             state.life_sequence = packet.life_sequence;
             state.gun_select = packet.gun_select;
-
+            let state = state.clone();
             p.client_state = ClientState::Alive;
-            p.state.clone()
-        };
+            Some(state)
+        });
 
-        if let Some(state) = spawned_state {
+        if let Some(state) = spawned_state.flatten() {
             if let Some(cn) = server.get_cn(id) {
                 server.broadcast_except_chan1(
                     id,
@@ -558,12 +453,9 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        {
-            let Some(mut p) = server.players.try_get_mut(id) else {
-                return;
-            };
+        let fired = server.players.with_mut(id, |p| {
             if p.client_state != ClientState::Alive {
-                return;
+                return false;
             }
             if let Some(state) = p.state.as_mut() {
                 match packet.gun {
@@ -576,6 +468,10 @@ impl<P: Plugin> Plugin for Base<P> {
                     sauer_proto::data::Gun::Pistol => state.ammo.pistol -= 1,
                 }
             }
+            true
+        });
+        if fired != Some(true) {
+            return;
         }
 
         if let Some(cn) = server.get_cn(id) {
@@ -620,7 +516,10 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        if server.players.get(id).client_state != ClientState::Alive {
+        let alive = server
+            .players
+            .with(id, |p| p.client_state == ClientState::Alive);
+        if alive != Some(true) {
             return;
         }
 
@@ -707,7 +606,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 plugin.on_chat(ctx, &mut text).await;
             }
             if !ctx.cancelled {
-                let name = ctx.server().players.get(id).name.clone();
+                let name = ctx.server().player_name(id);
                 info!("[CHAT] {name}: {text}");
                 if let Some(cn) = ctx.server().get_cn(id) {
                     ctx.server().broadcast_except_chan1(
@@ -742,9 +641,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn client_ping(&self, ctx: &mut Context, packet: &channel1::ClientPing) {
         let id = ctx.id();
-        if let Some(mut p) = ctx.server().players.try_get_mut(id) {
-            p.ping = packet.ping;
-        }
+        ctx.server().players.with_mut(id, |p| p.ping = packet.ping);
         if let Some(cn) = ctx.server().get_cn(id) {
             ctx.server().broadcast_except_chan1(
                 id,
@@ -788,7 +685,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         *server.map_data.write() = Some(data.clone());
 
-        let name = server.players.get(id).name.clone();
+        let name = server.player_name(id);
         let cn_str = server
             .get_cn(id)
             .map(|c| c.to_string())
@@ -815,21 +712,14 @@ impl<P: Plugin> Plugin for Base<P> {
             },
         );
 
-        let clipboard_packets: Vec<(i32, sauer_proto::data::ClipboardPayload)> = server
-            .players
-            .map
-            .iter()
-            .filter(|e| *e.key() != id)
-            .filter_map(|e| {
-                let owner_id = *e.key();
-                server.get_cn(owner_id).and_then(|cn| {
-                    e.value()
-                        .clipboard
-                        .as_ref()
-                        .map(|cb| (cn as i32, cb.payload.clone()))
-                })
-            })
-            .collect();
+        let clipboard_packets = server.players.filter_map(|owner_id, p| {
+            if owner_id == id {
+                return None;
+            }
+            let cb = p.clipboard.as_ref()?;
+            let cn = server.get_cn(owner_id)?;
+            Some((cn as i32, cb.payload.clone()))
+        });
         for (owner_cn, payload) in clipboard_packets {
             server.send_chan1(
                 id,
@@ -881,17 +771,15 @@ impl<P: Plugin> Plugin for Base<P> {
             if want == Privilege::Master {
                 let spectating = server
                     .players
-                    .try_get(id)
-                    .map_or(true, |p| p.client_state == ClientState::Spectator);
+                    .with(id, |p| p.client_state == ClientState::Spectator)
+                    .unwrap_or(true);
                 if spectating {
                     crate::ui::send_warn(server, id, "Spectators may not claim master.");
                     return;
                 }
                 let taken = server
                     .players
-                    .map
-                    .iter()
-                    .any(|p| *p.key() != id && p.privilege != Privilege::None);
+                    .any(|other, p| other != id && p.privilege != Privilege::None);
                 if taken {
                     crate::ui::send_warn(server, id, "Master is already claimed.");
                     return;
@@ -904,7 +792,7 @@ impl<P: Plugin> Plugin for Base<P> {
             Privilege::None
         };
 
-        let name = server.players.get(target).name.clone();
+        let name = server.player_name(target);
         let msg = match new {
             Privilege::None => format!("{} relinquished {}", name.to_utf8(), priv_name(theirs)),
             p => format!("{} claimed {}", name.to_utf8(), priv_name(p)),
@@ -932,8 +820,8 @@ impl<P: Plugin> Plugin for Base<P> {
             return;
         };
 
-        let kicker = server.players.get(id).name.to_utf8();
-        let kicked = server.players.get(victim).name.to_utf8();
+        let kicker = server.player_name(id).to_utf8();
+        let kicked = server.player_name(victim).to_utf8();
         let reason = packet.reason.to_utf8();
         let msg = if reason.is_empty() {
             format!("{kicker} kicked {kicked}")
@@ -986,7 +874,8 @@ impl<P: Plugin> Plugin for Base<P> {
                 .copied()
                 .collect(),
         );
-        if server.players.get(target).team != team {
+        let same = server.players.with(target, |p| p.team == team);
+        if same == Some(false) {
             server.set_team(target, team, SetTeamReason::Forced);
         }
     }
@@ -1055,14 +944,14 @@ impl<P: Plugin> Plugin for Base<P> {
     }
     async fn edit_mode(&self, ctx: &mut Context, packet: &channel1::EditMode) {
         let id = ctx.id();
-        if let Some(mut p) = ctx.server().players.try_get_mut(id) {
+        ctx.server().players.with_mut(id, |p| {
             if packet.is_editing {
                 p.edit_state = p.client_state;
                 p.client_state = ClientState::Editing;
             } else {
                 p.client_state = p.edit_state;
             }
-        }
+        });
         relay_coop(ctx.server(), ctx.id(), packet);
     }
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
@@ -1151,8 +1040,8 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let is_spectator = server
             .players
-            .try_get(id)
-            .map_or(false, |p| p.client_state == ClientState::Spectator);
+            .with(id, |p| p.client_state == ClientState::Spectator)
+            .unwrap_or(false);
 
         let mut items = server.items.write();
         if !items.notgotitems || is_spectator {
@@ -1184,55 +1073,47 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
         let idx = packet.item_index as usize;
+        let num_players = server.client_count();
 
-        let can = {
-            let Some(p) = server.players.try_get(id) else {
-                return;
-            };
+        // Checked and taken under one items lock, so two players can't both
+        // get the item and a map change can't empty the list in between.
+        let picked = server.players.with_mut(id, |p| {
             if p.client_state != ClientState::Alive {
-                return;
+                return None;
             }
-            let quad_millis = p.quad_millis;
-            p.state.as_ref().map_or(false, |s| {
-                server.items.read().list.get(idx).map_or(false, |item| {
-                    item.spawned && canpickup(s, quad_millis, item.item_type)
-                })
-            })
-        };
+            let state = p.state.as_mut()?;
+            let mut items = server.items.write();
+            let Some(item) = items
+                .list
+                .get_mut(idx)
+                .filter(|item| item.spawned && canpickup(state, p.quad_millis, item.item_type))
+            else {
+                return Some(false);
+            };
+            item.spawned = false;
+            item.spawn_time_ms = spawntime(item.item_type, num_players);
+            apply_pickup(state, &mut p.quad_millis, item.item_type);
+            Some(true)
+        });
 
-        if !can {
-            server.send_chan1(
+        match picked {
+            // Not alive, or never welcomed.
+            None | Some(None) => {}
+            Some(Some(true)) => {
+                if let Some(cn) = server.get_cn(id) {
+                    server.broadcast_chan1(&ItemAck {
+                        item_index: packet.item_index,
+                        client_num: cn as i32,
+                    });
+                }
+            }
+            Some(Some(false)) => server.send_chan1(
                 id,
                 &ItemAck {
                     item_index: packet.item_index,
                     client_num: -1,
                 },
-            );
-            return;
-        }
-
-        let num_players = server.client_count();
-        let item_type = {
-            let mut items = server.items.write();
-            let item = &mut items.list[idx];
-            item.spawned = false;
-            item.spawn_time_ms = spawntime(item.item_type, num_players);
-            item.item_type
-        };
-
-        if let Some(mut p) = server.players.try_get_mut(id) {
-            let mut quad = p.quad_millis;
-            if let Some(state) = p.state.as_mut() {
-                apply_pickup(state, &mut quad, item_type);
-            }
-            p.quad_millis = quad;
-        }
-
-        if let Some(cn) = server.get_cn(id) {
-            server.broadcast_chan1(&ItemAck {
-                item_index: packet.item_index,
-                client_num: cn as i32,
-            });
+            ),
         }
     }
 
@@ -1273,9 +1154,7 @@ impl<P: Plugin> Plugin for Base<P> {
             return;
         }
         let id = ctx.id();
-        if let Some(mut p) = ctx.server().players.try_get_mut(id) {
-            p.clipboard = None;
-        }
+        ctx.server().players.with_mut(id, |p| p.clipboard = None);
         if let Some(cn) = ctx.server().get_cn(id) {
             ctx.server().broadcast_except_chan1(
                 id,
@@ -1313,18 +1192,18 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let is_spectator = server
             .players
-            .try_get(id)
-            .map_or(false, |p| p.client_state == ClientState::Spectator);
+            .with(id, |p| p.client_state == ClientState::Spectator)
+            .unwrap_or(false);
         if is_spectator {
             return;
         }
 
-        if let Some(mut p) = server.players.try_get_mut(id) {
+        server.players.with_mut(id, |p| {
             p.clipboard = packet
                 .payload
                 .clone()
                 .map(|payload| ClipboardData { payload });
-        }
+        });
 
         // An empty one is passed on too, so others drop their copy.
         if let Some(cn) = server.get_cn(id) {
@@ -1337,4 +1216,45 @@ impl<P: Plugin> Plugin for Base<P> {
             );
         }
     }
+}
+
+/// One player's ExtInfo stats reply, with their cn.
+fn ext_player_stats(
+    server: &Server,
+    id: u64,
+) -> Option<(i32, sauer_proto::server_query::ExtInfoResponse)> {
+    let cn = server.get_cn(id)? as i32;
+    let insta = server.game_mode.read().is_insta();
+    // Only the first three octets go out, like the engine.
+    let ip = server.peer_addr(id).map(|a| match a.ip() {
+        std::net::IpAddr::V4(v4) => {
+            let [a, b, c, _] = v4.octets();
+            [a, b, c]
+        }
+        _ => [0, 0, 0],
+    });
+    server.players.with(id, |p| {
+        let state = p
+            .state
+            .clone()
+            .unwrap_or_else(|| crate::players::state::make_spawn_state(insta, 0));
+        let stats = sauer_proto::server_query::ExtInfoResponse::PlayerStatsStats {
+            client_num: cn,
+            ping: p.ping,
+            name: p.name.clone(),
+            team: p.team.clone(),
+            frags: p.frags,
+            flags: p.flags,
+            deaths: p.deaths,
+            teamkills: p.teamkills,
+            damage: 0, // TODO
+            health: state.health,
+            armour: state.armour,
+            gunselect: state.gun_select,
+            privilege: p.privilege,
+            state: p.client_state,
+            ip,
+        };
+        (cn, stats)
+    })
 }
