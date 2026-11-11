@@ -12,6 +12,7 @@ const MAX_LIGHTMAPS: i32 = 16_384;
 const MAX_PVS_BYTES: i32 = 256 * 1024 * 1024; // 256 MB
 const MAX_VARS: i32 = 65_536;
 const MAX_VSLOTS: i32 = 1_000_000;
+const MAX_WORLD_SIZE: i32 = 1 << 16;
 
 /// Leniently decompresses an .ogz file, handling concatenated GZIP streams
 /// and bypassing Sauerbraten's historically broken GZIP footers.
@@ -58,6 +59,11 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
     let _headersize = cursor.read_i32::<LittleEndian>()?;
     let world_size = cursor.read_i32::<LittleEndian>()?;
+    // The octree halves down from here, so it must be a power of two.
+    // The engine's `mapscale` goes up to 16.
+    if world_size <= 1 || world_size > MAX_WORLD_SIZE || !(world_size as u32).is_power_of_two() {
+        return Err(OgzError::LimitExceeded("worldsize"));
+    }
     let numents = cursor.read_i32::<LittleEndian>()?;
     let numpvs = cursor.read_i32::<LittleEndian>()?;
     let lightmaps = cursor.read_i32::<LittleEndian>()?;
@@ -332,7 +338,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
 
     // C++ loadchildren reads 8 worldroot cubes directly (no wrapper byte).
     // We wrap them in a Children node to fit the recursive OctreeNode type.
-    let octree = OctreeNode::Children(read_8_children(&mut cursor, version)?);
+    let octree = OctreeNode::Children(read_8_children(&mut cursor, version, world_size / 2)?);
 
     let mut lm_vec = Vec::new();
     if version >= 7 {
@@ -399,13 +405,20 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     })
 }
 
+/// Reads the 8 children of a cube, each `size` wide.
 fn read_8_children(
     cursor: &mut Cursor<&Vec<u8>>,
     version: i32,
+    size: i32,
 ) -> Result<Box<[OctreeNode; 8]>, OgzError> {
+    // Stops a file that nests deeper than the world allows from
+    // overflowing the stack.
+    if size < 1 {
+        return Err(OgzError::LimitExceeded("octree depth"));
+    }
     let mut children = Vec::with_capacity(8);
     for _ in 0..8 {
-        children.push(read_cube(cursor, version)?);
+        children.push(read_cube(cursor, version, size)?);
     }
     Ok(Box::new(
         children
@@ -414,14 +427,22 @@ fn read_8_children(
     ))
 }
 
-fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, OgzError> {
+fn read_cube(
+    cursor: &mut Cursor<&Vec<u8>>,
+    version: i32,
+    size: i32,
+) -> Result<OctreeNode, OgzError> {
     let octsav = cursor.read_u8()?;
     let ty = octsav & 0x07;
 
     match ty {
         0 => {
             // OCTSAV_CHILDREN
-            Ok(OctreeNode::Children(read_8_children(cursor, version)?))
+            Ok(OctreeNode::Children(read_8_children(
+                cursor,
+                version,
+                size / 2,
+            )?))
         }
         1..=4 => {
             let mut edges = [0u8; 12];
@@ -454,7 +475,7 @@ fn read_cube(cursor: &mut Cursor<&Vec<u8>>, version: i32) -> Result<OctreeNode, 
                 3 => Ok(OctreeNode::Normal { info, edges }),
                 4 => Ok(OctreeNode::LodCube {
                     info,
-                    children: read_8_children(cursor, version)?,
+                    children: read_8_children(cursor, version, size / 2)?,
                 }),
                 _ => unreachable!(),
             }

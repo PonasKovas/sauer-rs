@@ -44,51 +44,52 @@ impl<'a, R> Reader<'a, R> {
     }
 
     fn read_message<T: Decode<R>>(&mut self) -> Result<T, ParseError> {
-        // remove N_CLIENT wrapper if expired
-        if let Some(wrapper) = self.active_wrapper {
-            let addr = self.slice.as_ptr() as usize;
-            if addr >= wrapper.end_addr {
-                self.active_wrapper = None;
-            }
-        }
-
-        // peek the message tag
-        let mut temp_slice = self.slice;
-        let msg_type = i32::sauer_read(&mut temp_slice)?;
-
-        if msg_type == N_CLIENT {
-            if self.active_wrapper.is_some() {
-                return Err(ParseError::DoubleClientWrapper);
+        // A loop, not recursion: a packet of many empty N_CLIENT wrappers
+        // would otherwise overflow the stack.
+        loop {
+            // remove N_CLIENT wrapper if expired
+            if let Some(wrapper) = self.active_wrapper {
+                let addr = self.slice.as_ptr() as usize;
+                if addr >= wrapper.end_addr {
+                    self.active_wrapper = None;
+                }
             }
 
-            let cn = crate::data::Cn::sauer_read(&mut temp_slice)
-                .in_field("client_num")
-                .in_struct("N_CLIENT")?;
-            let len = u32::sauer_read(&mut temp_slice)
-                .in_field("length")
-                .in_struct("N_CLIENT")?;
+            // peek the message tag
+            let mut temp_slice = self.slice;
+            let msg_type = i32::sauer_read(&mut temp_slice)?;
 
-            // Only allow the envelope to extend up to the end of our current slice
-            let clamped_len = (len as usize).min(temp_slice.len());
-            let end_addr = temp_slice.as_ptr() as usize + clamped_len as usize;
+            if msg_type == N_CLIENT {
+                if self.active_wrapper.is_some() {
+                    return Err(ParseError::DoubleClientWrapper);
+                }
 
-            self.active_wrapper = Some(ClientWrapperState {
-                client_num: cn,
-                end_addr,
-            });
+                let cn = crate::data::Cn::sauer_read(&mut temp_slice)
+                    .in_field("client_num")
+                    .in_struct("N_CLIENT")?;
+                let len = u32::sauer_read(&mut temp_slice)
+                    .in_field("length")
+                    .in_struct("N_CLIENT")?;
 
-            self.slice = temp_slice;
+                // Only allow the envelope to extend up to the end of our current slice
+                let clamped_len = (len as usize).min(temp_slice.len());
+                let end_addr = temp_slice.as_ptr() as usize + clamped_len as usize;
 
-            return self.read_message();
+                self.active_wrapper = Some(ClientWrapperState {
+                    client_num: cn,
+                    end_addr,
+                });
+
+                self.slice = temp_slice;
+                continue;
+            }
+
+            return T::decode(
+                &mut self.slice,
+                self.active_wrapper.map(|w| w.client_num),
+                self.session,
+            );
         }
-
-        let msg = T::decode(
-            &mut self.slice,
-            self.active_wrapper.map(|w| w.client_num),
-            self.session,
-        )?;
-
-        Ok(msg)
     }
 
     /// Decode the next message as `T`, returning `None` at end-of-buffer.
