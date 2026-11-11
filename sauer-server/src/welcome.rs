@@ -1,7 +1,8 @@
 use crate::Server;
+use crate::Status;
 use sauer_proto::{
     channel1::{ClipboardServer, InitClient, ItemList, MapChange, Resume, Welcome},
-    data::{ClientResumeState, ClientState},
+    data::ClientResumeState,
 };
 
 impl Server {
@@ -67,7 +68,7 @@ impl Server {
                     .with(other, |pd| {
                         pd.state.clone().map(|player_state| ClientResumeState {
                             client_num: other_cn,
-                            state: pd.client_state,
+                            state: pd.status.client_state(),
                             frags: pd.frags,
                             flags: pd.flags,
                             deaths: pd.deaths,
@@ -109,7 +110,7 @@ impl Server {
 
         let is_spectator = self
             .players
-            .with(id, |p| p.client_state == ClientState::Spectator)
+            .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(false);
 
         if is_spectator {

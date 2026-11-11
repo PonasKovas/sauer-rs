@@ -1,5 +1,6 @@
+use super::Status;
 use cube_string::CubeString;
-use sauer_proto::data::{ClientState, PlayerModel, PlayerState, Privilege, Vec3};
+use sauer_proto::data::{PlayerModel, PlayerState, Privilege, Vec3};
 
 /// Stored clipboard geometry data for coop edit clipboard relay.
 #[derive(Clone, Debug)]
@@ -13,8 +14,7 @@ pub struct PlayerData {
     pub name: CubeString,
     pub model: PlayerModel,
     pub team: CubeString,
-    pub client_state: ClientState,
-    pub edit_state: ClientState,
+    pub status: Status,
     /// `None` until `welcome()` is called (sentinel for "has been welcomed").
     pub state: Option<PlayerState>,
     pub position: Vec3<f32>,
@@ -38,8 +38,7 @@ impl PlayerData {
             name: CubeString::new(),
             model: PlayerModel::MrFixit,
             team: CubeString::new(),
-            client_state: ClientState::Dead,
-            edit_state: ClientState::Dead,
+            status: Status::Dead,
             state: None,
             position: Vec3 {
                 x: 0.0,

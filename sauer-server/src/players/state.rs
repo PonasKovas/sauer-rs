@@ -1,7 +1,8 @@
 use crate::Server;
+use crate::Status;
 use sauer_proto::{
     channel1::SpawnState,
-    data::{ArmourType, ClientState, Gun, PlayerAmmo, PlayerState},
+    data::{ArmourType, Gun, PlayerAmmo, PlayerState},
 };
 
 pub(crate) fn make_spawn_state(insta: bool, life_sequence: i32) -> PlayerState {
@@ -36,7 +37,7 @@ impl Server {
     pub fn compute_spawn_state(&self, id: u64) -> Option<PlayerState> {
         let insta = self.game_mode.read().is_insta();
         let old_seq = self.players.with(id, |p| {
-            (p.client_state == ClientState::Dead)
+            (p.status == Status::Dead)
                 .then(|| p.state.as_ref().map(|s| s.life_sequence))
                 .flatten()
         })??;

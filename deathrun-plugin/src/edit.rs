@@ -11,8 +11,9 @@ use sauer_map::Map;
 use sauer_proto::{
     Client, channel0,
     channel1::{self, EditMode},
-    data::{ClientState, Direction, EntityType, GameMode, MasterMode, PlayerState, Privilege},
+    data::{Direction, EntityType, GameMode, MasterMode, PlayerState, Privilege},
 };
+use sauer_server::Status;
 use sauer_server::{
     Server,
     plugin::{Context, Plugin},
@@ -164,7 +165,7 @@ impl Plugin for DeathrunEdit {
         let server = ctx.server();
         let is_spectator = server
             .players
-            .with(id, |p| p.client_state == ClientState::Spectator)
+            .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(true);
 
         // --- READ PHASE 1: Target Trap & AABB ---
@@ -588,9 +589,10 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        let Some((spectating, pos)) = server.players.with(id, |p| {
-            (p.client_state == ClientState::Spectator, p.position)
-        }) else {
+        let Some((spectating, pos)) = server
+            .players
+            .with(id, |p| (p.status == Status::Spectator, p.position))
+        else {
             return;
         };
         if spectating {
@@ -742,7 +744,7 @@ impl Plugin for DeathrunEdit {
         if !is_waiting_for_map(server) && !locked {
             let is_spectator = server
                 .players
-                .with(id, |p| p.client_state == ClientState::Spectator)
+                .with(id, |p| p.status == Status::Spectator)
                 .unwrap_or(false);
             if is_spectator {
                 server.set_spectator(id, false);
@@ -810,7 +812,7 @@ impl Plugin for DeathrunEdit {
 
         let is_spectator = server
             .players
-            .with(id, |p| p.client_state == ClientState::Spectator)
+            .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(false);
         let is_master = server.get_privilege(id) >= Privilege::Master;
 

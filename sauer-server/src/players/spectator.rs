@@ -1,5 +1,6 @@
 use crate::Server;
-use sauer_proto::{channel1::SpectatorServer, data::ClientState};
+use crate::Status;
+use sauer_proto::channel1::SpectatorServer;
 
 impl Server {
     /// Sets a player's spectator state and broadcasts `N_SPECTATOR` to all clients.
@@ -9,15 +10,15 @@ impl Server {
             .players
             .with_mut(id, |p| {
                 if spectate {
-                    if p.client_state != ClientState::Spectator {
-                        p.client_state = ClientState::Spectator;
+                    if p.status != Status::Spectator {
+                        p.status = Status::Spectator;
                         true
                     } else {
                         false
                     }
                 } else {
-                    if p.client_state == ClientState::Spectator {
-                        p.client_state = ClientState::Dead;
+                    if p.status == Status::Spectator {
+                        p.status = Status::Dead;
                         true
                     } else {
                         false

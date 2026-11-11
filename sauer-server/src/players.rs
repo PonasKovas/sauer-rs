@@ -9,9 +9,11 @@ pub mod position;
 pub mod privilege;
 pub mod spectator;
 pub mod state;
+mod status;
 pub mod team;
 
 pub use data::{ClipboardData, PlayerData};
+pub use status::Status;
 
 /// Per-player data, keyed by client id.
 ///

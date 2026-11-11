@@ -30,7 +30,7 @@ pub use builder::ServerBuilder;
 pub use items::{
     ItemState, Items, MAX_ENTS, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
 };
-pub use players::{ClipboardData, PlayerData, Players};
+pub use players::{ClipboardData, PlayerData, Players, Status};
 
 pub use plugin::{Context, Plugin, ServerQueryContext};
 

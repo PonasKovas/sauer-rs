@@ -2,13 +2,14 @@ use crate::map_state::{DeathrunState, Trap, get_server_state};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
+use sauer_server::Status;
 
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
 use sauer_proto::data::{PlayerState, Privilege};
 use sauer_proto::{
     Client, channel0, channel1,
-    data::{ClientState, EntityType, GameMode, MasterMode, SetTeamReason},
+    data::{EntityType, GameMode, MasterMode, SetTeamReason},
 };
 use sauer_server::{
     Server,
@@ -452,8 +453,10 @@ fn check_win_conditions(
             return;
         }
 
-        let evil_state = server.players.with(e_id, |p| p.client_state);
-        if evil_state == Some(ClientState::Dead) || evil_state == Some(ClientState::Spectator) {
+        let evil_out = server.players.with(e_id, |p| {
+            matches!(p.status, Status::Dead | Status::Spectator)
+        });
+        if evil_out == Some(true) {
             let mut top = Vec::new();
             let mut sorted = lock.finished_players.clone();
             sorted.sort_by(|a, b| a.1.cmp(&b.1));
@@ -479,11 +482,7 @@ fn check_win_conditions(
             if !is_finished {
                 // If they are still connected and alive, the round is still playing
                 if ids.contains(&id) {
-                    if server
-                        .players
-                        .with(id, |p| p.client_state == ClientState::Alive)
-                        == Some(true)
-                    {
+                    if server.players.with(id, |p| p.status == Status::Alive) == Some(true) {
                         good_still_playing = true;
                         break;
                     }
@@ -700,7 +699,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
         for id in ids {
             if !server
                 .players
-                .with(id, |p| p.client_state == ClientState::Alive)
+                .with(id, |p| p.status == Status::Alive)
                 .unwrap_or(false)
             {
                 continue;

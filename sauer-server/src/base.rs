@@ -1,6 +1,7 @@
 //! The built-in Sauerbraten base plugin, always present as the innermost plugin.
 //! User plugins run before it and can cancel any handler.
 
+use crate::Status;
 use crate::{
     Server,
     items::{apply_pickup, canpickup},
@@ -16,9 +17,7 @@ use sauer_proto::{
         ShotFx, SpawnServer, UndoServer,
     },
     channel2,
-    data::{
-        ClientState, Cn, GameMode, ItemType, MasterMode, PlayerState, Privilege, SetTeamReason,
-    },
+    data::{Cn, GameMode, ItemType, MasterMode, PlayerState, Privilege, SetTeamReason},
 };
 use std::sync::{Arc, Weak};
 use tracing::info;
@@ -87,7 +86,7 @@ fn check_hit(server: &Server, target_id: u64, life_sequence: i32) -> bool {
     server
         .players
         .with(target_id, |p| {
-            p.client_state == ClientState::Alive
+            p.status == Status::Alive
                 && matches!(p.state.as_ref(), Some(s) if s.life_sequence == life_sequence)
         })
         .unwrap_or(false)
@@ -345,7 +344,7 @@ impl<P: Plugin> Plugin for Base<P> {
         {
             server
                 .players
-                .with_mut(id, |p| p.client_state = ClientState::Spectator);
+                .with_mut(id, |p| p.status = Status::Spectator);
         }
 
         if matches!(server.master_mode(), MasterMode::Private) {
@@ -378,14 +377,14 @@ impl<P: Plugin> Plugin for Base<P> {
         let server = ctx.server();
 
         let spawned_state = server.players.with_mut(id, |p| {
-            if p.client_state != ClientState::Dead {
+            if p.status != Status::Dead {
                 return None;
             }
             let state = p.state.as_mut()?;
             state.life_sequence = packet.life_sequence;
             state.gun_select = packet.gun_select;
             let state = state.clone();
-            p.client_state = ClientState::Alive;
+            p.status = Status::Alive;
             Some(state)
         });
 
@@ -433,7 +432,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let server = ctx.server().clone();
 
         let fired = server.players.with_mut(id, |p| {
-            if p.client_state != ClientState::Alive {
+            if p.status != Status::Alive {
                 return false;
             }
             if let Some(state) = p.state.as_mut() {
@@ -495,9 +494,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        let alive = server
-            .players
-            .with(id, |p| p.client_state == ClientState::Alive);
+        let alive = server.players.with(id, |p| p.status == Status::Alive);
         if alive != Some(true) {
             return;
         }
@@ -761,7 +758,7 @@ impl<P: Plugin> Plugin for Base<P> {
             if want == Privilege::Master {
                 let spectating = server
                     .players
-                    .with(id, |p| p.client_state == ClientState::Spectator)
+                    .with(id, |p| p.status == Status::Spectator)
                     .unwrap_or(true);
                 if spectating {
                     crate::ui::send_warn(server, id, "Spectators may not claim master.");
@@ -933,15 +930,16 @@ impl<P: Plugin> Plugin for Base<P> {
         relay_coop(ctx.server(), ctx.id(), packet);
     }
     async fn edit_mode(&self, ctx: &mut Context, packet: &channel1::EditMode) {
-        let id = ctx.id();
-        ctx.server().players.with_mut(id, |p| {
-            if packet.is_editing {
-                p.edit_state = p.client_state;
-                p.client_state = ClientState::Editing;
-            } else {
-                p.client_state = p.edit_state;
-            }
-        });
+        let server = ctx.server();
+        if *server.game_mode.read() != GameMode::CoopEdit {
+            return;
+        }
+        let changed = server
+            .players
+            .with_mut(ctx.id(), |p| p.status.set_editing(packet.is_editing));
+        if changed != Some(true) {
+            return;
+        }
         relay_coop(ctx.server(), ctx.id(), packet);
     }
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) {
@@ -998,7 +996,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let is_spectator = server
             .players
-            .with(id, |p| p.client_state == ClientState::Spectator)
+            .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(false);
 
         let num_players = server.client_count();
@@ -1024,7 +1022,7 @@ impl<P: Plugin> Plugin for Base<P> {
         // Checked and taken under one items lock, so two players can't both
         // get the item and a map change can't empty the list in between.
         let picked = server.players.with_mut(id, |p| {
-            if p.client_state != ClientState::Alive {
+            if p.status != Status::Alive {
                 return None;
             }
             let state = p.state.as_mut()?;
@@ -1135,7 +1133,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let is_spectator = server
             .players
-            .with(id, |p| p.client_state == ClientState::Spectator)
+            .with(id, |p| p.status == Status::Spectator)
             .unwrap_or(false);
         if is_spectator {
             return;
@@ -1195,7 +1193,7 @@ fn ext_player_stats(
             armour: state.armour,
             gunselect: state.gun_select,
             privilege: p.privilege,
-            state: p.client_state,
+            state: p.status.client_state(),
             ip,
         };
         (cn, stats)

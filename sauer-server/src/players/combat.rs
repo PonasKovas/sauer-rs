@@ -1,7 +1,8 @@
 use crate::Server;
+use crate::Status;
 use sauer_proto::{
     channel1::{Damage, Died, HitPush},
-    data::{ClientState, Gun, Vec3},
+    data::{Gun, Vec3},
 };
 
 pub fn gun_damage_per_ray(gun: Gun) -> i32 {
@@ -65,7 +66,7 @@ impl Server {
                 .unwrap_or(1);
 
         let hit = self.players.with_mut(target_id, |p| {
-            if p.client_state != ClientState::Alive {
+            if p.status != Status::Alive {
                 return None;
             }
             let state = p.state.as_mut()?;
@@ -75,7 +76,7 @@ impl Server {
             state.health -= damage - absorbed;
             let (health, armour, killed) = (state.health, state.armour, state.health <= 0);
             if killed {
-                p.client_state = ClientState::Dead;
+                p.status = Status::Dead;
             }
             Some((health, armour, killed))
         });
@@ -111,9 +112,9 @@ impl Server {
     /// Kill a player by suicide (frags -= 1). Returns true if successful.
     pub fn kill_player(&self, id: u64) -> bool {
         let killed = self.players.with_mut(id, |p| {
-            let alive = p.client_state == ClientState::Alive;
+            let alive = p.status == Status::Alive;
             if alive {
-                p.client_state = ClientState::Dead;
+                p.status = Status::Dead;
             }
             alive
         });
