@@ -300,6 +300,12 @@ impl UserData for LuaServer {
         methods.add_method(
             "set_interval",
             |_lua, _this, (interval_ms, func): (u64, mlua::Function)| {
+                // A zero period makes `tokio::time::interval` panic.
+                if interval_ms == 0 {
+                    return Err(mlua::Error::runtime(
+                        "set_interval: interval must be at least 1 ms",
+                    ));
+                }
                 let handle = tokio::spawn(async move {
                     let mut interval = tokio::time::interval(Duration::from_millis(interval_ms));
 
