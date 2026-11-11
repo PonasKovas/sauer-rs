@@ -73,15 +73,6 @@ impl Server {
         }
     }
 
-    /// Prepare a respawn: increment life_sequence, reset state, send N_SPAWNSTATE to this client.
-    /// Does nothing if the player is not dead or hasn't been welcomed.
-    /// Note: this bypasses the `on_spawn` plugin hook. Prefer using the hook when possible.
-    pub fn prepare_spawn(&self, id: u64) {
-        if let Some(state) = self.compute_spawn_state(id) {
-            self.apply_spawn_state(id, state);
-        }
-    }
-
     /// Broadcasts N_SPAWNSTATE for a newly welcomed player to everyone.
     pub(crate) fn broadcast_spawn_state(&self, id: u64) {
         let Some(state) = self.players.with(id, |p| p.state.clone()).flatten() else {
