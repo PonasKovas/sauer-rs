@@ -68,6 +68,7 @@ Helper types used as fields in packet structs. Not packets themselves.
 
 ### `SetTeamReason` (repr `i32`)
 
+- `Silent` = `-1` — Not announced (the engine uses it for spectators and the welcome).
 - `Switched` = `0`
 - `Forced` = `1`
 
@@ -321,12 +322,16 @@ Full state of a CTF flag, used in `N_INITFLAGS`. Complex conditional encoding.
 - `spawn_index: i32`
 - `location: FlagLocation`
 - `invis: bool`
-- `hold: Option<FlagStateHoldTeam>` — **must be `Some` only when `Session::is_hold_mode` is true**; stream corrupts otherwise.
+
+### `data::InitFlags`
+The flags of `N_INITFLAGS`. Must match `Session::is_hold_mode`.
+- `Plain(Vec<FlagState>)`
+- `Hold(Vec<(FlagState, FlagStateHoldTeam)>)` — each flag is followed by its hold team
 
 ### `data::FlagLocation`
 Wire: `owner, invis`, then `dropped` only when `owner < 0`, then the position only when `dropped`.
 - `Home` — owner -1, dropped 0
-- `Carried { owner: i32 }` — owner >= 0
+- `Carried { owner: Cn }` — owner >= 0
 - `Dropped { pos: Vec3<f32> }` — owner -1, dropped 1, then `pos`
 
 ### `data::FlagStateHoldTeam`
@@ -378,13 +383,6 @@ Enum types: `Chan0Server` for `S2C<Chan0>`, `Chan0Client` for `C2S<Chan0>`.
 
 - `client_num: Cn`
 - `jp: i32`
-
-### `DemoPacket` (`N_DEMOPACKET`)
-`N_DEMOPACKET` Demo playback marker (server only).
-  
-*Encode+Decode:* `DemoPacket` on `S2C<Chan0>` · `DemoPacket` on `S2C<Chan1>` · `DemoPacket` on `S2C<Chan2>`
-  
-*(no fields)*
 
 ### `Position`
 `N_POS` Constant physical position updates.
@@ -549,13 +547,6 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `Client<EditMode>` on `S2C<Chan1>` · `EditMode` on `C2S<Chan1>`
 
 - `is_editing: bool`
-
-### `DemoPacket` (`N_DEMOPACKET`)
-`N_DEMOPACKET` Demo playback marker.
-  
-*Encode+Decode:* `DemoPacket` on `S2C<Chan0>` · `DemoPacket` on `S2C<Chan1>` · `DemoPacket` on `S2C<Chan2>`
-  
-*(no fields)*
 
 ### `ServInfo` (`N_SERVINFO`)
 `N_SERVINFO` Initial server information sent when a client starts connecting.
@@ -1440,7 +1431,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `InitFlagsServer` on `S2C<Chan1>`
 
 - `scores: [i32; 2]`
-- `flags: Vec<FlagState>`
+- `flags: InitFlags`
 
 ### `BasesClient`
 `N_BASES` Sends the list of capture base spawns to the server (Capture / Regen Capture).
@@ -1456,13 +1447,6 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 Bulk file transfers (demo downloads, map sends). Server → Client only.  
 Enum type: `Chan2Server` for `S2C<Chan2>`.  
 Data field uses `read_all_remaining` — consumes all bytes to end of packet.
-
-### `DemoPacket` (`N_DEMOPACKET`)
-`N_DEMOPACKET` Demo playback marker.
-  
-*Encode+Decode:* `DemoPacket` on `S2C<Chan0>` · `DemoPacket` on `S2C<Chan1>` · `DemoPacket` on `S2C<Chan2>`
-  
-*(no fields)*
 
 ### `SendDemo` (`N_SENDDEMO`)
 `N_SENDDEMO` Sent over Channel 2 to stream a recorded demo file to the client.

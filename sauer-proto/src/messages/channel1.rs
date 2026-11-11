@@ -856,7 +856,7 @@ make_struct!(
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InitFlagsServer {
     pub scores: [i32; 2],
-    pub flags: Vec<FlagState>,
+    pub flags: InitFlags,
 }
 impl crate::PacketDescriptor for InitFlagsServer {
     fn packet_names(&self) -> Vec<&'static str> {
@@ -868,38 +868,13 @@ impl SauerWrite for InitFlagsServer {
         N_INITFLAGS.sauer_write(out);
         self.scores[0].sauer_write(out);
         self.scores[1].sauer_write(out);
-
         (self.flags.len() as i32).sauer_write(out);
-
-        for f in &self.flags {
-            f.version.sauer_write(out);
-            f.spawn_index.sauer_write(out);
-
-            // Owner (-1 if not carried), invis, then whether and where it lies dropped
-            match &f.location {
-                FlagLocation::Carried { owner } => owner.sauer_write(out),
-                _ => (-1i32).sauer_write(out),
-            }
-            f.invis.sauer_write(out);
-            match &f.location {
-                FlagLocation::Carried { .. } => {}
-                FlagLocation::Home => false.sauer_write(out),
-                FlagLocation::Dropped { pos } => {
-                    true.sauer_write(out);
-                    crate::data::vec3::write_quantized::<DMF>(pos, out);
-                }
-            }
-
-            // 4. Write Hold State (Only if `hold` is Some, enforcing M_HOLD gamemode)
-            if let Some(hold) = &f.hold {
-                match hold {
-                    FlagStateHoldTeam::None => (-1i32).sauer_write(out),
-                    FlagStateHoldTeam::Team { team, hold_time } => {
-                        team.sauer_write(out);
-                        hold_time.sauer_write(out);
-                    }
-                }
-            }
+        match &self.flags {
+            InitFlags::Plain(flags) => flags.iter().for_each(|f| f.sauer_write(out)),
+            InitFlags::Hold(flags) => flags.iter().for_each(|(f, hold)| {
+                f.sauer_write(out);
+                hold.sauer_write(out);
+            }),
         }
     }
 }
@@ -910,53 +885,31 @@ impl SauerReadStateful for InitFlagsServer {
 
             let scores = [i32::sauer_read(reader)?, i32::sauer_read(reader)?];
             let num_flags = i32::sauer_read(reader)?;
-
-            if num_flags < 0 || num_flags > 256 {
+            if !(0..=256).contains(&num_flags) {
                 return Err(ParseError::ValueOutOfRange {
                     value: num_flags,
                     max: 256,
                 });
             }
 
-            let mut flags = Vec::with_capacity(num_flags as usize);
-
-            for _ in 0..num_flags {
-                let version = i32::sauer_read(reader)?;
-                let spawn_index = i32::sauer_read(reader)?;
-                let owner = i32::sauer_read(reader)?;
-                let invis = bool::sauer_read(reader)?;
-                let location = if owner >= 0 {
-                    FlagLocation::Carried { owner }
-                } else if bool::sauer_read(reader)? {
-                    FlagLocation::Dropped {
-                        pos: crate::data::vec3::read_quantized::<DMF>(reader)?,
-                    }
-                } else {
-                    FlagLocation::Home
-                };
-
-                // Read Hold State (Strictly bound to Session gamemode!)
-                let hold = if session.is_hold_mode {
-                    let team = i32::sauer_read(reader)?;
-                    if team < 0 {
-                        Some(FlagStateHoldTeam::None)
-                    } else {
-                        let hold_time = i32::sauer_read(reader)?;
-                        Some(FlagStateHoldTeam::Team { team, hold_time })
-                    }
-                } else {
-                    None
-                };
-
-                flags.push(FlagState {
-                    version,
-                    spawn_index,
-                    location,
-                    invis,
-                    hold,
-                });
-            }
-
+            let flags = if session.is_hold_mode {
+                InitFlags::Hold(
+                    (0..num_flags)
+                        .map(|_| {
+                            Ok((
+                                FlagState::sauer_read(reader)?,
+                                FlagStateHoldTeam::sauer_read(reader)?,
+                            ))
+                        })
+                        .collect::<Result<_, ParseError>>()?,
+                )
+            } else {
+                InitFlags::Plain(
+                    (0..num_flags)
+                        .map(|_| FlagState::sauer_read(reader))
+                        .collect::<Result<_, _>>()?,
+                )
+            };
             Ok(InitFlagsServer { scores, flags })
         }
 

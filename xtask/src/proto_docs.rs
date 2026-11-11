@@ -697,13 +697,23 @@ pub fn run(src: &Path, dest: &Path) {
     writeln!(out, "- `version: i32`").unwrap();
     writeln!(out, "- `spawn_index: i32`").unwrap();
     writeln!(out, "- `location: FlagLocation`").unwrap();
-    writeln!(out, "- `invis: bool`").unwrap();
-    writeln!(out, "- `hold: Option<FlagStateHoldTeam>` — **must be `Some` only when `Session::is_hold_mode` is true**; stream corrupts otherwise.\n").unwrap();
-
+    writeln!(out, "- `invis: bool`\n").unwrap();
+    writeln!(out, "### `data::InitFlags`").unwrap();
+    writeln!(
+        out,
+        "The flags of `N_INITFLAGS`. Must match `Session::is_hold_mode`."
+    )
+    .unwrap();
+    writeln!(out, "- `Plain(Vec<FlagState>)`").unwrap();
+    writeln!(
+        out,
+        "- `Hold(Vec<(FlagState, FlagStateHoldTeam)>)` — each flag is followed by its hold team\n"
+    )
+    .unwrap();
     writeln!(out, "### `data::FlagLocation`").unwrap();
     writeln!(out, "Wire: `owner, invis`, then `dropped` only when `owner < 0`, then the position only when `dropped`.").unwrap();
     writeln!(out, "- `Home` — owner -1, dropped 0").unwrap();
-    writeln!(out, "- `Carried {{ owner: i32 }}` — owner >= 0").unwrap();
+    writeln!(out, "- `Carried {{ owner: Cn }}` — owner >= 0").unwrap();
     writeln!(
         out,
         "- `Dropped {{ pos: Vec3<f32> }}` — owner -1, dropped 1, then `pos`\n"

@@ -24,7 +24,7 @@ pub use clipboard::{ClipboardPayload, MAX_CLIENT_UNPACK_LEN, UndoEntity, UndoPay
 pub use cn::Cn;
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
-pub use flag_state::{FlagLocation, FlagState, FlagStateHoldTeam};
+pub use flag_state::{FlagLocation, FlagState, FlagStateHoldTeam, InitFlags};
 pub use tex_ref::TexRef;
 
 pub use sauer_core::{
