@@ -33,7 +33,7 @@ fn handle_edit_reject(ctx: &Context, min: [i32; 3], max: [i32; 3]) {
 }
 
 pub struct TrapHighlightState {
-    pub trap_idx: Option<usize>,
+    pub trap: Option<crate::trap::TrapId>,
     pub look_start: tokio::time::Instant,
     pub last_sent: tokio::time::Instant,
     pub active: bool,
@@ -214,10 +214,11 @@ impl Plugin for DeathrunEdit {
                 state
                     .traps
                     .iter()
-                    .position(|trap| trap.contains_button_point(hit_pt, 0.5))
+                    .find(|trap| trap.contains_button_point(hit_pt, 0.5))
+                    .map(|trap| trap.id)
             };
 
-            let edited_trap = state.mode.editing().map(|e| e.trap_idx);
+            let edited_trap = state.mode.editing().map(|e| e.trap);
             let moving_trap = state
                 .mode
                 .placing()
@@ -225,18 +226,19 @@ impl Plugin for DeathrunEdit {
                 .and_then(|p| p.trap);
             target_trap = edited_trap.or(moving_trap).or(hit_trap);
             is_trap_edit_active = edited_trap.is_some();
-            seethrough_target =
-                hit_trap.map(|idx| crate::trap::placement::button_key(&state.traps[idx]));
+            seethrough_target = hit_trap
+                .and_then(|t| state.trap(t))
+                .map(crate::trap::placement::button_key);
 
-            if let Some(idx) = target_trap {
+            if let Some((trap_id, trap)) = target_trap.and_then(|t| Some((t, state.trap(t)?))) {
                 let eye = Some((origin, forward));
-                entity_frames = guard::entity_frames(&guard::trap_ent_changes(&state, idx), eye);
+                entity_frames =
+                    guard::entity_frames(&guard::trap_ent_changes(&state, trap_id), eye);
 
-                let trap = &state.traps[idx];
                 let live = state
                     .mode
                     .editing()
-                    .filter(|e| e.trap_idx == idx)
+                    .filter(|e| e.trap == trap_id)
                     .and_then(|edit| {
                         crate::trap::commands::geometry_bounds(
                             &edit.original_map,
@@ -264,18 +266,18 @@ impl Plugin for DeathrunEdit {
                 self.trap_highlights
                     .entry(id)
                     .or_insert_with(|| TrapHighlightState {
-                        trap_idx: None,
+                        trap: None,
                         look_start: tokio::time::Instant::now(),
                         last_sent: tokio::time::Instant::now(),
                         active: false,
                     });
 
-            if hl_state.trap_idx != target_trap {
+            if hl_state.trap != target_trap {
                 target_changed = true;
                 if hl_state.active {
                     clear_highlight = true;
                 }
-                hl_state.trap_idx = target_trap;
+                hl_state.trap = target_trap;
                 hl_state.look_start = tokio::time::Instant::now();
                 hl_state.active = false;
             }
@@ -288,7 +290,7 @@ impl Plugin for DeathrunEdit {
             }
 
             TrapHighlightState {
-                trap_idx: hl_state.trap_idx,
+                trap: hl_state.trap,
                 look_start: hl_state.look_start,
                 last_sent: hl_state.last_sent,
                 active: hl_state.active,
@@ -715,18 +717,7 @@ impl Plugin for DeathrunEdit {
                 return Flow::Continue;
             }
 
-            state.traps.iter().position(|trap| {
-                let b_min = trap.button_pos;
-                let b_max = [
-                    b_min[0] + trap.button_size,
-                    b_min[1] + trap.button_size,
-                    b_min[2] + trap.button_size,
-                ];
-
-                (0..3).all(|ax| {
-                    hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
-                })
-            })
+            state.trap_at(hit_pt)
         };
 
         if let Some(trap_idx) = trap_to_trigger {

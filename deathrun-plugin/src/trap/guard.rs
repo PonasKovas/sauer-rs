@@ -246,18 +246,14 @@ const MAX_MARKED: usize = 20;
 const HALF: i32 = 8;
 
 /// Entity changes of a trap, live while it is being edited.
-pub fn trap_ent_changes(state: &DeathrunState, idx: usize) -> Vec<EntChange> {
+pub fn trap_ent_changes(state: &DeathrunState, trap: super::TrapId) -> Vec<EntChange> {
     match (state.mode.editing(), &state.map) {
-        (Some(edit), Some(map)) if edit.trap_idx == idx => ents::diff(
+        (Some(edit), Some(map)) if edit.trap == trap => ents::diff(
             &edit.original_map.entities,
             &map.entities,
             &map.virt_state.global_pool,
         ),
-        _ => state
-            .traps
-            .get(idx)
-            .map(|t| t.ents.clone())
-            .unwrap_or_default(),
+        _ => state.trap(trap).map(|t| t.ents.clone()).unwrap_or_default(),
     }
 }
 

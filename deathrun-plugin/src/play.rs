@@ -886,22 +886,12 @@ impl Plugin for DeathrunPlay {
                     origin[2] + forward[2] * dist,
                 ];
 
-                target_trap = state.traps.iter().position(|trap| {
-                    let b_min = trap.button_pos;
-                    let b_max = [
-                        b_min[0] + trap.button_size,
-                        b_min[1] + trap.button_size,
-                        b_min[2] + trap.button_size,
-                    ];
-                    (0..3).all(|ax| {
-                        hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
-                    })
-                });
-                seethrough_target =
-                    target_trap.map(|idx| crate::trap::placement::button_key(&state.traps[idx]));
+                target_trap = state.trap_at(hit_pt);
+                seethrough_target = target_trap
+                    .and_then(|t| state.trap(t))
+                    .map(crate::trap::placement::button_key);
 
-                if let Some(idx) = target_trap {
-                    let trap = &state.traps[idx];
+                if let Some(trap) = target_trap.and_then(|t| state.trap(t)) {
                     if let Some((t_min, t_max)) = trap.geom.as_ref().map(|g| g.clip_box()) {
                         let len_x = t_max[0] - t_min[0];
                         let len_y = t_max[1] - t_min[1];
@@ -994,18 +984,18 @@ impl Plugin for DeathrunPlay {
             let mut hl_state_clone = {
                 let mut hl_state = self.trap_highlights.entry(id).or_insert_with(|| {
                     crate::edit::TrapHighlightState {
-                        trap_idx: None,
+                        trap: None,
                         look_start: tokio::time::Instant::now(),
                         last_sent: tokio::time::Instant::now(),
                         active: false,
                     }
                 });
 
-                if hl_state.trap_idx != target_trap {
+                if hl_state.trap != target_trap {
                     if hl_state.active {
                         clear_highlight = true;
                     }
-                    hl_state.trap_idx = target_trap;
+                    hl_state.trap = target_trap;
                     hl_state.look_start = tokio::time::Instant::now();
                     hl_state.active = false;
                 }
@@ -1018,7 +1008,7 @@ impl Plugin for DeathrunPlay {
                 }
 
                 crate::edit::TrapHighlightState {
-                    trap_idx: hl_state.trap_idx,
+                    trap: hl_state.trap,
                     look_start: hl_state.look_start,
                     last_sent: hl_state.last_sent,
                     active: hl_state.active,
@@ -1129,7 +1119,7 @@ impl Plugin for DeathrunPlay {
                 if hl.active {
                     clear_highlight = true;
                     hl.active = false;
-                    hl.trap_idx = None;
+                    hl.trap = None;
                 }
             }
             if clear_highlight {
@@ -1449,18 +1439,7 @@ impl Plugin for DeathrunPlay {
             if state.mode.editing().is_some() {
                 return Flow::Continue;
             }
-            state.traps.iter().position(|trap| {
-                let b_min = trap.button_pos;
-                let b_max = [
-                    b_min[0] + trap.button_size,
-                    b_min[1] + trap.button_size,
-                    b_min[2] + trap.button_size,
-                ];
-
-                (0..3).all(|ax| {
-                    hit_pt[ax] >= b_min[ax] as f32 - 0.5 && hit_pt[ax] <= b_max[ax] as f32 + 0.5
-                })
-            })
+            state.trap_at(hit_pt)
         };
 
         if let Some(idx) = trap_idx {

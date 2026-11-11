@@ -1,8 +1,11 @@
+use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY, Trap, TrapId, TrapPhase};
 use crate::map_state::get_server_state;
-use sauer_proto::{Client, channel1, data::Vec3};
+use sauer_proto::{
+    Client, channel1,
+    data::{GameMode, Vec3},
+};
 use sauer_server::Server;
-
-use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY, Trap};
+use std::{sync::Arc, time::Duration};
 
 /// Turns the base state of the trap's area into its active state. Returns the
 /// entity slots it touched.
@@ -31,8 +34,12 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     let mut new_map = *base_map;
 
     // Apply all active traps in chronological order
-    for &t_idx in &state.active_trap_stack {
-        apply_active_state(&mut new_map, &state.traps[t_idx], &virt_state.global_pool);
+    for trap in state
+        .active_trap_stack
+        .iter()
+        .filter_map(|&id| state.trap(id))
+    {
+        apply_active_state(&mut new_map, trap, &virt_state.global_pool);
     }
 
     // A trap's geometry can cover other traps' buttons and paste them back as
@@ -40,7 +47,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     for trap in &state.traps {
         let (pos, size, orient) = (trap.button_pos, trap.button_size, trap.button_orient);
         crate::trap::placement::build_button_geometry(&mut new_map, pos, size, orient);
-        if trap.is_active {
+        if trap.phase != TrapPhase::Ready {
             for pkt in crate::trap::placement::get_outer_faces_vslot_packets(
                 pos,
                 size,
@@ -142,351 +149,198 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     }
 }
 
-pub fn trap_triggerable(state: &crate::map_state::DeathrunState, trap_idx: usize) -> bool {
+pub fn trap_triggerable(state: &crate::map_state::DeathrunState, id: TrapId) -> bool {
     // A button being moved is off limits until it is placed.
-    state.mode.editing().is_none()
-        && state
-            .mode
-            .placing()
-            .is_none_or(|p| p.trap != Some(trap_idx))
+    state.mode.editing().is_none() && state.mode.placing().is_none_or(|p| p.trap != Some(id))
 }
 
-pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
+pub fn trigger_trap(server: &Arc<Server>, id: TrapId, actor_id: u64) {
     let mut state = get_server_state(server).write();
-    if !trap_triggerable(&state, trap_idx) {
+    if !trap_triggerable(&state, id) {
         return;
     }
-
-    if trap_idx >= state.traps.len() {
+    let Some(trap) = state.trap_mut(id) else {
         return;
-    }
-
-    if state.traps[trap_idx].is_active || !state.traps[trap_idx].does_anything() {
-        return;
-    }
-
-    state.traps[trap_idx].is_active = true;
-    if state.base_map.is_none() {
-        state.base_map = Some(Box::new(state.map.as_ref().unwrap().clone()));
-    }
-    state.active_trap_stack.push(trap_idx);
-
-    let button_pos = state.traps[trap_idx].button_pos;
-    let button_size = state.traps[trap_idx].button_size;
-    let button_orient = state.traps[trap_idx].button_orient;
-    let trap_time = state.traps[trap_idx].time;
-    let trap_timeout = state.traps[trap_idx].timeout;
-
-    let is_edit_mode = server.game.read().mode == sauer_proto::data::GameMode::CoopEdit;
-    let effective_timeout = if is_edit_mode || trap_timeout == 0 {
-        trap_time
-    } else {
-        trap_timeout.max(trap_time)
     };
-
+    if trap.phase != TrapPhase::Ready || !trap.does_anything() {
+        return;
+    }
+    trap.phase = TrapPhase::Firing;
+    let button = (trap.button_pos, trap.button_size, trap.button_orient);
+    let (time, timeout) = (trap.time, trap.timeout);
+    if state.base_map.is_none() {
+        state.base_map = state.map.clone().map(Box::new);
+    }
+    state.active_trap_stack.push(id);
     drop(state);
 
-    let server_clone = std::sync::Arc::clone(server);
-    tokio::spawn(async move {
-        // Calculate progress bar position to be exactly 0.5 units off the face
-        let mut px = button_pos[0] as f32 + button_size as f32 / 2.0;
-        let mut py = button_pos[1] as f32 + button_size as f32 / 2.0;
-        let mut pz = button_pos[2] as f32 + button_size as f32 / 2.0;
-
-        let d = (button_orient >> 1) as usize;
-        let dc = button_orient & 1;
-        let offset = if dc == 0 {
-            -0.5
-        } else {
-            button_size as f32 + 0.5
-        };
-
-        if d == 0 {
-            px = button_pos[0] as f32 + offset;
-        } else if d == 1 {
-            py = button_pos[1] as f32 + offset;
-        } else if d == 2 {
-            pz = button_pos[2] as f32 + offset;
-        }
-
-        let namespace = format!("trap_prog_{}", trap_idx);
-        let actor_cn = crate::SERVER_BOT_CN;
-
-        let target_ids = {
-            let is_play_mode =
-                server_clone.game.read().mode != sauer_proto::data::GameMode::CoopEdit;
-            if is_play_mode {
-                let maps = server_clone
-                    .extra
-                    .get::<std::sync::Arc<parking_lot::RwLock<crate::play::PlayMaps>>>()
-                    .unwrap();
-                let lock = maps.read();
-                lock.evil_id.into_iter().collect::<Vec<_>>()
-            } else {
-                server_clone.client_ids()
-            }
-        };
-
-        // Send initial 100% progress BEFORE applying trigger (beats client PasteServer freeze)
-        let color = (0 << 8) | (15 << 4); // Full green
-        let initial_fake_ent = sauer_map::virt_ents::FakeEnt {
-            ent_type: sauer_proto::data::EntityType::Particles,
-            position: [px, py, pz],
-            attrs: [5, 100, color as i32, 1337, 7331],
-        };
-        {
-            let mut state = get_server_state(&server_clone).write();
-            if let Some(map) = state.map.as_mut() {
-                let mut glob = Vec::new();
-                let mut pers = std::collections::HashMap::new();
-                for &target_id in &target_ids {
-                    let mut up =
-                        map.update_virt_ents(target_id, &namespace, vec![initial_fake_ent.clone()]);
-                    glob.append(&mut up.global_broadcast);
-                    pers.insert(target_id, up.personal);
-                }
-                if !glob.is_empty() {
-                    server_clone.broadcast(
-                        glob.into_iter()
-                            .map(|p| sauer_proto::Client {
-                                client_num: actor_cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                for (tid, pkts) in pers {
-                    if !pkts.is_empty() {
-                        server_clone.send(
-                            tid,
-                            pkts.into_iter()
-                                .map(|p| sauer_proto::Client {
-                                    client_num: actor_cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                }
-            }
-        }
-
-        // --- 1. APPLY ACTIVE ---
-        recompose_traps(&server_clone);
-
-        if let Some(trigger_cn) = server_clone.get_cn(actor_id) {
-            server_clone.broadcast(&sauer_proto::Client {
-                client_num: trigger_cn,
-                packet: sauer_proto::channel1::Sound { sound_id: 64 },
-            });
-        }
-
-        set_button_color(
-            &server_clone,
-            actor_id,
-            button_pos,
-            button_size,
-            button_orient,
-            BUTTON_COLOR_ACTIVE,
-        );
-
-        let start = tokio::time::Instant::now();
-        let total_dur = std::time::Duration::from_millis(effective_timeout as u64);
-        let revert_dur = std::time::Duration::from_millis(trap_time as u64);
-        let mut reverted = false;
-        let mut last_progress = 100;
-
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(33));
-
-        loop {
-            // Check if map was reloaded or round reset logic deleted the trap.
-            let is_valid = {
-                let state = get_server_state(&server_clone).read();
-                if let Some(t) = state.traps.get(trap_idx) {
-                    t.is_active // Retains is_active == true during cooldown phase
-                } else {
-                    false
-                }
-            };
-            if !is_valid {
-                return; // Abort immediately, map changed!
-            }
-
-            let elapsed = start.elapsed();
-            if elapsed >= total_dur {
-                break;
-            }
-
-            if !reverted && elapsed >= revert_dur {
-                {
-                    let mut state = get_server_state(&server_clone).write();
-                    // We intentionally keep `is_active = true` to enforce the timeout cooldown
-                    state.active_trap_stack.retain(|&id| id != trap_idx);
-                }
-
-                recompose_traps(&server_clone);
-
-                {
-                    let mut state = get_server_state(&server_clone).write();
-                    if state.active_trap_stack.is_empty() {
-                        state.base_map = None;
-                    }
-                }
-
-                if effective_timeout > trap_time {
-                    // Force button color back to ACTIVE for the duration of the timeout cooldown.
-                    set_button_color(
-                        &server_clone,
-                        actor_id,
-                        button_pos,
-                        button_size,
-                        button_orient,
-                        BUTTON_COLOR_ACTIVE,
-                    );
-                }
-
-                reverted = true;
-            }
-
-            let remaining = total_dur.saturating_sub(elapsed).as_millis() as i32;
-            let progress = (remaining * 100 / effective_timeout as i32).clamp(0, 100);
-
-            if progress != last_progress {
-                last_progress = progress;
-
-                let g = (progress * 15 / 100).clamp(0, 15);
-                let r = ((100 - progress) * 15 / 100).clamp(0, 15);
-                let color = (r << 8) | (g << 4);
-                let prog_fake_ent = sauer_map::virt_ents::FakeEnt {
-                    ent_type: sauer_proto::data::EntityType::Particles,
-                    position: [px, py, pz],
-                    attrs: [5, progress as i32, color as i32, 1337, 7331],
-                };
-
-                let mut glob = Vec::new();
-                let mut pers = std::collections::HashMap::new();
-                {
-                    let mut state = get_server_state(&server_clone).write();
-                    if let Some(map) = state.map.as_mut() {
-                        for &target_id in &target_ids {
-                            let mut up = map.update_virt_ents(
-                                target_id,
-                                &namespace,
-                                vec![prog_fake_ent.clone()],
-                            );
-                            glob.append(&mut up.global_broadcast);
-                            pers.insert(target_id, up.personal);
-                        }
-                    }
-                }
-                if !glob.is_empty() {
-                    server_clone.broadcast(
-                        glob.into_iter()
-                            .map(|p| sauer_proto::Client {
-                                client_num: actor_cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                for (tid, pkts) in pers {
-                    if !pkts.is_empty() {
-                        server_clone.send(
-                            tid,
-                            pkts.into_iter()
-                                .map(|p| sauer_proto::Client {
-                                    client_num: actor_cn,
-                                    packet: p,
-                                })
-                                .collect::<Vec<_>>(),
-                        );
-                    }
-                }
-            }
-            interval.tick().await;
-        }
-
-        if !reverted {
-            {
-                let mut state = get_server_state(&server_clone).write();
-                if state.traps[trap_idx].is_active {
-                    state.traps[trap_idx].is_active = false;
-                    state.active_trap_stack.retain(|&id| id != trap_idx);
-                }
-            }
-
-            recompose_traps(&server_clone);
-
-            {
-                let mut state = get_server_state(&server_clone).write();
-                if state.active_trap_stack.is_empty() {
-                    state.base_map = None;
-                }
-            }
-        } else {
-            // End of the timeout cooldown
-            let mut state = get_server_state(&server_clone).write();
-            if state.traps.get(trap_idx).map_or(false, |t| t.is_active) {
-                state.traps[trap_idx].is_active = false;
-            }
-        }
-
-        {
-            let mut glob = Vec::new();
-            let mut pers = std::collections::HashMap::new();
-            let mut state = get_server_state(&server_clone).write();
-            if let Some(map) = state.map.as_mut() {
-                for &target_id in &target_ids {
-                    let mut up = map.clear_virt_ents(target_id, &namespace);
-                    glob.append(&mut up.global_broadcast);
-                    pers.insert(target_id, up.personal);
-                }
-            }
-            drop(state);
-            if !glob.is_empty() {
-                server_clone.broadcast(
-                    glob.into_iter()
-                        .map(|p| sauer_proto::Client {
-                            client_num: actor_cn,
-                            packet: p,
-                        })
-                        .collect::<Vec<_>>(),
-                );
-            }
-            for (tid, pkts) in pers {
-                if !pkts.is_empty() {
-                    server_clone.send(
-                        tid,
-                        pkts.into_iter()
-                            .map(|p| sauer_proto::Client {
-                                client_num: actor_cn,
-                                packet: p,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-            }
-        }
-
-        set_button_color(
-            &server_clone,
-            actor_id,
-            button_pos,
-            button_size,
-            button_orient,
-            BUTTON_COLOR_READY,
-        );
-    });
+    let is_edit_mode = server.game.read().mode == GameMode::CoopEdit;
+    let total = if is_edit_mode || timeout == 0 {
+        time
+    } else {
+        timeout.max(time)
+    };
+    tokio::spawn(run_trap(
+        Arc::clone(server),
+        id,
+        actor_id,
+        button,
+        time,
+        total,
+    ));
 }
 
-pub fn set_button_color(
-    server: &Server,
-    _actor_id: u64,
-    pos: [i32; 3],
-    size: i32,
-    orient: u8,
-    color: [f32; 3],
+/// A fired trap: its active state for `time` ms, then a cooldown until
+/// `total` ms, with a progress bar by its button for whoever may trigger it.
+async fn run_trap(
+    server: Arc<Server>,
+    id: TrapId,
+    actor_id: u64,
+    (pos, size, orient): (ButtonPos, i32, u8),
+    time: u32,
+    total: u32,
 ) {
+    let namespace = format!("trap_prog_{id}");
+    let bar_pos = progress_bar_pos(pos, size, orient);
+    // In play only the terrorist triggers traps, so only they see the bar.
+    let targets = if server.game.read().mode == GameMode::CoopEdit {
+        server.client_ids()
+    } else {
+        let maps = server
+            .extra
+            .get::<Arc<parking_lot::RwLock<crate::play::PlayMaps>>>()
+            .expect("DeathrunPlay::init sets up PlayMaps");
+        maps.read().evil_id.into_iter().collect()
+    };
+
+    // The full bar goes out before the trap's paste, which freezes clients a moment.
+    show_progress(
+        &server,
+        &targets,
+        &namespace,
+        vec![progress_ent(bar_pos, 100)],
+    );
+    recompose_traps(&server);
+    if let Some(trigger_cn) = server.get_cn(actor_id) {
+        server.broadcast(&Client {
+            client_num: trigger_cn,
+            packet: channel1::Sound { sound_id: 64 },
+        });
+    }
+    set_button_color(&server, pos, size, orient, BUTTON_COLOR_ACTIVE);
+
+    let start = tokio::time::Instant::now();
+    let total_dur = Duration::from_millis(total as u64);
+    let revert_dur = Duration::from_millis(time as u64);
+    let mut last_progress = 100;
+    let mut interval = tokio::time::interval(Duration::from_millis(33));
+    loop {
+        // Gone when it was deleted or the map was reloaded.
+        let phase = get_server_state(&server).read().trap(id).map(|t| t.phase);
+        let Some(phase @ (TrapPhase::Firing | TrapPhase::Cooldown)) = phase else {
+            show_progress(&server, &targets, &namespace, Vec::new());
+            return;
+        };
+
+        let elapsed = start.elapsed();
+        if elapsed >= total_dur {
+            break;
+        }
+        if phase == TrapPhase::Firing && elapsed >= revert_dur {
+            revert(&server, id);
+            // The button stays dark through the cooldown.
+            set_button_color(&server, pos, size, orient, BUTTON_COLOR_ACTIVE);
+        }
+
+        let remaining = total_dur.saturating_sub(elapsed).as_millis() as i32;
+        let progress = (remaining * 100 / total as i32).clamp(0, 100);
+        if progress != last_progress {
+            last_progress = progress;
+            show_progress(
+                &server,
+                &targets,
+                &namespace,
+                vec![progress_ent(bar_pos, progress)],
+            );
+        }
+        interval.tick().await;
+    }
+
+    // With no cooldown the trap is still firing here.
+    revert(&server, id);
+    if let Some(trap) = get_server_state(&server).write().trap_mut(id) {
+        trap.phase = TrapPhase::Ready;
+    }
+    show_progress(&server, &targets, &namespace, Vec::new());
+    set_button_color(&server, pos, size, orient, BUTTON_COLOR_READY);
+}
+
+/// Takes a firing trap's active state out of the map; it cools down next.
+fn revert(server: &Arc<Server>, id: TrapId) {
+    {
+        let mut state = get_server_state(server).write();
+        match state.trap_mut(id) {
+            Some(trap) if trap.phase == TrapPhase::Firing => trap.phase = TrapPhase::Cooldown,
+            _ => return,
+        }
+        state.active_trap_stack.retain(|&i| i != id);
+    }
+    recompose_traps(server);
+    let mut state = get_server_state(server).write();
+    if state.active_trap_stack.is_empty() {
+        state.base_map = None;
+    }
+}
+
+type ButtonPos = [i32; 3];
+
+/// Half a unit off the button's face, in the middle.
+fn progress_bar_pos(pos: ButtonPos, size: i32, orient: u8) -> [f32; 3] {
+    let d = (orient >> 1) as usize;
+    let mut p = pos.map(|v| v as f32 + size as f32 / 2.0);
+    p[d] = pos[d] as f32
+        + if orient & 1 == 0 {
+            -0.5
+        } else {
+            size as f32 + 0.5
+        };
+    p
+}
+
+/// The progress bar: a particle meter, green when full, red when empty.
+fn progress_ent(pos: [f32; 3], progress: i32) -> sauer_map::virt_ents::FakeEnt {
+    let g = (progress * 15 / 100).clamp(0, 15);
+    let r = ((100 - progress) * 15 / 100).clamp(0, 15);
+    sauer_map::virt_ents::FakeEnt {
+        ent_type: sauer_proto::data::EntityType::Particles,
+        position: pos,
+        attrs: [5, progress, (r << 8) | (g << 4), 1337, 7331],
+    }
+}
+
+/// Shows `ents` in `namespace` to each target (none clears it).
+fn show_progress(
+    server: &Server,
+    targets: &[u64],
+    namespace: &str,
+    ents: Vec<sauer_map::virt_ents::FakeEnt>,
+) {
+    let updates: Vec<_> = {
+        let mut state = get_server_state(server).write();
+        let Some(map) = state.map.as_mut() else {
+            return;
+        };
+        targets
+            .iter()
+            .map(|&id| (id, map.update_virt_ents(id, namespace, ents.clone())))
+            .collect()
+    };
+    for (id, up) in updates {
+        super::place::send_virt(server, id, up);
+    }
+}
+
+pub fn set_button_color(server: &Server, pos: [i32; 3], size: i32, orient: u8, color: [f32; 3]) {
     let actor_cn = crate::SERVER_BOT_CN;
     let mut state = get_server_state(server).write();
 

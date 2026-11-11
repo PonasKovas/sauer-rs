@@ -27,11 +27,41 @@ pub struct DeathrunState {
     pub traps: Vec<Trap>,
     pub mode: crate::trap::TrapMode,
     pub base_map: Option<Box<sauer_map::Map>>,
-    pub active_trap_stack: Vec<usize>,
+    /// Traps whose active state is in the map, oldest first.
+    pub active_trap_stack: Vec<crate::trap::TrapId>,
     /// Where trap geometry and the trap record live in the map, once created.
     pub vault: Option<crate::trap::vault::Vault>,
     /// Generation of the last trap record written to the anchor.
     pub record_generation: u32,
+}
+
+impl DeathrunState {
+    pub fn trap_index(&self, id: crate::trap::TrapId) -> Option<usize> {
+        self.traps.iter().position(|t| t.id == id)
+    }
+
+    pub fn trap(&self, id: crate::trap::TrapId) -> Option<&Trap> {
+        self.traps.iter().find(|t| t.id == id)
+    }
+
+    pub fn trap_mut(&mut self, id: crate::trap::TrapId) -> Option<&mut Trap> {
+        self.traps.iter_mut().find(|t| t.id == id)
+    }
+
+    /// The trap whose button is at `hit_pt`, give or take half a unit.
+    pub fn trap_at(&self, hit_pt: [f32; 3]) -> Option<crate::trap::TrapId> {
+        let trap = self
+            .traps
+            .iter()
+            .find(|t| t.contains_button_point(hit_pt, 0.5))?;
+        Some(trap.id)
+    }
+
+    /// The number players see for a trap: its place in the list.
+    pub fn trap_number(&self, id: crate::trap::TrapId) -> String {
+        self.trap_index(id)
+            .map_or_else(|| "?".to_string(), |i| i.to_string())
+    }
 }
 
 impl Default for DeathrunState {

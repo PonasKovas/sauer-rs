@@ -13,7 +13,7 @@ use super::placement::{
     ButtonKey, build_button, build_button_geometry, button_key, clear_button_cell,
     get_outer_face_selections,
 };
-use super::{BUTTON_SIZE, Trap, TrapGeom, TrapMode, persist};
+use super::{BUTTON_SIZE, Trap, TrapGeom, TrapId, TrapMode, TrapPhase, persist};
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
@@ -48,7 +48,7 @@ impl Kind {
 pub struct Placing {
     pub player: u64,
     /// The trap whose button is moving, `None` for a new trap.
-    pub trap: Option<usize>,
+    pub trap: Option<TrapId>,
     /// Where the player aims, as shown to everyone.
     target: Target,
 }
@@ -142,14 +142,16 @@ fn cell_at(hit_pt: [f32; 3], orient: u8, world_size: i32) -> Option<[i32; 3]> {
 
 /// The trap whose button the ray hits, counting only the button itself, not
 /// the air around it in its cell.
-pub fn button_hit(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Option<usize> {
+pub fn button_hit(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Option<TrapId> {
     let (hit_pt, _, _) = raycast(state, origin, ray)?;
     // Just past the surface, inside whatever was hit.
     let inside: [f32; 3] = std::array::from_fn(|i| hit_pt[i] + ray[i] * 0.01);
-    state.traps.iter().position(|t| {
+    state.traps.iter().find_map(|t| {
         let (min, max) =
             get_outer_face_selections(t.button_pos, t.button_size, t.button_orient)[0].bounds();
-        (0..3).all(|i| inside[i] >= min[i] as f32 - 0.05 && inside[i] <= max[i] as f32 + 0.05)
+        (0..3)
+            .all(|i| inside[i] >= min[i] as f32 - 0.05 && inside[i] <= max[i] as f32 + 0.05)
+            .then_some(t.id)
     })
 }
 
@@ -173,7 +175,7 @@ fn frames_around(state: &DeathrunState, cell: Box3) -> Vec<Box3> {
         .collect()
 }
 
-fn verdict(state: &DeathrunState, moving: Option<usize>, key: ButtonKey) -> Verdict {
+fn verdict(state: &DeathrunState, moving: Option<TrapId>, key: ButtonKey) -> Verdict {
     let cell = cell_box(key);
     if !state.active_trap_stack.is_empty() {
         return Verdict::Bad("Wait for the active traps to reset.");
@@ -184,8 +186,7 @@ fn verdict(state: &DeathrunState, moving: Option<usize>, key: ButtonKey) -> Verd
     let taken = state
         .traps
         .iter()
-        .enumerate()
-        .any(|(i, t)| Some(i) != moving && overlaps(cell, t.button_box()));
+        .any(|t| Some(t.id) != moving && overlaps(cell, t.button_box()));
     if taken {
         return Verdict::Bad("Another trap's button is in the way.");
     }
@@ -197,7 +198,7 @@ fn verdict(state: &DeathrunState, moving: Option<usize>, key: ButtonKey) -> Verd
 }
 
 /// Where the button would go for a player aiming along `ray`.
-fn aim(state: &DeathrunState, moving: Option<usize>, origin: [f32; 3], ray: [f32; 3]) -> Target {
+fn aim(state: &DeathrunState, moving: Option<TrapId>, origin: [f32; 3], ray: [f32; 3]) -> Target {
     // Other buttons count as any surface: the new one goes on top.
     if moving.is_some() && button_hit(state, origin, ray) == moving {
         return Target::Back;
@@ -209,7 +210,10 @@ fn aim(state: &DeathrunState, moving: Option<usize>, origin: [f32; 3], ray: [f32
         return Target::Nowhere;
     };
     let key = (pos, BUTTON_SIZE, orient);
-    if moving.is_some_and(|i| button_key(&state.traps[i]) == key) {
+    if moving
+        .and_then(|m| state.trap(m))
+        .is_some_and(|t| button_key(t) == key)
+    {
         return Target::Back;
     }
     Target::Cell(key, verdict(state, moving, key))
@@ -260,7 +264,7 @@ fn frames(state: &DeathrunState, target: Target) -> Vec<FakeEnt> {
         .collect()
 }
 
-fn send_virt(server: &Server, id: u64, up: VirtEntUpdates) {
+pub(crate) fn send_virt(server: &Server, id: u64, up: VirtEntUpdates) {
     let cn = crate::SERVER_BOT_CN;
     let wrap = |pkts: Vec<channel1::EditEnt>| {
         pkts.into_iter()
@@ -359,7 +363,7 @@ pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray:
     let refusal = match &state.mode {
         TrapMode::Editing(e) => Some(format!(
             "Trap {} is being edited. Type #tedit to finish editing first.",
-            e.trap_idx
+            state.trap_number(e.trap)
         )),
         TrapMode::Placing(p) if p.player != id => busy_message(server, &state),
         TrapMode::Placing(p) if p.kind() != kind => Some(format!(
@@ -388,15 +392,18 @@ fn start(
     let moving = match kind {
         Kind::New => None,
         Kind::Move => {
-            let Some(i) = button_hit(&state, origin, ray) else {
+            let Some(trap) = button_hit(&state, origin, ray) else {
                 crate::ui::send_warn(server, id, "Aim at a trap button to move it.");
                 return;
             };
-            if state.traps[i].is_active {
+            if state
+                .trap(trap)
+                .is_some_and(|t| t.phase != TrapPhase::Ready)
+            {
                 crate::ui::send_warn(server, id, "That trap is active. Wait for it to reset.");
                 return;
             }
-            Some(i)
+            Some(trap)
         }
     };
     let target = aim(&state, moving, origin, ray);
@@ -406,11 +413,12 @@ fn start(
         target,
     });
     show(server, &mut state, Target::Nowhere, target);
+    let number = moving.map(|t| state.trap_number(t));
     drop(state);
 
     let cmd = kind.command();
-    let what = match moving {
-        Some(i) => format!("moving the button of trap {i}"),
+    let what = match number {
+        Some(n) => format!("moving the button of trap {n}"),
         None => "placing a new trap button".to_string(),
     };
     announce(server, format!("{} is {what}.", name(server, id)));
@@ -465,20 +473,23 @@ fn finish(
     };
 
     let mut sync = persist::Sync::default();
-    let old = moving.map(|i| button_key(&state.traps[i]));
+    let old = moving.and_then(|m| state.trap(m)).map(button_key);
     if let Err(e) = set_button_cells(state, old, Some(key), &mut sync) {
         crate::ui::send_warn(server, id, &format!("\x0C3[ERROR]\x0C7 {e}"));
         return;
     }
-    let idx = match moving {
-        Some(i) => {
-            let t = &mut state.traps[i];
-            (t.button_pos, t.button_size, t.button_orient) = key;
-            i
+    let trap = match moving {
+        Some(m) => {
+            if let Some(t) = state.trap_mut(m) {
+                (t.button_pos, t.button_size, t.button_orient) = key;
+            }
+            m
         }
         None => {
-            state.traps.push(Trap::new(key.0, key.1, key.2));
-            state.traps.len() - 1
+            let t = Trap::new(key.0, key.1, key.2);
+            let id = t.id;
+            state.traps.push(t);
+            id
         }
     };
     // Back to idle first: the preview cell is in `sync`, so the server's
@@ -493,7 +504,8 @@ fn finish(
     persist::send(server, out);
 
     let verb = if moving.is_some() { "moved" } else { "placed" };
-    let mut text = format!("{} {verb} the button of trap {idx}.", name(server, id));
+    let number = state.trap_number(trap);
+    let mut text = format!("{} {verb} the button of trap {number}.", name(server, id));
     if matches!(target, Target::Cell(_, Verdict::InFrame)) {
         text.push_str(" It is inside a trap's frame.");
     }

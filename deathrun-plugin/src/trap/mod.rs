@@ -34,8 +34,38 @@ pub const BUTTON_SEETHROUGH_ALPHA: f32 = 0.3;
 /// Limit for one trap's compressed geometry (what gets sent when it fires).
 pub const TRAP_BUDGET: usize = 1024 * 1024;
 
+/// A trap's identity. Unlike its index in `DeathrunState::traps` it stays the
+/// same when other traps are deleted, and it's never reused, so whatever
+/// holds one over time (a trigger task, an edit) can tell its trap is gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TrapId(u32);
+
+impl std::fmt::Display for TrapId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl TrapId {
+    fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// Where a trap is in its firing cycle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrapPhase {
+    #[default]
+    Ready,
+    /// Its active state is in the map.
+    Firing,
+    /// Back to its base state, but the button waits out the timeout.
+    Cooldown,
+}
+
 pub struct TrapEditState {
-    pub trap_idx: usize,
+    pub trap: TrapId,
     pub original_map: Box<sauer_map::Map>,
 }
 
@@ -118,6 +148,7 @@ impl TrapGeom {
 
 #[derive(Clone)]
 pub struct Trap {
+    pub id: TrapId,
     pub button_pos: [i32; 3],
     pub button_size: i32,
     pub button_orient: u8,
@@ -127,12 +158,13 @@ pub struct Trap {
 
     pub time: u32,
     pub timeout: u32,
-    pub is_active: bool,
+    pub phase: TrapPhase,
 }
 
 impl Trap {
     pub fn new(button_pos: [i32; 3], button_size: i32, button_orient: u8) -> Self {
         Self {
+            id: TrapId::next(),
             button_pos,
             button_size,
             button_orient,
@@ -140,7 +172,7 @@ impl Trap {
             ents: Vec::new(),
             time: 2000,
             timeout: 20000,
-            is_active: false,
+            phase: TrapPhase::Ready,
         }
     }
 

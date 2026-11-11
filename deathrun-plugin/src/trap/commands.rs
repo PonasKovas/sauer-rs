@@ -1,4 +1,4 @@
-use super::{Trap, TrapEditState, TrapGeom, TrapMode, persist};
+use super::{Trap, TrapEditState, TrapGeom, TrapId, TrapMode, TrapPhase, persist};
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
@@ -94,7 +94,7 @@ pub fn edit_size(state: &DeathrunState) -> usize {
     let (Some(edit), Some(current)) = (state.mode.editing(), state.map.as_ref()) else {
         return 0;
     };
-    let old = state.traps.get(edit.trap_idx).and_then(|t| t.geom.as_ref());
+    let old = state.trap(edit.trap).and_then(|t| t.geom.as_ref());
     geometry_bounds(&edit.original_map, current, old)
         .map_or(0, |b| payload_size(&capture_geometry(current, b).payload))
 }
@@ -142,10 +142,10 @@ fn spawn_payloads(server: &Arc<Server>, payloads: Vec<ClipboardPayload>) {
     });
 }
 
-/// Why trap `idx` can't be changed right now, if it can't.
-fn locked(server: &Server, state: &DeathrunState, idx: usize) -> Option<String> {
+/// Why `trap` can't be changed right now, if it can't.
+fn locked(server: &Server, state: &DeathrunState, trap: TrapId) -> Option<String> {
     let p = state.mode.placing()?;
-    (p.trap == Some(idx)).then(|| super::place::busy_message(server, state).unwrap_or_default())
+    (p.trap == Some(trap)).then(|| super::place::busy_message(server, state).unwrap_or_default())
 }
 
 /// Why traps can't be added or removed right now, if they can't.
@@ -153,7 +153,7 @@ fn busy(server: &Server, state: &DeathrunState) -> Option<String> {
     if let Some(e) = state.mode.editing() {
         return Some(format!(
             "Trap {} is being edited. Type #tedit to finish editing first.",
-            e.trap_idx
+            state.trap_number(e.trap)
         ));
     }
     if let Some(msg) = super::place::busy_message(server, state) {
@@ -213,7 +213,7 @@ pub fn cmd_cleartrap(ctx: &Context, hit_pt: [f32; 3]) {
         not_looking(server, id);
         return;
     };
-    if state.traps[trap_idx].is_active {
+    if state.traps[trap_idx].phase != TrapPhase::Ready {
         crate::ui::send_warn(server, id, "That trap is active. Wait for it to reset.");
         return;
     }
@@ -254,7 +254,7 @@ fn set_trap_value(ctx: &Context, hit_pt: [f32; 3], f: impl FnOnce(&mut Trap) -> 
         not_looking(server, id);
         return;
     };
-    if let Some(msg) = locked(server, &state, trap_idx) {
+    if let Some(msg) = locked(server, &state, state.traps[trap_idx].id) {
         crate::ui::send_warn(server, id, &msg);
         return;
     }
@@ -365,10 +365,10 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
 
     if let Some(edit) = state.mode.editing() {
         // Someone aiming at another trap most likely meant to edit that one.
-        if let Some(other) = aimed.filter(|&i| i != edit.trap_idx) {
+        if let Some(other) = aimed.filter(|&i| state.traps[i].id != edit.trap) {
             let msg = format!(
                 "Trap {} is being edited, not trap {other}. Aim at it, or away from other traps, and type #tedit to finish.",
-                edit.trap_idx
+                state.trap_number(edit.trap)
             );
             drop(state);
             crate::ui::send_warn(server, id, &msg);
@@ -403,7 +403,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
         None => Vec::new(),
     };
     state.mode = TrapMode::Editing(TrapEditState {
-        trap_idx,
+        trap: trap.id,
         original_map,
     });
     drop(state);
@@ -444,7 +444,7 @@ fn end_edit(
     let current_map = state.map.as_ref().unwrap();
     let original = &edit_state.original_map;
     let pool = current_map.virt_state.global_pool.clone();
-    let old_geom = state.traps[edit_state.trap_idx].geom.clone();
+    let old_geom = state.trap(edit_state.trap).and_then(|t| t.geom.clone());
 
     let geom_bounds = geometry_bounds(original, current_map, old_geom.as_ref());
     let ent_changes = super::ents::diff(&original.entities, &current_map.entities, &pool);
@@ -477,9 +477,10 @@ fn end_edit(
         if let Some(g) = &old_geom {
             persist::free_shelf(&mut state, g, &mut sync);
         }
-        let trap = &mut state.traps[edit_state.trap_idx];
-        trap.geom = new_geom;
-        trap.ents = ent_changes;
+        if let Some(trap) = state.trap_mut(edit_state.trap) {
+            trap.geom = new_geom;
+            trap.ents = ent_changes;
+        }
         result = persist::save(&mut state, &mut sync);
     }
     let out = persist::packets(&state, sync);
