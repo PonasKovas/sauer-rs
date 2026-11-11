@@ -1,7 +1,7 @@
 [package]
 name = "cube-string"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 zerocopy = { workspace = true, features = ["derive"] }
@@ -13,3 +13,6 @@ mlua = { workspace = true, optional = true }
 default = ["serde"]
 serde = ["dep:serde"]
 lua = ["dep:mlua"]
+
+[lints]
+workspace = true

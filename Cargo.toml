@@ -2,6 +2,13 @@
 members = ["cube-string", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "sauer-plugin-lua", "example-server", "deathrun", "sauer-core", "telegram-plugin", "sauer-kit", "xtask"]
 resolver = "3"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.dependencies]
 telegram-plugin.path = "telegram-plugin/"
 cube-string.path = "cube-string/"

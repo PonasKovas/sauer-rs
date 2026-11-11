@@ -1,7 +1,7 @@
 [package]
 name = "sauer-kit"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Building blocks for custom servers on sauer-server: virtual entities, coop-edit tracking, paste sync"
 
 [dependencies]
@@ -11,3 +11,6 @@ sauer-map.workspace = true
 sauer-core.workspace = true
 ogz-rs.workspace = true
 tokio.workspace = true
+
+[lints]
+workspace = true

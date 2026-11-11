@@ -1,7 +1,7 @@
 [package]
 name = "telegram-plugin"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 cube-string.workspace = true
@@ -11,3 +11,6 @@ tokio.workspace = true
 teloxide.workspace = true
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true

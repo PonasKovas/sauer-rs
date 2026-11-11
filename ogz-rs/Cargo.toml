@@ -1,13 +1,16 @@
 [package]
 name = "ogz-rs"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "A parser and serializer for the Cube 2: Sauerbraten .ogz map format."
 
 [dependencies]
-sauer-core = { path = "../sauer-core" }
+sauer-core.workspace = true
 cube-string.workspace = true
 thiserror.workspace = true
 flate2 = { workspace = true }
 num_enum.workspace = true
 byteorder.workspace = true
+
+[lints]
+workspace = true

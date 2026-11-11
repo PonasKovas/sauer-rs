@@ -1,10 +1,10 @@
 [package]
 name = "sauer-proto"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-sauer-core = { path = "../sauer-core", features = ["serde"] }
+sauer-core = { workspace = true, features = ["serde"] }
 num_enum.workspace = true
 thiserror.workspace = true
 cube-string.workspace = true
@@ -16,3 +16,6 @@ serde = { workspace = true, optional = true }
 [features]
 lua = ["dep:mlua", "sauer-core/lua"]
 serde = ["dep:serde"]
+
+[lints]
+workspace = true
