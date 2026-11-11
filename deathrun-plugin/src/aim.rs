@@ -46,8 +46,8 @@ impl Aim {
     }
 
     /// Where the ray first hits geometry, or [`REACH`] away.
-    pub fn hit_point(&self, map: Option<&Map>) -> [f32; 3] {
-        self.at(map.and_then(|m| self.hit(m)).map_or(REACH, |hit| hit.dist))
+    pub fn hit_point(&self, map: &Map) -> [f32; 3] {
+        self.at(self.hit(map).map_or(REACH, |hit| hit.dist))
     }
 
     /// Whether `p` is within `radius` of the ray, in front of the eye.

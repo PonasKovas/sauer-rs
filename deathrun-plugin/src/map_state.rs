@@ -18,7 +18,7 @@ pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
 pub use crate::trap::Trap;
 
 pub struct DeathrunState {
-    pub map: Option<sauer_map::Map>,
+    pub map: sauer_map::Map,
     /// True while waiting for a player to upload a map after a map vote.
     pub waiting_for_map: bool,
     pub uploading_map_name: Option<cube_string::CubeString>,
@@ -57,10 +57,8 @@ impl DeathrunState {
         namespace: &str,
         ents: Vec<sauer_kit::virt_ents::FakeEnt>,
     ) -> sauer_kit::virt_ents::VirtEntUpdates {
-        match self.map.as_mut() {
-            Some(map) => self.virt.update(&mut map.entities, player, namespace, ents),
-            None => Default::default(),
-        }
+        self.virt
+            .update(&mut self.map.entities, player, namespace, ents)
     }
 
     /// The trap whose button is at `hit_pt`, give or take half a unit.
@@ -82,7 +80,7 @@ impl DeathrunState {
 impl Default for DeathrunState {
     fn default() -> Self {
         Self {
-            map: None,
+            map: sauer_map::Map::default_empty(),
             waiting_for_map: false,
             uploading_map_name: None,
             traps: Vec::new(),
@@ -113,7 +111,8 @@ where
     if let Some(base) = state.base_map.as_mut() {
         f(base);
     }
-    if let Some(map) = state.map.as_mut() {
+    {
+        let map = &mut state.map;
         f(map);
     }
 }

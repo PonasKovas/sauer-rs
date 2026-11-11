@@ -47,9 +47,7 @@ fn after_paste(server: &Server) {
 pub fn send_map_file(server: &Arc<Server>, id: u64) {
     let server = Arc::clone(server);
     tokio::spawn(async move {
-        let Some(map) = get_server_state(&server).read().map.clone() else {
-            return;
-        };
+        let map = get_server_state(&server).read().map.clone();
         let bytes = tokio::task::spawn_blocking(move || {
             map.to_ogz_bytes_merged(flate2::Compression::fast())
         })

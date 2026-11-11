@@ -48,7 +48,7 @@ pub fn maps(state: &mut DeathrunState) -> Vec<&mut Map> {
         super::TrapMode::Editing(e) => Some(&mut *e.original_map),
         _ => None,
     };
-    map.iter_mut()
+    std::iter::once(map)
         .chain(base_map.iter_mut().map(|m| &mut **m))
         .chain(edit)
         .collect()
@@ -87,14 +87,15 @@ fn enlarge_maps(state: &mut DeathrunState, sync: &mut Sync) {
     for m in maps(state) {
         m.enlarge();
     }
-    if let Some(map) = state.map.as_ref() {
+    {
+        let map = &state.map;
         sync.dirty.extend(map.enlarged_octants());
     }
 }
 
 /// Enlarges the map from the server side (clients are told with `N_NEWMAP`).
 fn enlarge(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
-    if state.map.as_ref().map_or(MAX_WORLD, |m| m.size) >= MAX_WORLD {
+    if state.map.size >= MAX_WORLD {
         return Err("the map is already at the maximum size, so the trap vault can't grow".into());
     }
     enlarge_maps(state, sync);
@@ -105,7 +106,7 @@ fn enlarge(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
 /// A client enlarged the map (already relayed to everyone): follow it, turn
 /// the new rock into air for everyone, and move the vault to the new corner.
 pub fn client_enlarged(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
-    if state.map.as_ref().map_or(MAX_WORLD, |m| m.size) >= MAX_WORLD {
+    if state.map.size >= MAX_WORLD {
         return Ok(()); // the engine refuses this too
     }
     enlarge_maps(state, sync);
@@ -196,12 +197,12 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     let (size, positions) = vault::pack_fresh(start, &items)
         .ok_or("the traps' geometry is too big to fit in the vault")?;
 
-    let at_max = |state: &DeathrunState| state.map.as_ref().map_or(true, |m| m.size >= MAX_WORLD);
+    let at_max = |state: &DeathrunState| state.map.size >= MAX_WORLD;
     if fresh_octant && !at_max(state) {
         enlarge(state, sync)?;
     }
     let target = loop {
-        let map = state.map.as_ref().ok_or("no map loaded")?;
+        let map = &state.map;
         if at_max(state) && size <= map.size / 2 {
             break corner_away_from_play(map, size, old);
         }
@@ -289,16 +290,16 @@ pub fn save(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
 
 /// Moves the vault back to the far corner after the world was enlarged.
 pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
-    let (Some(v), Some(map)) = (state.vault, state.map.as_ref()) else {
+    let (Some(v), map) = (state.vault, &state.map) else {
         return Ok(());
     };
     if v.is_at_far_corner(map.size) {
         return Ok(());
     }
     let mut target = Vault::at_far_corner(map.size, v.size);
-    while !vault::is_free(state.map.as_ref().unwrap(), target.bounds(), None) {
+    while !vault::is_free(&state.map, target.bounds(), None) {
         enlarge(state, sync)?;
-        target = Vault::at_far_corner(state.map.as_ref().unwrap().size, v.size);
+        target = Vault::at_far_corner(state.map.size, v.size);
     }
     for m in maps(state) {
         vault::erase(m, &v);
@@ -319,9 +320,7 @@ pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<
 
 /// Builds the packets for `sync` from the current map. Call under the state lock.
 pub fn packets(state: &DeathrunState, sync: Sync) -> (u32, Vec<ClipboardPayload>) {
-    let Some(map) = state.map.as_ref() else {
-        return (sync.enlarges, Vec::new());
-    };
+    let map = &state.map;
     let mut boxes: Vec<Aabb> = Vec::new();
     for b in sync.dirty {
         if !boxes.iter().any(|o| o.contains(&b)) {
@@ -526,14 +525,14 @@ mod tests {
         trap.geom = Some(geom);
         trap.ents = vec![EntChange::Removed(ents::EntRec::of(&map.entities[0]))];
         DeathrunState {
-            map: Some(map),
+            map: map,
             traps: vec![trap],
             ..Default::default()
         }
     }
 
     fn reload(state: &DeathrunState) -> (Map, Loaded) {
-        let bytes = state.map.as_ref().unwrap().to_ogz_bytes().unwrap();
+        let bytes = &state.map.to_ogz_bytes().unwrap();
         let map = Map::from_bytes(&bytes).unwrap();
         let loaded = load(&map);
         (map, loaded)
@@ -582,7 +581,7 @@ mod tests {
         let mut sync = Sync::default();
         client_enlarged(&mut state, &mut sync).unwrap();
         assert_eq!(sync.enlarges, 0, "the client's enlarge was already relayed");
-        let map = state.map.as_ref().unwrap();
+        let map = &state.map;
         for octant in map.enlarged_octants() {
             assert!(sync.dirty.contains(&octant), "new octant not resent as air");
         }
@@ -632,7 +631,7 @@ mod tests {
     fn missing_base_entity_is_unlinked_on_load() {
         let mut state = setup();
         save(&mut state, &mut Sync::default()).unwrap();
-        state.map.as_mut().unwrap().entities[0].ent_type = EntityType::Empty;
+        state.map.entities[0].ent_type = EntityType::Empty;
         let (_, loaded) = reload(&state);
         assert!(loaded.traps[0].ents.is_empty());
         assert_eq!(loaded.warnings.len(), 1);

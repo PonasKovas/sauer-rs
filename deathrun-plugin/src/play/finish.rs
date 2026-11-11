@@ -27,10 +27,7 @@ pub(super) fn check_finish(
             let d: f32 = (0..3).map(|i| (pos[i] - e.position[i]).powi(2)).sum();
             e.ent_type == EntityType::Flag && d < FLAG_REACH * FLAG_REACH
         };
-        state
-            .map
-            .as_ref()
-            .and_then(|m| m.entities.iter().find(near).map(|e| e.position))
+        state.map.entities.iter().find(near).map(|e| e.position)
     };
     let Some(flag) = flag else {
         return;
@@ -73,9 +70,7 @@ fn fireworks(server: &Server, pos: [f32; 3]) {
     const EFFECTS: [[i16; 5]; 2] = [[0, 1000, 0, -1, 0], [12, 1000, 1000, 0, 0]];
     let placed: Vec<(usize, [i16; 5])> = {
         let mut state = get_server_state(server).write();
-        let Some(map) = state.map.as_mut() else {
-            return;
-        };
+        let map = &mut state.map;
         EFFECTS
             .iter()
             .map(|&attrs| {

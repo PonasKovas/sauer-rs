@@ -75,7 +75,7 @@ pub fn capture_geometry(current: &Map, bounds: Aabb) -> TrapGeom {
 
 /// Size of the trap being edited if it were recorded right now.
 pub fn edit_size(state: &DeathrunState) -> usize {
-    let (Some(edit), Some(current)) = (state.mode.editing(), state.map.as_ref()) else {
+    let (Some(edit), current) = (state.mode.editing(), &state.map) else {
         return 0;
     };
     let old = state.trap(edit.trap).and_then(|t| t.geom.as_ref());
@@ -331,10 +331,10 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
         return;
     };
 
-    let original_map = Box::new(state.map.clone().unwrap());
+    let original_map = Box::new(state.map.clone());
     let trap = state.traps[trap_idx].clone();
     let pool = state.virt.slots().to_vec();
-    let map = state.map.as_mut().unwrap();
+    let map = &mut state.map;
     let touched = super::trigger::apply_active_state(map, &trap, &pool);
     map.invalidate_cache();
     crate::map_state::update_server_items(map, server);
@@ -369,7 +369,7 @@ fn end_edit(
         up.send(server, id, crate::SERVER_BOT_CN);
     }
 
-    let current_map = state.map.as_ref().unwrap();
+    let current_map = &state.map;
     let original = &edit_state.original_map;
     let pool = state.virt.slots().to_vec();
     let old_geom = state.trap(edit_state.trap).and_then(|t| t.geom.clone());
@@ -387,10 +387,10 @@ fn end_edit(
 
     // Back to the base state. Keep vslots created during the edit: the new
     // geometry may reference them.
-    let merged_vslots = std::mem::take(&mut state.map.as_mut().unwrap().vslots);
-    state.map = Some(*edit_state.original_map.clone());
+    let merged_vslots = std::mem::take(&mut state.map.vslots);
+    state.map = *edit_state.original_map.clone();
     let crate::map_state::DeathrunState { map, virt, .. } = &mut *state;
-    if let Some(map) = map.as_mut() {
+    {
         if merged_vslots.len() > map.vslots.len() {
             map.vslots = merged_vslots;
         }
@@ -412,9 +412,9 @@ fn end_edit(
     }
     let out = persist::packets(&state, sync);
     let restore = geom_bounds
-        .map(|b| sauer_kit::paste::restore_payloads(state.map.as_ref().unwrap(), b))
+        .map(|b| sauer_kit::paste::restore_payloads(&state.map, b))
         .unwrap_or_default();
-    let map_snapshot = state.map.as_ref().unwrap();
+    let map_snapshot = &state.map;
     crate::map_sync::broadcast_ents(server, map_snapshot, changed_ent_ids);
     drop(state);
 
@@ -518,9 +518,7 @@ pub fn run(ctx: &Context, cmd: Command, args: &[cube_string::CubeString], aim: A
     }
     let hit_pt = {
         let state = get_server_state(server).read();
-        let Some(map) = state.map.as_ref() else {
-            return;
-        };
+        let map = &state.map;
         aim.hit(map).map(|hit| aim.at(hit.dist))
     };
     // Finishing an edit works wherever the player aims.

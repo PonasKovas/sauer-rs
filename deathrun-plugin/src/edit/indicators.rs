@@ -55,19 +55,14 @@ impl DeathrunEdit {
         };
         let dist = {
             let state = get_server_state(server).read();
-            state
-                .map
-                .as_ref()
-                .and_then(|map| {
-                    sauer_map::raycast::raycast_with_filter(
-                        map,
-                        side.origin,
-                        side.forward,
-                        TRAP_EDIT_PARTICLE_MAX_DIST,
-                        |c| !c.is_empty() || c.material != sauer_core::Material::default(),
-                    )
-                })
-                .map_or(TRAP_EDIT_PARTICLE_MAX_DIST, |hit| (hit.dist - 1.0).max(1.0))
+            sauer_map::raycast::raycast_with_filter(
+                &state.map,
+                side.origin,
+                side.forward,
+                TRAP_EDIT_PARTICLE_MAX_DIST,
+                |c| !c.is_empty() || c.material != sauer_core::Material::default(),
+            )
+            .map_or(TRAP_EDIT_PARTICLE_MAX_DIST, |hit| (hit.dist - 1.0).max(1.0))
         };
         let particle = sauer_kit::virt_ents::FakeEnt {
             ent_type: EntityType::Particles,

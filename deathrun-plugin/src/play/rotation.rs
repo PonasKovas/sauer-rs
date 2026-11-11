@@ -102,15 +102,13 @@ impl PlayMaps {
         }
     }
 
-    pub(super) fn make_active_state(&self) -> (Option<String>, DeathrunState) {
-        let mut ds = DeathrunState::default();
-        if let Some(name) = &self.current_map {
-            if let Some(loaded) = self.maps.get(name) {
-                ds.map = Some(loaded.state.clone());
-                ds.traps = loaded.traps.clone();
-                return (Some(name.clone()), ds);
-            }
-        }
-        (None, ds)
+    /// A fresh game state on the current map, `None` if no map is loaded.
+    pub(super) fn make_active_state(&self) -> Option<DeathrunState> {
+        let loaded = self.maps.get(self.current_map.as_ref()?)?;
+        Some(DeathrunState {
+            map: loaded.state.clone(),
+            traps: loaded.traps.clone(),
+            ..Default::default()
+        })
     }
 }

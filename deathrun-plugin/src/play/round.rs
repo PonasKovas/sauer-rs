@@ -54,11 +54,11 @@ pub(super) fn start_round_sequence(
         lock.rotation_idx += 1;
         lock.current_map = Some(next_map);
 
-        let (_, new_state) = lock.make_active_state();
-        let Some(map) = new_state.map.clone() else {
+        let Some(new_state) = lock.make_active_state() else {
             lock.round_state = RoundState::NotStarted;
             return;
         };
+        let map = new_state.map.clone();
         *get_server_state(&server).write() = new_state;
         (map, epoch, server.client_ids())
     };

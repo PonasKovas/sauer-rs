@@ -24,11 +24,7 @@ pub fn reject(ctx: &Context, bounds: Aabb, msg: &str) {
     let server = ctx.server().clone();
     let payloads = {
         let state = get_server_state(&server).read();
-        state
-            .map
-            .as_ref()
-            .map(|m| sauer_kit::paste::restore_payloads(m, bounds))
-            .unwrap_or_default()
+        sauer_kit::paste::restore_payloads(&state.map, bounds)
     };
     crate::map_sync::paste_everywhere(&server, payloads);
 }
@@ -64,14 +60,15 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
         return;
     }
     let snapshot = match (state.mode.editing(), &state.map) {
-        (Some(_), Some(map)) => Some(sauer_map::block::generate_region_clipboard(map, bounds)),
+        (Some(_), map) => Some(sauer_map::block::generate_region_clipboard(map, bounds)),
         _ => None,
     };
 
     if let Some(base) = state.base_map.as_mut() {
         apply(base);
     }
-    if let Some(map) = state.map.as_mut() {
+    {
+        let map = &mut state.map;
         apply(map);
     }
 
@@ -82,7 +79,7 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
     if size <= super::TRAP_BUDGET {
         return;
     }
-    let map = state.map.as_mut().unwrap();
+    let map = &mut state.map;
     if let Some(sel) = super::vault::sel(map, pos, s, grid) {
         map.apply_block(&sel, payload.nodes, false);
     }
@@ -95,12 +92,8 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
     reject(ctx, bounds, &msg);
 }
 
-fn base_entities(state: &DeathrunState) -> Option<&Vec<ogz_rs::data::Entity>> {
-    state
-        .base_map
-        .as_deref()
-        .or(state.map.as_ref())
-        .map(|m| &m.entities)
+fn base_entities(state: &DeathrunState) -> &[ogz_rs::data::Entity] {
+    &state.base_map.as_deref().unwrap_or(&state.map).entities
 }
 
 /// Applies an entity edit to the server maps. Rejects it in protected areas,
@@ -143,7 +136,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
         .map(|&i| {
             (
                 i,
-                state.map.as_ref().and_then(|m| m.entities.get(i).cloned()),
+                state.map.entities.get(i).cloned(),
                 state
                     .base_map
                     .as_ref()
@@ -155,7 +148,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
     let watch = state.mode.editing().is_none();
     let before: Vec<Option<ogz_rs::data::Entity>> = ids
         .iter()
-        .map(|&i| base_entities(&state).and_then(|e| e.get(i).cloned()))
+        .map(|&i| base_entities(&state).get(i).cloned())
         .collect();
 
     let ok = !boxes.iter().any(|b| state.protected.blocks(b));
@@ -163,12 +156,14 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
         if let Some(base) = state.base_map.as_mut() {
             apply(base);
         }
-        if let Some(map) = state.map.as_mut() {
+        {
+            let map = &mut state.map;
             apply(map);
         }
     }
     for (i, live, base) in saved {
-        if let (Some(e), Some(m)) = (live, state.map.as_mut()) {
+        if let Some(e) = live {
+            let m = &mut state.map;
             m.entities[i] = e;
         }
         if let (Some(e), Some(m)) = (base, state.base_map.as_mut()) {
@@ -182,12 +177,12 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
         virt,
         ..
     } = &mut *state;
-    for m in map.iter_mut().chain(base_map.as_deref_mut()) {
+    for m in std::iter::once(map).chain(base_map.as_deref_mut()) {
         virt.reconcile(&mut m.entities);
     }
     if !ok {
         // The edit was already relayed: put the server's entities back everywhere.
-        crate::map_sync::broadcast_ents(server, state.map.as_ref().unwrap(), ids.iter().copied());
+        crate::map_sync::broadcast_ents(server, &state.map, ids.iter().copied());
         drop(state);
         crate::ui::send_warn(server, ctx.id(), PROTECTED_MSG);
         return;
@@ -201,7 +196,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
         let Some(old) = old.as_ref().filter(|e| e.ent_type != EntityType::Empty) else {
             continue;
         };
-        if base_entities(&state).and_then(|e| e.get(i)) == Some(old) {
+        if base_entities(&state).get(i) == Some(old) {
             continue;
         }
         for trap in &mut state.traps {
@@ -239,7 +234,7 @@ const HALF: i32 = 8;
 /// Entity changes of a trap, live while it is being edited.
 pub fn trap_ent_changes(state: &DeathrunState, trap: super::TrapId) -> Vec<EntChange> {
     match (state.mode.editing(), &state.map) {
-        (Some(edit), Some(map)) if edit.trap == trap => ents::diff(
+        (Some(edit), map) if edit.trap == trap => ents::diff(
             &edit.original_map.entities,
             &map.entities,
             state.virt.slots(),

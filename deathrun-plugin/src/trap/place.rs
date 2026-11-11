@@ -153,7 +153,7 @@ pub fn button_hit(state: &DeathrunState, aim: &Aim) -> Option<TrapId> {
 
 /// Hit point, face orient and world size of the first surface along the ray.
 fn raycast(state: &DeathrunState, aim: &Aim) -> Option<([f32; 3], u8, i32)> {
-    let map = state.map.as_ref()?;
+    let map = &state.map;
     let hit = aim.hit(map)?;
     Some((aim.at(hit.dist), hit.orient, map.size))
 }
@@ -259,9 +259,7 @@ fn send_frames(server: &Server, state: &mut DeathrunState, target: Target) {
 
 /// Moves the preview everyone sees from `old` to `new`.
 fn show(server: &Server, state: &mut DeathrunState, old: Target, new: Target) {
-    let Some(map) = state.map.as_mut() else {
-        return;
-    };
+    let map = &mut state.map;
     let mut payloads = unghost(map, old);
     payloads.extend(ghost(map, new));
     crate::map_sync::paste_preview(server, payloads);
@@ -274,7 +272,8 @@ pub fn repaint(server: &Server) {
     let Some(target) = state.mode.placing().map(|p| p.target) else {
         return;
     };
-    if let Some(map) = state.map.as_mut() {
+    {
+        let map = &mut state.map;
         let payloads = ghost(map, target);
         crate::map_sync::paste_preview(server, payloads);
     }
@@ -556,7 +555,7 @@ pub fn set_button_cells(
 
     let mut updates = Vec::new();
     let DeathrunState { map, traps, .. } = &mut *state;
-    let map = map.as_mut().ok_or("No map is loaded.")?;
+
     for (i, t) in traps.iter().enumerate() {
         let Some(g) = &t.geom else { continue };
         if !cells.iter().any(|&c| c.overlaps(&g.clip_box())) {
@@ -645,7 +644,7 @@ mod tests {
 
     /// What the trap's recording puts in the map when it fires.
     fn fired(state: &DeathrunState) -> Map {
-        let mut map = state.map.clone().unwrap();
+        let mut map = state.map.clone();
         super::super::trigger::apply_active_state(&mut map, &state.traps[0], &[]);
         map
     }
@@ -664,7 +663,7 @@ mod tests {
             Aabb::new([64, 64, 512], [128, 128, 576]),
         ));
         let mut state = DeathrunState {
-            map: Some(map),
+            map: map,
             traps: vec![trap],
             ..Default::default()
         };
@@ -672,7 +671,7 @@ mod tests {
         // On the floor of the frame, facing up: the slab is the cell's bottom.
         let inside = ([96, 96, 520], BUTTON_SIZE, 5);
         set_button_cells(&mut state, None, Some(inside), &mut Default::default()).unwrap();
-        assert!(solid(state.map.as_ref().unwrap(), [96, 96, 520]));
+        assert!(solid(&state.map, [96, 96, 520]));
         let f = fired(&state);
         assert!(solid(&f, [96, 96, 520]), "firing covers the button");
         assert!(!solid(&f, [96, 96, 526]), "button cell not air when fired");
@@ -686,7 +685,7 @@ mod tests {
             &mut Default::default(),
         )
         .unwrap();
-        assert!(!solid(state.map.as_ref().unwrap(), [96, 96, 520]));
+        assert!(!solid(&state.map, [96, 96, 520]));
         let f = fired(&state);
         assert!(
             !solid(&f, [96, 96, 520]),

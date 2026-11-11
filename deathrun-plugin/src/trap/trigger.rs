@@ -26,7 +26,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         None => return, // Nothing to recompose
     };
 
-    let old_map = state.map.clone().unwrap();
+    let old_map = state.map.clone();
     let mut new_map = *base_map;
 
     // Apply all active traps in chronological order
@@ -88,13 +88,13 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     }
 
     state.virt.reconcile(&mut new_map.entities);
-    state.map = Some(new_map);
-    crate::map_state::update_server_items(state.map.as_ref().unwrap(), server);
+    state.map = new_map;
+    crate::map_state::update_server_items(&state.map, server);
 
-    crate::map_sync::broadcast_ents(server, state.map.as_ref().unwrap(), diff_ent_ids);
+    crate::map_sync::broadcast_ents(server, &state.map, diff_ent_ids);
 
     if !changed.is_empty() {
-        let map = state.map.as_ref().unwrap();
+        let map = &state.map;
         let payloads = changed
             .into_iter()
             .flat_map(|b| sauer_kit::paste::chunk_region(map, b, usize::MAX))
@@ -124,7 +124,7 @@ pub fn trigger_trap(server: &Arc<Server>, id: TrapId, actor_id: u64) {
     let button = (trap.button_pos, trap.button_size, trap.button_orient);
     let (time, timeout) = (trap.time, trap.timeout);
     if state.base_map.is_none() {
-        state.base_map = state.map.clone().map(Box::new);
+        state.base_map = Some(Box::new(state.map.clone()));
     }
     state.active_trap_stack.push(id);
     drop(state);
@@ -297,7 +297,8 @@ pub fn set_button_color(server: &Server, pos: [i32; 3], size: i32, orient: u8, c
     let mut state = get_server_state(server).write();
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
-        if let Some(map) = state.map.as_mut() {
+        {
+            let map = &mut state.map;
             sauer_kit::coop_edit::edit_vslot(map, &packet);
         }
         if let Some(base) = state.base_map.as_mut() {

@@ -82,7 +82,7 @@ impl Plugin for DeathrunEdit {
         server.game.write().mode = GameMode::CoopEdit;
         crate::add_server_bot(server);
         let state = DeathrunState {
-            map: Some(Map::default_empty()),
+            map: Map::default_empty(),
             ..Default::default()
         };
         server.extra.insert(RwLock::new(state));
@@ -127,7 +127,7 @@ impl Plugin for DeathrunEdit {
             {
                 let state = get_server_state(server).read();
                 let hit_trap = (!is_spectator)
-                    .then(|| state.trap_at(aim.hit_point(state.map.as_ref())))
+                    .then(|| state.trap_at(aim.hit_point(&state.map)))
                     .flatten();
                 let edited = state.mode.editing().map(|e| e.trap);
                 let moving = state
@@ -148,7 +148,7 @@ impl Plugin for DeathrunEdit {
                                 |edit| {
                                     crate::trap::commands::geometry_bounds(
                                         &edit.original_map,
-                                        state.map.as_ref()?,
+                                        &state.map,
                                         trap.geom.as_ref(),
                                     )
                                 },
@@ -262,8 +262,7 @@ impl Plugin for DeathrunEdit {
         }
 
         if let Some((_, step)) = self.pending_welcome.remove(&id) {
-            let has_map = get_server_state(server).read().map.is_some();
-            if matches!(step, WelcomeStep::InitialLoad) && has_map {
+            if matches!(step, WelcomeStep::InitialLoad) {
                 crate::map_sync::send_map_file(server, id);
                 info!("sent map state to id {id} after welcome");
                 self.pending_welcome.insert(id, WelcomeStep::SentMap);
@@ -368,11 +367,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) -> Flow {
-        let size = get_server_state(ctx.server())
-            .read()
-            .map
-            .as_ref()
-            .map_or(0, |m| m.size);
+        let size = get_server_state(ctx.server()).read().map.size;
         let bounds = match packet.in_sel {
             true => packet.sel.bounds(),
             false => Aabb::cube([0; 3], size),
@@ -429,15 +424,16 @@ impl Plugin for DeathrunEdit {
 
         server.players.with_mut(id, |p| p.clipboard = None);
 
-        if let Some(state) = crate::map_state::get_server_state(&server)
-            .write()
-            .map
-            .as_mut()
-        {
-            if let Some(sel) = packet.sel.validate(state.size) {
-                let payload = state.copy_selection(&sel);
-                server.players.with_mut(id, |p| p.clipboard = Some(payload));
-            }
+        let payload = {
+            let mut state = get_server_state(&server).write();
+            let map = &mut state.map;
+            packet
+                .sel
+                .validate(map.size)
+                .map(|sel| map.copy_selection(&sel))
+        };
+        if let Some(payload) = payload {
+            server.players.with_mut(id, |p| p.clipboard = Some(payload));
         }
 
         let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));
@@ -489,7 +485,7 @@ impl Plugin for DeathrunEdit {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
             // A new map starts over: no traps, vault, protections or fake entities.
             *state = DeathrunState {
-                map: Some(Map::new_empty(world_size)),
+                map: Map::new_empty(world_size),
                 ..Default::default()
             };
             return Flow::Continue;

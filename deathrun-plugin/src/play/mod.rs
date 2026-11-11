@@ -104,7 +104,7 @@ impl Plugin for DeathrunPlay {
         server.config.write().reopen_when_masterless = false;
         crate::add_server_bot(server);
 
-        let (_, state) = self.maps.read().make_active_state();
+        let state = self.maps.read().make_active_state().unwrap_or_default();
         server.extra.insert(RwLock::new(state));
         server.extra.insert(Arc::clone(&self.maps));
         server
@@ -113,7 +113,7 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn start(&self, server: &Arc<Server>) {
-        let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        let maps = Arc::clone(&self.maps);
         let server = Arc::clone(server);
         let timeout = Duration::from_secs(self.config.afk_timeout_secs);
         tokio::spawn(async move {
@@ -127,7 +127,7 @@ impl Plugin for DeathrunPlay {
     async fn on_client_welcomed(&self, ctx: &mut Context) {
         let id = ctx.id();
         let server = ctx.server();
-        let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        let maps = Arc::clone(&self.maps);
 
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read();
@@ -181,7 +181,7 @@ impl Plugin for DeathrunPlay {
             let aim = Aim::new(packet.pos, packet.dir);
             let (target, seethrough, outline) = {
                 let state = get_server_state(server).read();
-                let target = state.trap_at(aim.hit_point(state.map.as_ref()));
+                let target = state.trap_at(aim.hit_point(&state.map));
                 let trap = target.and_then(|t| state.trap(t));
                 let outline = trap
                     .and_then(|t| t.geom.as_ref())
@@ -208,7 +208,7 @@ impl Plugin for DeathrunPlay {
     async fn disconnected(&self, ctx: &mut Context) {
         let id = ctx.id();
         let server = ctx.server();
-        let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        let maps = Arc::clone(&self.maps);
         maps.read().afk.lock().remove(id);
         if let Some(known) = server.extra.get::<crate::map_sync::KnownVars>() {
             known.forget(id);
@@ -228,7 +228,7 @@ impl Plugin for DeathrunPlay {
 
     async fn on_player_died(&self, ctx: &mut Context, victim_id: u64, _actor_id: u64) {
         let server = ctx.server();
-        let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        let maps = Arc::clone(&self.maps);
 
         // Spectate good players when they die
         let is_evil = maps.read().evil_id == Some(victim_id);
@@ -276,8 +276,7 @@ impl Plugin for DeathrunPlay {
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) -> Flow {
         let id = ctx.id();
-        let server = ctx.server();
-        let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
+        let maps = &self.maps;
 
         let mut cancel = false;
         {
@@ -308,7 +307,7 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
 
         let is_evil = {
-            let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
+            let maps = &self.maps;
             maps.read().evil_id == Some(id)
         };
         if !is_evil {
@@ -339,8 +338,7 @@ impl Plugin for DeathrunPlay {
     }
 
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) -> Flow {
-        let server = ctx.server();
-        let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
+        let maps = &self.maps;
         let round_state = maps.read().round_state;
 
         // Prevent self-unspectating during the game (even for masters to prevent cheating the 1-life limit).
@@ -372,7 +370,7 @@ impl Plugin for DeathrunPlay {
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
-        let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
+        let maps = Arc::clone(&self.maps);
         if send_map_to_client(Arc::clone(server), id, &maps, false) {
             info!("Sending map rebuild to id {id} on N_GETMAP");
             return Flow::Cancel;

@@ -66,7 +66,7 @@ fn parse(data: &[u8]) -> Result<Parsed, String> {
 
     let loaded = persist::ingest(&mut map);
     let mut state = DeathrunState {
-        map: Some(map),
+        map: map,
         protected: loaded.protected(),
         traps: loaded.traps,
         vault: loaded.vault,
@@ -90,8 +90,6 @@ fn parse(data: &[u8]) -> Result<Parsed, String> {
 
     let file = state
         .map
-        .as_ref()
-        .expect("just set")
         .to_ogz_bytes_merged(flate2::Compression::fast())
         .map_err(|e| e.to_string())?;
     info!(
@@ -113,7 +111,7 @@ fn install(server: &Server, id: u64, parsed: Parsed, size: usize) {
         file,
     } = parsed;
     let traps = state.traps.len();
-    let world_size = state.map.as_ref().map_or(0, |m| m.size);
+    let world_size = state.map.size;
     let name = {
         let mut s = get_server_state(server).write();
         // Someone started editing or placing while the map was parsed.
@@ -123,7 +121,8 @@ fn install(server: &Server, id: u64, parsed: Parsed, size: usize) {
             ui::send_warn(server, id, &msg);
             return;
         }
-        if let Some(map) = state.map.as_ref() {
+        {
+            let map = &state.map;
             update_server_items(map, server);
         }
         let name = s
