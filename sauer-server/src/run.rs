@@ -204,26 +204,60 @@ pub(crate) async fn run<P: Plugin>(
         let plugin = Arc::clone(&plugin);
         let server = Arc::clone(&server);
         tokio::spawn(async move {
-            let mut ctx = Context {
-                server: Arc::clone(&server),
+            // The session and the `disconnected` hook each run in their own
+            // task, so a panic in a hook can't skip the cleanup that frees the
+            // client's cn and player data.
+            let session = tokio::spawn(client_session(
+                Arc::clone(&server),
+                Arc::clone(&plugin),
+                rx,
                 id,
-                cancelled: false,
-            };
-
-            plugin.connected(&mut ctx).await;
-
-            if !ctx.cancelled {
-                if let Err(e) = handle_client(&server, &plugin, rx, id).await {
-                    error!("handling peer: {e}");
-                }
+            ));
+            if let Err(e) = session.await {
+                error!("client {id} session panicked: {e}");
+                server.disconnect(id);
             }
 
-            ctx.cancelled = false;
-            plugin.disconnected(&mut ctx).await;
+            let cleanup = tokio::spawn({
+                let server = Arc::clone(&server);
+                let plugin = Arc::clone(&plugin);
+                async move {
+                    let mut ctx = Context {
+                        server,
+                        id,
+                        cancelled: false,
+                    };
+                    plugin.disconnected(&mut ctx).await;
+                }
+            });
+            if let Err(e) = cleanup.await {
+                error!("client {id} disconnect hook panicked: {e}");
+            }
 
             server.clients.remove(&id);
         });
     }
 
     Ok(())
+}
+
+async fn client_session<P: Plugin>(
+    server: Arc<Server>,
+    plugin: Arc<P>,
+    rx: lenet_tokio::ConnectionReceiver,
+    id: u64,
+) {
+    let mut ctx = Context {
+        server: Arc::clone(&server),
+        id,
+        cancelled: false,
+    };
+
+    plugin.connected(&mut ctx).await;
+
+    if !ctx.cancelled {
+        if let Err(e) = handle_client(&server, &plugin, rx, id).await {
+            error!("handling peer: {e}");
+        }
+    }
 }

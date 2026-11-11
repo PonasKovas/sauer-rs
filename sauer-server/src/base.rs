@@ -184,20 +184,18 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
 
+        // The player entry exists before the cn does, so code that finds the
+        // id through its cn always finds its data too.
+        let session_id = init_player(&server.players, id);
         let cn = match server.assign_cn(id) {
             Some(c) => c,
             None => {
+                clear_player(&server.players, id);
                 server.disconnect(id);
                 ctx.cancel();
                 return;
             }
         };
-
-        // Initialize player ONLY if not already initialized
-        if server.players.try_get(id).is_none() {
-            init_player(&server.players, id);
-        }
-        let session_id = server.players.get(id).session_id;
 
         server.send_chan1(
             id,
@@ -419,16 +417,16 @@ impl<P: Plugin> Plugin for Base<P> {
             .try_get(id)
             .map_or(false, |p| p.privilege != Privilege::None);
 
-        clear_player(&server.players, id);
-
         server.map_votes.write().remove(&id);
 
+        // The cn goes before the player entry, the reverse of `connected`.
         if let Some(cn) = server.get_cn(id) {
+            server.free_cn(cn);
             server.broadcast_chan1(&channel1::ClientDisconnected {
                 client_num: cn as i32,
             });
-            server.free_cn(cn);
         }
+        clear_player(&server.players, id);
 
         if had_privilege {
             server.broadcast_current_master();
