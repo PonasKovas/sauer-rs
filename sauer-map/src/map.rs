@@ -139,13 +139,25 @@ impl Map {
     }
 
     /// [`Map::to_ogz_bytes_with`], with faces merged like `remip` does, so
-    /// clients load it faster. Costs a pass over the octree.
+    /// clients load it faster. Costs a pass over the octree. Falls back to
+    /// the plain map if merging fails or makes the map too big to send.
     pub fn to_ogz_bytes_merged(
         &self,
         compression: flate2::Compression,
     ) -> Result<Vec<u8>, ogz_rs::OgzError> {
-        let octree = crate::facemerge::node_to_ogz_merged(&self.root, self.size);
-        self.serialize(compression, octree)
+        /// The engine's file transfer limit (`sendfile` in engine/server.cpp).
+        const MAX_SENT_MAP: usize = 16 << 20;
+        let merged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::facemerge::node_to_ogz_merged(&self.root, self.size)
+        }));
+        if let Ok(octree) = merged {
+            if let Ok(bytes) = self.serialize(compression, octree) {
+                if bytes.len() <= MAX_SENT_MAP {
+                    return Ok(bytes);
+                }
+            }
+        }
+        self.to_ogz_bytes_with(compression)
     }
 
     fn serialize(
