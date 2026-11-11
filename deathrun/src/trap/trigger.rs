@@ -219,11 +219,19 @@ async fn run_trap(
         interval.tick().await;
     }
 
-    // With no cooldown the trap is still firing here.
-    revert(&server, id);
-    if let Some(trap) = get_server_state(&server).write().trap_mut(id) {
-        trap.phase = TrapPhase::Ready;
+    // Ready before the last recompose: its paste goes out after the color edit
+    // below and covers a button inside the trap's own frame, so it must carry
+    // the ready color. With no cooldown the trap is still firing here.
+    {
+        let mut state = get_server_state(&server).write();
+        if let Some(trap) = state.trap_mut(id) {
+            trap.phase = TrapPhase::Ready;
+        }
+        if let Some(layer) = state.active.as_mut() {
+            layer.stack.retain(|&i| i != id);
+        }
     }
+    recompose_traps(&server);
     show_progress(&server, &targets, &namespace, Vec::new());
     set_button_color(&server, pos, size, orient, BUTTON_COLOR_READY);
 }
