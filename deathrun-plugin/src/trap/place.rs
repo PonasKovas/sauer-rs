@@ -3,7 +3,8 @@
 //! One player aims around while everyone sees a see-through copy of the
 //! button where it would go: green if it can go there, yellow if it would sit
 //! inside a trap's frame (the frame is shown too), red if it can't. Typing the
-//! command again puts it there, or cancels when aiming at a trap button.
+//! command again puts it there. A move is cancelled by aiming back at the
+//! button, a new trap by typing the command where the button can't go.
 //!
 //! The copy is never part of the server's map. It is only pasted on clients,
 //! and the server's version is pasted back over it when it moves on.
@@ -74,8 +75,8 @@ impl Placing {
 enum Target {
     /// No surface in reach, or the spot is outside the world.
     Nowhere,
-    /// A trap button: placing here cancels.
-    Button,
+    /// The moving button itself: placing here cancels the move.
+    Back,
     Cell(ButtonKey, Verdict),
 }
 
@@ -197,8 +198,9 @@ fn verdict(state: &DeathrunState, moving: Option<usize>, key: ButtonKey) -> Verd
 
 /// Where the button would go for a player aiming along `ray`.
 fn aim(state: &DeathrunState, moving: Option<usize>, origin: [f32; 3], ray: [f32; 3]) -> Target {
-    if button_hit(state, origin, ray).is_some() {
-        return Target::Button;
+    // Other buttons count as any surface: the new one goes on top.
+    if moving.is_some() && button_hit(state, origin, ray) == moving {
+        return Target::Back;
     }
     let Some((hit_pt, orient, world_size)) = raycast(state, origin, ray) else {
         return Target::Nowhere;
@@ -208,7 +210,7 @@ fn aim(state: &DeathrunState, moving: Option<usize>, origin: [f32; 3], ray: [f32
     };
     let key = (pos, BUTTON_SIZE, orient);
     if moving.is_some_and(|i| button_key(&state.traps[i]) == key) {
-        return Target::Button;
+        return Target::Back;
     }
     Target::Cell(key, verdict(state, moving, key))
 }
@@ -360,7 +362,7 @@ pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray:
         )),
         TrapMode::Placing(p) if p.player != id => busy_message(server, &state),
         TrapMode::Placing(p) if p.kind() != kind => Some(format!(
-            "You are placing a button already. Type {0} to place it, or aim at a trap button and type {0} to cancel.",
+            "You are placing a button already. Type {} to place it or cancel.",
             p.kind().command()
         )),
         _ => None,
@@ -412,7 +414,7 @@ fn start(
     };
     announce(server, format!("{} is {what}.", name(server, id)));
     let back = match kind {
-        Kind::New => "aim at any trap button",
+        Kind::New => "aim where it can't go (red)",
         Kind::Move => "aim back at the button",
     };
     crate::ui::send(
@@ -436,24 +438,27 @@ fn finish(
     };
     let moving = p.trap;
     let target = aim(state, moving, origin, ray);
-    let key = match target {
-        Target::Button => {
+    let refused = match target {
+        Target::Cell(key, Verdict::Good | Verdict::InFrame) => Ok(key),
+        Target::Back => Err(None),
+        Target::Cell(_, Verdict::Bad(why)) => Err(Some(why)),
+        Target::Nowhere => Err(Some("Aim at a surface inside the world.")),
+    };
+    let key = match refused {
+        Ok(key) => key,
+        // A move goes on until it is put down or aimed back; there is no
+        // spot to aim back at for a new trap, so a refused spot cancels it.
+        Err(Some(why)) if moving.is_some() => {
+            follow_locked(server, state, target);
+            crate::ui::send_warn(server, id, why);
+            return;
+        }
+        Err(_) => {
             end(server, state);
             announce(
                 server,
                 format!("{} cancelled placing the button.", name(server, id)),
             );
-            return;
-        }
-        Target::Cell(key, Verdict::Good | Verdict::InFrame) => key,
-        Target::Cell(_, Verdict::Bad(why)) => {
-            follow_locked(server, state, target);
-            crate::ui::send_warn(server, id, why);
-            return;
-        }
-        Target::Nowhere => {
-            follow_locked(server, state, target);
-            crate::ui::send_warn(server, id, "Aim at a surface inside the world.");
             return;
         }
     };
