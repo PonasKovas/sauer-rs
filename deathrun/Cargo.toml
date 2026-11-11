@@ -1,5 +1,5 @@
 [package]
-name = "deathrun-plugin"
+name = "deathrun"
 version = "0.1.0"
 edition = "2024"
 
@@ -16,17 +16,16 @@ cube-string.workspace = true
 bytes.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+notify = "6.1.1"
 flate2.workspace = true
 rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 bitcode.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 sauer-plugin-lua.workspace = true
-sauer-proto = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
 toml.workspace = true
 clap = { workspace = true, features = ["derive"] }
 telegram-plugin.workspace = true
-notify = "6.1.1"
+sauer-server = { workspace = true, features = ["serde"] }

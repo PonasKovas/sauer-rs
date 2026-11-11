@@ -10,3 +10,4 @@ sauer-server.workspace = true
 tokio.workspace = true
 teloxide.workspace = true
 tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }

@@ -367,7 +367,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "deathrun-plugin"
+name = "deathrun"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -389,7 +389,6 @@ dependencies = [
  "sauer-server",
  "serde",
  "telegram-plugin",
- "thiserror 2.0.18",
  "tokio",
  "toml",
  "tracing",
@@ -1727,6 +1726,7 @@ dependencies = [
  "parking_lot",
  "rand",
  "sauer-proto",
+ "serde",
  "tiger",
  "tokio",
  "tracing",
@@ -2001,6 +2001,7 @@ dependencies = [
  "cube-string",
  "sauer-proto",
  "sauer-server",
+ "serde",
  "teloxide",
  "tokio",
  "tracing",

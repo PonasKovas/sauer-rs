@@ -22,6 +22,8 @@ mod peer;
 pub mod players;
 pub mod plugin;
 mod run;
+#[cfg(feature = "serde")]
+mod settings;
 pub mod ui;
 pub mod utils;
 mod welcome;
@@ -32,6 +34,8 @@ pub use items::{
     ItemState, Items, MAX_ENTS, ServerItem, apply_pickup, canpickup, delay_spawn, spawntime,
 };
 pub use players::{PlayerData, Players, Status};
+#[cfg(feature = "serde")]
+pub use settings::Settings;
 
 pub use plugin::{Context, Flow, Plugin, ServerQueryContext};
 pub use sauer_proto;

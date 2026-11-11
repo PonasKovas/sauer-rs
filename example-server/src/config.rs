@@ -1,120 +1,23 @@
 use crate::Args;
-use cube_string::IntoCubeStringLossy;
-use sauer_proto::data::{GameMode, MasterMode};
-use sauer_server::{Server, plugin::Plugin};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{net::SocketAddr, path::PathBuf};
-use tokio::fs;
+use telegram_plugin::TelegramConfig;
 
 /// Server configuration loaded from TOML.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub max_peers: usize,
     pub plugin_dir: PathBuf,
     #[serde(default)]
-    pub base: BaseConfig,
+    pub base: sauer_server::Settings,
     #[serde(default)]
     pub telegram: TelegramConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TelegramConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub token: String,
-    #[serde(default)]
-    pub chat_id: i64,
-}
-
-impl Default for TelegramConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            token: String::new(),
-            chat_id: 0,
-        }
-    }
-}
-
-/// Initial server settings (map, mode, description, etc.).
-/// These become the startup state of `Server` and can be changed at runtime by plugins.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseConfig {
-    #[serde(default = "default_server_desc")]
-    pub server_desc: String,
-    #[serde(default)]
-    pub server_auth: String,
-    #[serde(default)]
-    pub has_password: bool,
-    /// Password for claiming admin with `/setmaster PASSWORD`. Empty disables admin.
-    #[serde(default)]
-    pub admin_pass: String,
-    #[serde(default = "default_map")]
-    pub map: String,
-    #[serde(default = "default_game_mode")]
-    pub mode: GameMode,
-    #[serde(default = "default_master_mode")]
-    pub master_mode: MasterMode,
-    #[serde(default = "default_updatemaster")]
-    pub updatemaster: bool,
-}
-
-fn default_server_desc() -> String {
-    "sauer-rs".into()
-}
-
-fn default_map() -> String {
-    "complex".into()
-}
-
-fn default_game_mode() -> GameMode {
-    GameMode::Ffa
-}
-
-fn default_master_mode() -> MasterMode {
-    MasterMode::Open
-}
-
-fn default_updatemaster() -> bool {
-    true
-}
-
-impl Default for BaseConfig {
-    fn default() -> Self {
-        Self {
-            server_desc: default_server_desc(),
-            server_auth: String::new(),
-            has_password: false,
-            admin_pass: String::new(),
-            map: default_map(),
-            mode: GameMode::Ffa,
-            master_mode: MasterMode::Open,
-            updatemaster: true,
-        }
-    }
-}
-
-impl Plugin for BaseConfig {
-    async fn init(&self, server: &mut Server) {
-        server.config.write().desc = self.server_desc.as_str().lossy_cubestring();
-        server.config.write().auth = self.server_auth.as_str().lossy_cubestring();
-        server.config.write().has_password = self.has_password;
-        server.config.write().admin_pass = self.admin_pass.clone();
-        if self.admin_pass.is_empty() {
-            tracing::info!("admin password not set, /setmaster PASSWORD is off");
-        }
-        server.game.write().map_name = self.map.as_str().lossy_cubestring();
-        server.game.write().mode = self.mode;
-        server.game.write().master_mode = self.master_mode;
-        server.config.write().update_master = self.updatemaster;
-    }
-}
-
 impl Config {
     pub async fn load(args: &Args) -> anyhow::Result<Self> {
-        let contents = fs::read_to_string(&args.config).await?;
+        let contents = tokio::fs::read_to_string(&args.config).await?;
         Ok(toml::from_str(&contents)?)
     }
 }

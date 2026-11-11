@@ -22,3 +22,7 @@ bytes.workspace = true
 rand.workspace = true
 anymap.workspace = true
 tiger.workspace = true
+serde = { workspace = true, features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde", "sauer-proto/serde"]

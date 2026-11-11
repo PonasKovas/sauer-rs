@@ -21,6 +21,7 @@ use tracing::info;
 
 mod afk;
 mod finish;
+pub mod map_dir;
 mod rotation;
 mod round;
 

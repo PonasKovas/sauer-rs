@@ -370,3 +370,111 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
 
     crate::for_each_packet_hook!(packet_hook_chain);
 }
+
+macro_rules! packet_hook_option {
+    (
+        ()
+        chan0 { $($c0:tt)* }
+        chan1 { $($c1:tt)* }
+    ) => {
+        packet_hook_option! { @each $($c0)* $($c1)* }
+    };
+    (@each $( [$msg_id:ident] $method:ident ($packet:path) $variant:ident, )*) => {
+        $(
+            async fn $method(&self, ctx: &mut Context, packet: &$packet) -> Flow {
+                match self {
+                    Some(p) => p.$method(ctx, packet).await,
+                    None => Flow::Continue,
+                }
+            }
+        )*
+    };
+}
+
+/// A plugin that may be turned off: `None` does nothing.
+impl<P: Plugin> Plugin for Option<P> {
+    async fn init(&self, server: &mut Server) {
+        if let Some(p) = self {
+            p.init(server).await;
+        }
+    }
+    async fn start(&self, server: &Arc<Server>) {
+        if let Some(p) = self {
+            p.start(server).await;
+        }
+    }
+    async fn server_query(
+        &self,
+        ctx: &mut ServerQueryContext,
+        request: &ServerQueryRequest,
+    ) -> Flow {
+        match self {
+            Some(p) => p.server_query(ctx, request).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn connected(&self, ctx: &mut Context) -> Flow {
+        match self {
+            Some(p) => p.connected(ctx).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn disconnected(&self, ctx: &mut Context) {
+        if let Some(p) = self {
+            p.disconnected(ctx).await;
+        }
+    }
+    async fn on_client_welcomed(&self, ctx: &mut Context) {
+        if let Some(p) = self {
+            p.on_client_welcomed(ctx).await;
+        }
+    }
+    async fn map_changed(&self, ctx: &mut Context, map_name: &CubeString, mode: GameMode) {
+        if let Some(p) = self {
+            p.map_changed(ctx, map_name, mode).await;
+        }
+    }
+    async fn on_player_died(&self, ctx: &mut Context, victim_id: u64, actor_id: u64) {
+        if let Some(p) = self {
+            p.on_player_died(ctx, victim_id, actor_id).await;
+        }
+    }
+    async fn on_damage(
+        &self,
+        ctx: &mut Context,
+        target_id: u64,
+        actor_id: u64,
+        damage: &mut i32,
+    ) -> Flow {
+        match self {
+            Some(p) => p.on_damage(ctx, target_id, actor_id, damage).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) -> Flow {
+        match self {
+            Some(p) => p.on_spawn(ctx, state).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
+        match self {
+            Some(p) => p.on_chat(ctx, text).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) -> Flow {
+        match self {
+            Some(p) => p.on_command(ctx, args).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn map(&self, ctx: &mut Context, data: &Bytes) -> Flow {
+        match self {
+            Some(p) => p.map(ctx, data).await,
+            None => Flow::Continue,
+        }
+    }
+
+    crate::for_each_packet_hook!(packet_hook_option);
+}

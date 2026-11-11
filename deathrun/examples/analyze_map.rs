@@ -1,5 +1,5 @@
 use clap::Parser;
-use deathrun_plugin::trap::{EntChange, commands::payload_size, persist};
+use deathrun::trap::{EntChange, commands::payload_size, persist};
 use sauer_map::Map;
 use std::path::PathBuf;
 

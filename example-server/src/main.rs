@@ -4,7 +4,6 @@ use sauer_plugin_lua::LuaPlugin;
 use sauer_plugin_lua::LuaPluginOptions;
 use sauer_server::ServerBuilder;
 use std::path::PathBuf;
-use telegram_plugin::TelegramBridge;
 use tracing::error;
 
 mod config;
@@ -42,18 +41,13 @@ async fn main() {
         }
     };
 
-    let telegram_plugin = TelegramBridge::new(
-        config.telegram.enabled,
-        config.telegram.token.clone(),
-        config.telegram.chat_id,
-    );
-
     let server = ServerBuilder::new()
         .bind_addr(config.bind_addr)
         .max_peers(config.max_peers)
         .plugin(config.base)
-        .plugin(telegram_plugin)
-        .plugin(lua_plugin);
+        // Telegram after Lua, so it only relays chat Lua didn't cancel.
+        .plugin(lua_plugin)
+        .plugin(config.telegram.bridge());
 
     if let Err(e) = server.run().await {
         error!("Error running the server: {e}");

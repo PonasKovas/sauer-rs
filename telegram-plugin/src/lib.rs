@@ -3,18 +3,16 @@ use sauer_server::{Context, Flow, Plugin, Server};
 use std::sync::Arc;
 use teloxide::prelude::*;
 
+/// Relays chat between the server and a Telegram chat, through a fake player.
 pub struct TelegramBridge {
-    enabled: bool,
     bot: Bot,
     chat_id: ChatId,
     bot_cn: sauer_proto::data::Cn,
 }
 
 impl TelegramBridge {
-    /// Create a new Telegram Bridge plugin with specific credentials.
-    pub fn new(enabled: bool, token: impl Into<String>, chat_id: i64) -> Self {
+    pub fn new(token: impl Into<String>, chat_id: i64) -> Self {
         Self {
-            enabled,
             bot: Bot::new(token),
             chat_id: ChatId(chat_id),
             bot_cn: sauer_proto::data::Cn(255),
@@ -31,30 +29,41 @@ impl TelegramBridge {
             .parse::<i64>()
             .expect("TELEGRAM_CHAT_ID must be a valid integer");
 
-        Self::new(true, token, chat_id)
+        Self::new(token, chat_id)
+    }
+}
+
+/// The `[telegram]` table of a config file.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct TelegramConfig {
+    pub enabled: bool,
+    pub token: String,
+    pub chat_id: i64,
+}
+
+impl TelegramConfig {
+    /// The bridge, or `None` when it'"'"'s turned off.
+    pub fn bridge(&self) -> Option<TelegramBridge> {
+        self.enabled
+            .then(|| TelegramBridge::new(self.token.clone(), self.chat_id))
     }
 }
 
 impl Plugin for TelegramBridge {
     async fn init(&self, server: &mut Server) {
-        if self.enabled {
-            let bot = sauer_server::FakePlayer {
-                name: "TG".lossy_cubestring(),
-                model: sauer_proto::data::PlayerModel::MrFixit,
-                team: Default::default(),
-            };
-            assert!(
-                server.add_fake_player(self.bot_cn, bot),
-                "the telegram bot cn is already taken"
-            );
-        }
+        let bot = sauer_server::FakePlayer {
+            name: "TG".lossy_cubestring(),
+            model: sauer_proto::data::PlayerModel::MrFixit,
+            team: Default::default(),
+        };
+        assert!(
+            server.add_fake_player(self.bot_cn, bot),
+            "the telegram bot cn is already taken"
+        );
     }
 
     async fn start(&self, server: &Arc<Server>) {
-        if !self.enabled {
-            return;
-        }
-
         let bot = self.bot.clone();
         let target_chat_id = self.chat_id;
         let server_clone = Arc::clone(server);
@@ -98,10 +107,6 @@ impl Plugin for TelegramBridge {
     }
 
     async fn on_chat(&self, ctx: &mut Context, text: &mut cube_string::CubeString) -> Flow {
-        if !self.enabled {
-            return Flow::Continue;
-        }
-
         // Do not forward messages from the TG bot itself
         if ctx.server().get_cn(ctx.id()) == Some(self.bot_cn) {
             return Flow::Continue;

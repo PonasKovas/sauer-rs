@@ -24,7 +24,7 @@ zigbuild() {
 }
 
 build_server() {
-    zigbuild -p deathrun-plugin --example deathrun_server
+    zigbuild -p deathrun --example server
 }
 
 # Lenet's archive bundles LLVM's libc++, whose objects carry .deplibs notes
@@ -56,6 +56,6 @@ fi
 
 # Ship it without debug info (the release profile keeps it).
 mkdir -p dist
-objcopy --strip-debug "$CARGO_TARGET_DIR/$TRIPLE/release/examples/deathrun_server" dist/deathrun_server
+objcopy --strip-debug "$CARGO_TARGET_DIR/$TRIPLE/release/examples/server" dist/deathrun_server
 echo "Built dist/deathrun_server (glibc >= $GLIBC):"
 objdump -T dist/deathrun_server | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1

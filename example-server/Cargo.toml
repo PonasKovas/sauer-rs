@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 parking_lot.workspace = true
-sauer-server.workspace = true
+sauer-server = { workspace = true, features = ["serde"] }
 sauer-proto = { workspace = true, features = ["serde"] }
 sauer-plugin-lua.workspace = true
 cube-string.workspace = true
