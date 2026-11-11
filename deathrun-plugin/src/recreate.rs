@@ -145,7 +145,7 @@ pub async fn visual_rebuild_map<F>(
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     let mut payloads =
-        sauer_map::chunking::chunk_region(map, [0, 0, 0], [map.size, map.size, map.size], 4000);
+        sauer_map::chunking::chunk_region(map, sauer_core::Aabb::cube([0; 3], map.size), 4000);
 
     // Optional random shuffle to make it look cool, like in original recreate
     use rand::seq::SliceRandom;

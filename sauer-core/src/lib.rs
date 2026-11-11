@@ -1,7 +1,10 @@
 use cube_string::CubeString;
 use num_enum::{FromPrimitive, IntoPrimitive, TryFromPrimitive};
 
+mod aabb;
 pub mod io;
+
+pub use aabb::Aabb;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -274,10 +277,10 @@ impl Selection {
 
     /// The box the selection covers. Saturates instead of overflowing, so an
     /// unchecked selection gives a huge box rather than a wrapped one.
-    pub fn bounds(&self) -> ([i32; 3], [i32; 3]) {
+    pub fn bounds(&self) -> Aabb {
         let min = [self.o.x, self.o.y, self.o.z];
         let max = [0, 1, 2].map(|i| min[i].saturating_add(self.s[i].saturating_mul(self.grid)));
-        (min, max)
+        Aabb::new(min, max)
     }
 
     /// Checks the selection against a world, like the engine's

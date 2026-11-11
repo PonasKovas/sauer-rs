@@ -12,7 +12,7 @@ use sauer_server::Server;
 use sauer_server::plugin::Context;
 use std::sync::Arc;
 
-type Box3 = ([i32; 3], [i32; 3]);
+use sauer_core::Aabb;
 
 fn find_trap(state: &DeathrunState, hit_pt: [f32; 3]) -> Option<usize> {
     state
@@ -52,34 +52,16 @@ pub fn payload_size(payload: &ClipboardPayload) -> usize {
 
 /// Bounds of the geometry that differs between `original` and `current`,
 /// grown to cover the trap's previous clip box when re-editing it.
-pub fn geometry_bounds(original: &Map, current: &Map, old: Option<&TrapGeom>) -> Option<Box3> {
-    let mut min = [i32::MAX; 3];
-    let mut max = [i32::MIN; 3];
-    sauer_map::octree::diff_bounds(
-        &original.root,
-        &current.root,
-        [0, 0, 0],
-        current.size,
-        &mut min,
-        &mut max,
-    );
-    if let Some(g) = old {
-        let (o_min, o_max) = g.clip_box();
-        for i in 0..3 {
-            min[i] = min[i].min(o_min[i]);
-            max[i] = max[i].max(o_max[i]);
-        }
-    }
-    if min[0] == i32::MAX {
-        return None;
-    }
-    Some((min.map(|v| v.max(0)), max.map(|v| v.min(current.size))))
+pub fn geometry_bounds(original: &Map, current: &Map, old: Option<&TrapGeom>) -> Option<Aabb> {
+    let diff = sauer_map::octree::diff_box(&original.root, &current.root, current.size);
+    let b = Aabb::enclosing(diff.into_iter().chain(old.map(TrapGeom::clip_box)))?;
+    Aabb::new([0; 3], [current.size; 3]).intersection(&b)
 }
 
 /// Copies the active-state geometry inside `bounds` out of `current`.
-pub fn capture_geometry(current: &Map, (min, max): Box3) -> TrapGeom {
+pub fn capture_geometry(current: &Map, bounds: Aabb) -> TrapGeom {
     let (clip_pos, clip_s, clip_grid, payload) =
-        sauer_map::clipboard::generate_region_clipboard(current, min, max);
+        sauer_map::clipboard::generate_region_clipboard(current, bounds);
     TrapGeom {
         clip_pos,
         clip_s,
@@ -396,10 +378,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
 
     broadcast_ents(server, map, touched);
     let payloads = match &trap.geom {
-        Some(g) => {
-            let (min, max) = g.clip_box();
-            map.generate_restore_packets(min, max)
-        }
+        Some(g) => map.generate_restore_packets(g.clip_box()),
         None => Vec::new(),
     };
     state.mode = TrapMode::Editing(TrapEditState {
@@ -485,13 +464,7 @@ fn end_edit(
     }
     let out = persist::packets(&state, sync);
     let restore = geom_bounds
-        .map(|(min, max)| {
-            state
-                .map
-                .as_ref()
-                .unwrap()
-                .generate_restore_packets(min, max)
-        })
+        .map(|b| state.map.as_ref().unwrap().generate_restore_packets(b))
         .unwrap_or_default();
     let map_snapshot = state.map.as_ref().unwrap();
     broadcast_ents(server, map_snapshot, changed_ent_ids);

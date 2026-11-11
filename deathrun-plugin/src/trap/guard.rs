@@ -11,13 +11,13 @@ use sauer_map::virt_ents::FakeEnt;
 use sauer_proto::{Client, channel1, data::EntityType};
 use sauer_server::plugin::Context;
 
-type Box3 = ([i32; 3], [i32; 3]);
+use sauer_core::Aabb;
 
 const PROTECTED_MSG: &str = "That area is protected (a trap button or the trap vault).";
 
 /// Tells the editor why their edit was undone and resends the server's
 /// version of the area to everyone (the edit was already relayed).
-pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
+pub fn reject(ctx: &Context, bounds: Aabb, msg: &str) {
     crate::ui::send_warn(ctx.server(), ctx.id(), msg);
     let server = ctx.server().clone();
     let payloads = {
@@ -25,7 +25,7 @@ pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
         state
             .map
             .as_ref()
-            .map(|m| m.generate_restore_packets(min, max))
+            .map(|m| m.generate_restore_packets(bounds))
             .unwrap_or_default()
     };
     tokio::spawn(async move {
@@ -36,7 +36,7 @@ pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
 /// Applies a geometry edit to the server maps. Rejects it if it touches a
 /// protected area, and reverts it if it pushes the trap being edited over
 /// the budget.
-pub fn geometry_edit(ctx: &Context, bounds: Box3, mut apply: impl FnMut(&mut Map) -> bool) {
+pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map) -> bool) {
     let mut state = get_server_state(ctx.server()).write();
     if super::place::covers_preview(&state, bounds) {
         drop(state);
@@ -44,9 +44,7 @@ pub fn geometry_edit(ctx: &Context, bounds: Box3, mut apply: impl FnMut(&mut Map
         return;
     }
     let snapshot = match (state.mode.editing(), &state.map) {
-        (Some(_), Some(map)) => Some(sauer_map::clipboard::generate_region_clipboard(
-            map, bounds.0, bounds.1,
-        )),
+        (Some(_), Some(map)) => Some(sauer_map::clipboard::generate_region_clipboard(map, bounds)),
         _ => None,
     };
 

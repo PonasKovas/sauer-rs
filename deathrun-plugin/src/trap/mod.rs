@@ -137,12 +137,8 @@ impl TrapGeom {
         self.clip_s.map(|s| s * self.clip_grid)
     }
 
-    pub fn clip_box(&self) -> ([i32; 3], [i32; 3]) {
-        let ext = self.extent();
-        (
-            self.clip_pos,
-            std::array::from_fn(|i| self.clip_pos[i] + ext[i]),
-        )
+    pub fn clip_box(&self) -> sauer_core::Aabb {
+        sauer_core::Aabb::sized(self.clip_pos, self.extent())
     }
 }
 
@@ -176,16 +172,12 @@ impl Trap {
         }
     }
 
-    pub fn button_box(&self) -> ([i32; 3], [i32; 3]) {
-        (
-            self.button_pos,
-            self.button_pos.map(|v| v + self.button_size),
-        )
+    pub fn button_box(&self) -> sauer_core::Aabb {
+        sauer_core::Aabb::cube(self.button_pos, self.button_size)
     }
 
     pub fn contains_button_point(&self, p: [f32; 3], margin: f32) -> bool {
-        let (min, max) = self.button_box();
-        (0..3).all(|ax| p[ax] >= min[ax] as f32 - margin && p[ax] < max[ax] as f32 + margin)
+        self.button_box().contains_point(p, margin)
     }
 
     pub fn does_anything(&self) -> bool {

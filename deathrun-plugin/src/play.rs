@@ -1,6 +1,7 @@
 use crate::map_state::{DeathrunState, Trap, get_server_state};
 use crate::ui;
 use cube_string::IntoCubeStringLossy;
+use sauer_core::Aabb;
 use sauer_map::Map;
 
 use parking_lot::RwLock;
@@ -113,8 +114,7 @@ impl LoadedMap {
 
         crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
         for trap in &traps {
-            let (min, max) = trap.button_box();
-            state.protect_region(min, max);
+            state.protect_region(trap.button_box());
         }
         Ok(Self { state, traps })
     }
@@ -912,7 +912,11 @@ impl Plugin for DeathrunPlay {
                     .map(crate::trap::placement::button_key);
 
                 if let Some(trap) = target_trap.and_then(|t| state.trap(t)) {
-                    if let Some((t_min, t_max)) = trap.geom.as_ref().map(|g| g.clip_box()) {
+                    if let Some(Aabb {
+                        min: t_min,
+                        max: t_max,
+                    }) = trap.geom.as_ref().map(|g| g.clip_box())
+                    {
                         let len_x = t_max[0] - t_min[0];
                         let len_y = t_max[1] - t_min[1];
                         let len_z = t_max[2] - t_min[2];

@@ -118,10 +118,9 @@ pub(crate) fn region_layout(map: &Map, min: [i32; 3], max: [i32; 3]) -> ([i32; 3
 
 pub fn generate_region_clipboard(
     map: &Map,
-    min: [i32; 3],
-    max: [i32; 3],
+    b: sauer_core::Aabb,
 ) -> ([i32; 3], [i32; 3], i32, ClipboardPayload) {
-    let (o, s, grid) = region_layout(map, min, max);
+    let (o, s, grid) = region_layout(map, b.min, b.max);
     let payload = generate_clipboard_for_region(map, o, s, grid);
     (o, s, grid, payload)
 }

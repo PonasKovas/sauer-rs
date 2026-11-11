@@ -139,7 +139,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
         let map = state.map.as_ref().unwrap();
         let payloads = changed
             .into_iter()
-            .flat_map(|(min, max)| sauer_map::chunking::chunk_region(map, min, max, usize::MAX))
+            .flat_map(|b| sauer_map::chunking::chunk_region(map, b, usize::MAX))
             .collect();
 
         let s_clone = server.clone();
@@ -358,7 +358,7 @@ pub fn set_button_color(server: &Server, pos: [i32; 3], size: i32, orient: u8, c
     }
 }
 
-type Box3 = ([i32; 3], [i32; 3]);
+use sauer_core::Aabb;
 
 /// Tight boxes around what differs between the trees: one per known area
 /// with changes inside it, plus one around changes outside all of them.
@@ -366,41 +366,27 @@ fn changed_boxes(
     old: &sauer_map::Node,
     new: &sauer_map::Node,
     world_size: i32,
-    areas: &[Box3],
-) -> Vec<Box3> {
-    let mut cells = Vec::new();
-    sauer_map::octree::collect_diff_cells(old, new, [0; 3], world_size, &mut cells);
-    let empty = ([i32::MAX; 3], [i32::MIN; 3]);
-    let mut tight = vec![empty; areas.len() + 1];
-    let grow = |b: &mut Box3, min: [i32; 3], max: [i32; 3]| {
-        for k in 0..3 {
-            b.0[k] = b.0[k].min(min[k]);
-            b.1[k] = b.1[k].max(max[k]);
-        }
-    };
-    for (pos, size, _) in &cells {
-        let (cmin, cmax) = (*pos, pos.map(|v| v + size));
+    areas: &[Aabb],
+) -> Vec<Aabb> {
+    let mut tight: Vec<Option<Aabb>> = vec![None; areas.len() + 1];
+    let grow = |b: &mut Option<Aabb>, c: Aabb| *b = Some(b.map_or(c, |b| b.union(&c)));
+    for cell in sauer_map::octree::diff_cells(old, new, world_size) {
         let mut inside = false;
-        for (i, (amin, amax)) in areas.iter().enumerate() {
-            let lo: [i32; 3] = std::array::from_fn(|k| cmin[k].max(amin[k]));
-            let hi: [i32; 3] = std::array::from_fn(|k| cmax[k].min(amax[k]));
-            if (0..3).all(|k| lo[k] < hi[k]) {
-                grow(&mut tight[i], lo, hi);
-                inside |= lo == cmin && hi == cmax;
+        for (i, area) in areas.iter().enumerate() {
+            if let Some(part) = area.intersection(&cell) {
+                grow(&mut tight[i], part);
+                inside |= part == cell;
             }
         }
         if !inside {
-            grow(&mut tight[areas.len()], cmin, cmax);
+            grow(&mut tight[areas.len()], cell);
         }
     }
-    let mut out: Vec<Box3> = Vec::new();
-    for b in tight.into_iter().filter(|b| b.0[0] != i32::MAX) {
+    let mut out: Vec<Aabb> = Vec::new();
+    for b in tight.into_iter().flatten() {
         // Overlapping areas (a button inside a trap frame) would paste twice.
-        if !out
-            .iter()
-            .any(|o| (0..3).all(|k| o.0[k] <= b.0[k] && b.1[k] <= o.1[k]))
-        {
-            out.retain(|o| !(0..3).all(|k| b.0[k] <= o.0[k] && o.1[k] <= b.1[k]));
+        if !out.iter().any(|o| o.contains(&b)) {
+            out.retain(|o| !b.contains(o));
             out.push(b);
         }
     }

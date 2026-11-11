@@ -8,14 +8,9 @@ use sauer_proto::route::{Chan1, S2C};
 /// Splits the region into clipboards whose packets fit in `max_bytes`
 /// (compressed) and that clients accept (unpacked size). Pass `usize::MAX`
 /// for as few clipboards as clients allow.
-pub fn chunk_region(
-    map: &Map,
-    min: [i32; 3],
-    max: [i32; 3],
-    max_bytes: usize,
-) -> Vec<ClipboardPayload> {
+pub fn chunk_region(map: &Map, b: sauer_core::Aabb, max_bytes: usize) -> Vec<ClipboardPayload> {
     let mut out = Vec::new();
-    do_chunk(map, min, max, max_bytes, &mut out);
+    do_chunk(map, b.min, b.max, max_bytes, &mut out);
     out
 }
 

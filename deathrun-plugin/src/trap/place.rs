@@ -23,7 +23,7 @@ use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 use std::sync::Arc;
 
-type Box3 = ([i32; 3], [i32; 3]);
+use sauer_core::Aabb;
 
 const FRAMES: &str = "place_frames";
 /// The frames of traps the preview sits in, in the preview's yellow.
@@ -63,7 +63,7 @@ impl Placing {
     }
 
     /// The cell the preview is drawn in, if any.
-    pub fn preview_box(&self) -> Option<Box3> {
+    pub fn preview_box(&self) -> Option<Aabb> {
         match self.target {
             Target::Cell(key, _) => Some(cell_box(key)),
             _ => None,
@@ -101,20 +101,16 @@ impl Verdict {
 /// Whether an edit of `bounds` would touch the placement preview. Those get
 /// rejected: the edit lands on the preview on clients, and would be lost
 /// under the next repaint anyway.
-pub fn covers_preview(state: &DeathrunState, bounds: Box3) -> bool {
+pub fn covers_preview(state: &DeathrunState, bounds: Aabb) -> bool {
     state
         .mode
         .placing()
         .and_then(Placing::preview_box)
-        .is_some_and(|cell| overlaps(cell, bounds))
+        .is_some_and(|cell| cell.overlaps(&bounds))
 }
 
-fn cell_box((pos, size, _): ButtonKey) -> Box3 {
-    (pos, pos.map(|v| v + size))
-}
-
-fn overlaps(a: Box3, b: Box3) -> bool {
-    (0..3).all(|i| a.0[i] < b.1[i] && b.0[i] < a.1[i])
+fn cell_box((pos, size, _): ButtonKey) -> Aabb {
+    Aabb::cube(pos, size)
 }
 
 /// The cell in front of the surface hit at `hit_pt`, for a button facing
@@ -147,7 +143,7 @@ pub fn button_hit(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Opt
     // Just past the surface, inside whatever was hit.
     let inside: [f32; 3] = std::array::from_fn(|i| hit_pt[i] + ray[i] * 0.01);
     state.traps.iter().find_map(|t| {
-        let (min, max) =
+        let Aabb { min, max } =
             get_outer_face_selections(t.button_pos, t.button_size, t.button_orient)[0].bounds();
         (0..3)
             .all(|i| inside[i] >= min[i] as f32 - 0.05 && inside[i] <= max[i] as f32 + 0.05)
@@ -166,12 +162,12 @@ fn raycast(state: &DeathrunState, origin: [f32; 3], ray: [f32; 3]) -> Option<([f
 }
 
 /// Frames of the traps whose geometry covers `cell`.
-fn frames_around(state: &DeathrunState, cell: Box3) -> Vec<Box3> {
+fn frames_around(state: &DeathrunState, cell: Aabb) -> Vec<Aabb> {
     state
         .traps
         .iter()
         .filter_map(|t| t.geom.as_ref().map(|g| g.clip_box()))
-        .filter(|&frame| overlaps(frame, cell))
+        .filter(|&frame| frame.overlaps(&cell))
         .collect()
 }
 
@@ -180,13 +176,13 @@ fn verdict(state: &DeathrunState, moving: Option<TrapId>, key: ButtonKey) -> Ver
     if !state.active_trap_stack.is_empty() {
         return Verdict::Bad("Wait for the active traps to reset.");
     }
-    if state.vault.is_some_and(|v| overlaps(cell, v.bounds())) {
+    if state.vault.is_some_and(|v| cell.overlaps(&v.bounds())) {
         return Verdict::Bad("That is the trap vault.");
     }
     let taken = state
         .traps
         .iter()
-        .any(|t| Some(t.id) != moving && overlaps(cell, t.button_box()));
+        .any(|t| Some(t.id) != moving && cell.overlaps(&t.button_box()));
     if taken {
         return Verdict::Bad("Another trap's button is in the way.");
     }
@@ -228,10 +224,10 @@ fn ghost(map: &mut Map, target: Target) -> Vec<ClipboardPayload> {
         return Vec::new();
     };
     let (pos, size, orient) = key;
-    let (min, max) = cell_box(key);
-    let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, min, max);
+    let cell = cell_box(key);
+    let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, cell);
     build_button(map, pos, size, orient, verdict.color(), true);
-    let out = map.generate_restore_packets(min, max);
+    let out = map.generate_restore_packets(cell);
     if let Some(sel) = super::vault::sel(map, o, s, grid) {
         map.apply_block(&sel, saved.nodes, false);
     }
@@ -241,10 +237,7 @@ fn ghost(map: &mut Map, target: Target) -> Vec<ClipboardPayload> {
 /// Paste packets putting the server's version back where `target` was drawn.
 fn unghost(map: &Map, target: Target) -> Vec<ClipboardPayload> {
     match target {
-        Target::Cell(key, _) => {
-            let (min, max) = cell_box(key);
-            map.generate_restore_packets(min, max)
-        }
+        Target::Cell(key, _) => map.generate_restore_packets(cell_box(key)),
         _ => Vec::new(),
     }
 }
@@ -255,7 +248,7 @@ fn frames(state: &DeathrunState, target: Target) -> Vec<FakeEnt> {
     };
     frames_around(state, cell_box(key))
         .into_iter()
-        .flat_map(|(min, max)| super::guard::box_edges(min, max, None))
+        .flat_map(|b| super::guard::box_edges(b.min, b.max, None))
         .map(|(x, y, z, dir, len)| FakeEnt {
             ent_type: EntityType::Particles,
             position: [x as f32, y as f32, z as f32],
@@ -593,14 +586,14 @@ pub fn set_button_cells(
     new: Option<ButtonKey>,
     sync: &mut persist::Sync,
 ) -> Result<(), String> {
-    let cells: Vec<Box3> = old.iter().chain(new.iter()).map(|&k| cell_box(k)).collect();
+    let cells: Vec<Aabb> = old.iter().chain(new.iter()).map(|&k| cell_box(k)).collect();
 
     let mut updates = Vec::new();
     let DeathrunState { map, traps, .. } = &mut *state;
     let map = map.as_mut().ok_or("No map is loaded.")?;
     for (i, t) in traps.iter().enumerate() {
         let Some(g) = &t.geom else { continue };
-        if !cells.iter().any(|&c| overlaps(c, g.clip_box())) {
+        if !cells.iter().any(|&c| c.overlaps(&g.clip_box())) {
             continue;
         }
         let geom = rerecord(map, g, old, new);
@@ -623,14 +616,12 @@ pub fn set_button_cells(
     }
     for m in persist::maps(state) {
         if let Some(key) = old {
-            let (min, max) = cell_box(key);
-            m.unprotect_region(min, max);
+            m.unprotect_region(cell_box(key));
             clear_button_cell(m, key.0, key.1);
         }
         if let Some(key) = new {
-            let (min, max) = cell_box(key);
             build_button_geometry(m, key.0, key.1, key.2);
-            m.protect_region(min, max);
+            m.protect_region(cell_box(key));
         }
         m.invalidate_cache();
     }
@@ -647,20 +638,14 @@ fn rerecord(
     new: Option<ButtonKey>,
 ) -> TrapGeom {
     let clip = g.clip_box();
-    let touched = |k: &ButtonKey| overlaps(cell_box(*k), clip);
+    let touched = |k: &ButtonKey| cell_box(*k).overlaps(&clip);
     let old = old.filter(touched);
     let new = new.filter(touched);
 
     // Everything changed below gets put back from this.
-    let mut region = clip;
-    for (min, max) in old.iter().chain(new.iter()).map(|&k| cell_box(k)) {
-        for i in 0..3 {
-            region.0[i] = region.0[i].min(min[i]);
-            region.1[i] = region.1[i].max(max[i]);
-        }
-    }
-    let (o, s, grid, saved) =
-        sauer_map::clipboard::generate_region_clipboard(map, region.0, region.1);
+    let cells = old.iter().chain(new.iter()).map(|&k| cell_box(k));
+    let region = cells.fold(clip, |r, c| r.union(&c));
+    let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, region);
 
     g.paste_into(map);
     if let Some((pos, size, _)) = old {
@@ -704,7 +689,10 @@ mod tests {
             true,
         );
         let mut trap = Trap::new([0, 0, 512], BUTTON_SIZE, 0);
-        trap.geom = Some(capture_geometry(&active, ([64, 64, 512], [128, 128, 576])));
+        trap.geom = Some(capture_geometry(
+            &active,
+            Aabb::new([64, 64, 512], [128, 128, 576]),
+        ));
         let mut state = DeathrunState {
             map: Some(map),
             traps: vec![trap],

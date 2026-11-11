@@ -1,5 +1,6 @@
 use crate::{Cube, Node};
 use ogz_rs::data::{CubeInfo, ModernSurfaceData, ModernSurfaces, OctreeNode, Surfaces};
+use sauer_core::Aabb;
 
 /// Size of the biggest shaped (neither empty nor fully solid) leaf touching
 /// `[min, max)`, or 0. A clipboard grid below this would split that leaf,
@@ -68,120 +69,38 @@ pub fn extract_node_at(
     }
 }
 
-pub fn diff_bounds(
-    a: &Node,
-    b: &Node,
-    pos: [i32; 3],
-    size: i32,
-    out_min: &mut [i32; 3],
-    out_max: &mut [i32; 3],
-) {
-    if a == b {
-        return;
-    }
-    let half = size / 2;
-    match (a, b) {
-        (Node::Branch(ac), Node::Branch(bc)) => {
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                diff_bounds(&ac[i], &bc[i], child_pos, half, out_min, out_max);
-            }
-        }
-        (Node::Branch(ac), Node::Leaf(bl)) => {
-            let b_children = crate::geom::subdivide(bl);
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                diff_bounds(
-                    &ac[i],
-                    &Node::Leaf(b_children[i]),
-                    child_pos,
-                    half,
-                    out_min,
-                    out_max,
-                );
-            }
-        }
-        (Node::Leaf(al), Node::Branch(bc)) => {
-            let a_children = crate::geom::subdivide(al);
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                diff_bounds(
-                    &Node::Leaf(a_children[i]),
-                    &bc[i],
-                    child_pos,
-                    half,
-                    out_min,
-                    out_max,
-                );
-            }
-        }
-        (Node::Leaf(_), Node::Leaf(_)) => {
-            for i in 0..3 {
-                if pos[i] < out_min[i] {
-                    out_min[i] = pos[i];
-                }
-                if pos[i] + size > out_max[i] {
-                    out_max[i] = pos[i] + size;
-                }
-            }
+/// The cells where two trees differ: leaf-sized boxes, one per pair of
+/// leaves that aren't equal (a leaf against a branch gets subdivided).
+pub fn diff_cells(a: &Node, b: &Node, world_size: i32) -> Vec<Aabb> {
+    fn children(node: &Node) -> std::borrow::Cow<'_, [Node; 8]> {
+        match node {
+            Node::Branch(c) => std::borrow::Cow::Borrowed(c),
+            Node::Leaf(l) => std::borrow::Cow::Owned(crate::geom::subdivide(l).map(Node::Leaf)),
         }
     }
+    fn walk(a: &Node, b: &Node, pos: [i32; 3], size: i32, out: &mut Vec<Aabb>) {
+        if a == b {
+            return;
+        }
+        if let (Node::Leaf(_), Node::Leaf(_)) = (a, b) {
+            out.push(Aabb::cube(pos, size));
+            return;
+        }
+        let (ac, bc) = (children(a), children(b));
+        let half = size / 2;
+        for i in 0..8 {
+            let child = std::array::from_fn(|k| pos[k] + ((i >> k) & 1) as i32 * half);
+            walk(&ac[i], &bc[i], child, half, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(a, b, [0; 3], world_size, &mut out);
+    out
 }
 
-pub fn collect_diff_cells(
-    a: &Node,
-    b: &Node,
-    pos: [i32; 3],
-    size: i32,
-    out: &mut Vec<([i32; 3], i32, Node)>,
-) {
-    if a == b {
-        return;
-    }
-    let half = size / 2;
-    match (a, b) {
-        (Node::Branch(ac), Node::Branch(bc)) => {
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                collect_diff_cells(&ac[i], &bc[i], child_pos, half, out);
-            }
-        }
-        (Node::Branch(ac), Node::Leaf(bl)) => {
-            let b_children = crate::geom::subdivide(bl);
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                collect_diff_cells(&ac[i], &Node::Leaf(b_children[i]), child_pos, half, out);
-            }
-        }
-        (Node::Leaf(al), Node::Branch(bc)) => {
-            let a_children = crate::geom::subdivide(al);
-            for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
-                let child_pos = [pos[0] + cx * half, pos[1] + cy * half, pos[2] + cz * half];
-                collect_diff_cells(&Node::Leaf(a_children[i]), &bc[i], child_pos, half, out);
-            }
-        }
-        (Node::Leaf(_), Node::Leaf(_)) => {
-            out.push((pos, size, b.clone()));
-        }
-    }
+/// The smallest box around everything that differs between two trees.
+pub fn diff_box(a: &Node, b: &Node, world_size: i32) -> Option<Aabb> {
+    Aabb::enclosing(diff_cells(a, b, world_size))
 }
 
 pub fn build_node(ogz_node: &OctreeNode) -> Node {

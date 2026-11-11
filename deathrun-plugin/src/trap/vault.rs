@@ -19,7 +19,7 @@ pub const MAX_SIZE: i32 = 1 << 15;
 /// `DEFAULT_GEOM`, a texture slot every map has. The record vslot is a variant of it.
 pub const ANCHOR_SLOT: u16 = 1;
 
-type Box3 = ([i32; 3], [i32; 3]);
+use sauer_core::Aabb;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Vault {
@@ -39,28 +39,25 @@ impl Vault {
         *self == Self::at_far_corner(world, self.size)
     }
 
-    pub fn bounds(&self) -> Box3 {
-        (self.origin, self.origin.map(|v| v + self.size))
+    pub fn bounds(&self) -> Aabb {
+        Aabb::cube(self.origin, self.size)
     }
 
     fn abs(&self, rel: [i32; 3]) -> [i32; 3] {
         std::array::from_fn(|i| self.origin[i] + rel[i])
     }
 
-    pub fn anchor_box(&self) -> Box3 {
-        let min = self.abs(anchor_rel(self.size));
-        (min, min.map(|v| v + 1))
+    pub fn anchor_box(&self) -> Aabb {
+        Aabb::cube(self.abs(anchor_rel(self.size)), 1)
     }
 
-    pub fn shelf_box(&self, geom: &TrapGeom) -> Option<Box3> {
-        let min = self.abs(geom.shelf?);
-        let ext = geom.extent();
-        Some((min, std::array::from_fn(|i| min[i] + ext[i])))
+    pub fn shelf_box(&self, geom: &TrapGeom) -> Option<Aabb> {
+        Some(Aabb::sized(self.abs(geom.shelf?), geom.extent()))
     }
 }
 
-fn cavity_rel(size: i32) -> Box3 {
-    ([size / 4; 3], [size * 3 / 4; 3])
+fn cavity_rel(size: i32) -> Aabb {
+    Aabb::new([size / 4; 3], [size * 3 / 4; 3])
 }
 
 fn anchor_rel(size: i32) -> [i32; 3] {
@@ -84,20 +81,23 @@ impl Item {
 }
 
 /// At least one unit of air between the two boxes on some axis.
-fn separated(a: &Box3, b: &Box3) -> bool {
-    (0..3).any(|i| a.1[i] < b.0[i] || b.1[i] < a.0[i])
+fn separated(a: &Aabb, b: &Aabb) -> bool {
+    (0..3).any(|i| a.max[i] < b.min[i] || b.max[i] < a.min[i])
 }
 
 /// Places `items` (in order) into the cavity of a vault of `size`, around the
 /// already occupied relative boxes in `taken`. Returns relative positions.
-pub fn pack(size: i32, taken: &[Box3], items: &[Item]) -> Option<Vec<[i32; 3]>> {
-    let (cmin, cmax) = cavity_rel(size);
+pub fn pack(size: i32, taken: &[Aabb], items: &[Item]) -> Option<Vec<[i32; 3]>> {
+    let Aabb {
+        min: cmin,
+        max: cmax,
+    } = cavity_rel(size);
     let lo = cmin.map(|v| v + 1);
     let hi = cmax.map(|v| v - 1);
 
-    let mut placed: Vec<Box3> = taken.to_vec();
+    let mut placed: Vec<Aabb> = taken.to_vec();
     let anchor = anchor_rel(size);
-    placed.push((anchor, anchor.map(|v| v + 1)));
+    placed.push(Aabb::cube(anchor, 1));
 
     let mut out = Vec::with_capacity(items.len());
     for item in items {
@@ -105,7 +105,11 @@ pub fn pack(size: i32, taken: &[Box3], items: &[Item]) -> Option<Vec<[i32; 3]>> 
             return None;
         }
         let mut candidates = vec![lo];
-        for (bmin, bmax) in &placed {
+        for Aabb {
+            min: bmin,
+            max: bmax,
+        } in &placed
+        {
             for axis in 0..3 {
                 let mut p = *bmin;
                 p[axis] = bmax[axis] + 1;
@@ -126,12 +130,12 @@ pub fn pack(size: i32, taken: &[Box3], items: &[Item]) -> Option<Vec<[i32; 3]>> 
                 let v = c[i].max(lo[i]);
                 (v + item.grid - 1).div_euclid(item.grid) * item.grid
             });
-            let b = (p, std::array::from_fn(|i| p[i] + item.extent[i]));
-            let inside = (0..3).all(|i| b.1[i] <= hi[i]);
+            let b = Aabb::sized(p, item.extent);
+            let inside = (0..3).all(|i| b.max[i] <= hi[i]);
             (inside && placed.iter().all(|q| separated(&b, q))).then_some(b)
         })?;
         placed.push(fit);
-        out.push(fit.0);
+        out.push(fit.min);
     }
     Some(out)
 }
@@ -185,7 +189,7 @@ fn clear(map: &mut Map, min: [i32; 3], extent: [i32; 3], grid: i32) {
 }
 
 pub fn write_anchor(map: &mut Map, vault: &Vault, record: &VSlotProps) {
-    let (min, _) = vault.anchor_box();
+    let min = vault.anchor_box().min;
     let Some(s) = sel(map, min, [1; 3], 1) else {
         return;
     };
@@ -194,23 +198,23 @@ pub fn write_anchor(map: &mut Map, vault: &Vault, record: &VSlotProps) {
 }
 
 pub fn write_shelf(map: &mut Map, vault: &Vault, geom: &TrapGeom) {
-    if let Some((min, _)) = vault.shelf_box(geom)
+    if let Some(Aabb { min, .. }) = vault.shelf_box(geom)
         && let Some(s) = sel(map, min, geom.clip_s, geom.clip_grid)
     {
         map.apply_block(&s, geom.payload.nodes.clone(), false);
     }
 }
 
-pub fn clear_shelf(map: &mut Map, vault: &Vault, geom: &TrapGeom) -> Option<Box3> {
+pub fn clear_shelf(map: &mut Map, vault: &Vault, geom: &TrapGeom) -> Option<Aabb> {
     let b = vault.shelf_box(geom)?;
-    clear(map, b.0, geom.extent(), geom.clip_grid);
+    clear(map, b.min, geom.extent(), geom.clip_grid);
     Some(b)
 }
 
 /// Writes the whole vault from scratch: rock, cavity, anchor and every shelf.
 pub fn build(map: &mut Map, vault: &Vault, traps: &[Trap], record: &VSlotProps) {
     fill_rock(map, vault.origin, vault.size);
-    let (cmin, _) = cavity_rel(vault.size);
+    let cmin = cavity_rel(vault.size).min;
     clear(map, vault.abs(cmin), [vault.size / 2; 3], vault.size / 4);
     write_anchor(map, vault, record);
     for geom in traps.iter().filter_map(|t| t.geom.as_ref()) {
@@ -220,7 +224,7 @@ pub fn build(map: &mut Map, vault: &Vault, traps: &[Trap], record: &VSlotProps) 
 
 /// Copies a shelf back out as a payload aimed at the trap's clip box.
 pub fn read_shelf(map: &Map, vault: &Vault, geom: &TrapGeom) -> Option<ClipboardPayload> {
-    let (min, max) = vault.shelf_box(geom)?;
+    let Aabb { min, max } = vault.shelf_box(geom)?;
     if (0..3).any(|i| min[i] < 0 || max[i] > map.size) {
         return None;
     }
@@ -237,21 +241,21 @@ pub fn read_shelf(map: &Map, vault: &Vault, geom: &TrapGeom) -> Option<Clipboard
 /// True when the box holds only untouched air or untouched rock (each part
 /// split off around `ours` may be either), ignoring the part covered by
 /// `ours` (the current vault, which we are free to overwrite).
-pub fn is_free(map: &Map, b: Box3, ours: Option<Box3>) -> bool {
-    if (0..3).any(|i| b.0[i] < 0 || b.1[i] > map.size) {
+pub fn is_free(map: &Map, b: Aabb, ours: Option<Aabb>) -> bool {
+    if (0..3).any(|i| b.min[i] < 0 || b.max[i] > map.size) {
         return false;
     }
     match ours {
-        Some(o) if (0..3).all(|i| o.0[i] <= b.0[i] && b.1[i] <= o.1[i]) => true,
-        Some(o) if !separated(&b, &o) && (0..3).all(|i| b.1[i] > b.0[i] + 1) => {
+        Some(o) if (0..3).all(|i| o.min[i] <= b.min[i] && b.max[i] <= o.max[i]) => true,
+        Some(o) if !separated(&b, &o) && (0..3).all(|i| b.max[i] > b.min[i] + 1) => {
             // Partially ours: split into octants (everything here is power-of-two aligned).
-            let half: [i32; 3] = std::array::from_fn(|i| (b.1[i] - b.0[i]) / 2);
+            let half: [i32; 3] = std::array::from_fn(|i| (b.max[i] - b.min[i]) / 2);
             (0..8).all(|k| {
-                let min: [i32; 3] = std::array::from_fn(|i| b.0[i] + ((k >> i) & 1) * half[i]);
-                is_free(map, (min, std::array::from_fn(|i| min[i] + half[i])), ours)
+                let min: [i32; 3] = std::array::from_fn(|i| b.min[i] + ((k >> i) & 1) * half[i]);
+                is_free(map, Aabb::sized(min, half), ours)
             })
         }
-        _ => map.is_untouched_region(b.0, b.1),
+        _ => map.is_untouched_region(b),
     }
 }
 
@@ -267,14 +271,17 @@ mod tests {
     }
 
     fn check(size: i32, items: &[Item], pos: &[[i32; 3]]) {
-        let (cmin, cmax) = cavity_rel(size);
+        let Aabb {
+            min: cmin,
+            max: cmax,
+        } = cavity_rel(size);
         let a = anchor_rel(size);
-        let mut boxes: Vec<Box3> = vec![(a, a.map(|v| v + 1))];
+        let mut boxes: Vec<Aabb> = vec![Aabb::cube(a, 1)];
         for (it, p) in items.iter().zip(pos) {
-            let b = (*p, std::array::from_fn(|i| p[i] + it.extent[i]));
+            let b = Aabb::sized(*p, it.extent);
             assert!((0..3).all(|i| p[i] % it.grid == 0), "unaligned {p:?}");
             assert!(
-                (0..3).all(|i| b.0[i] > cmin[i] && b.1[i] < cmax[i]),
+                (0..3).all(|i| b.min[i] > cmin[i] && b.max[i] < cmax[i]),
                 "outside cavity {b:?}"
             );
             assert!(boxes.iter().all(|q| separated(&b, q)), "touching {b:?}");
@@ -307,12 +314,9 @@ mod tests {
     fn incremental_respects_taken() {
         let size = 128;
         let first = pack(size, &[], &[item(16, 8)]).unwrap();
-        let taken = vec![(first[0], first[0].map(|v| v + 16))];
+        let taken = vec![Aabb::cube(first[0], 16)];
         let second = pack(size, &taken, &[item(16, 8)]).unwrap();
-        assert!(separated(
-            &taken[0],
-            &(second[0], second[0].map(|v| v + 16))
-        ));
+        assert!(separated(&taken[0], &Aabb::cube(second[0], 16)));
     }
 
     #[test]
@@ -358,7 +362,7 @@ mod tests {
         );
 
         erase(&mut map, &vault);
-        assert!(map.is_untouched_region(vault.bounds().0, vault.bounds().1));
+        assert!(map.is_untouched_region(vault.bounds()));
         assert!(
             map.get_cube(vault.origin[0] as f32, vault.origin[1] as f32, 0.0)
                 .unwrap()
@@ -377,6 +381,10 @@ mod tests {
         map.fill(&sel(&map, [1984, 1984, 0], [1; 3], 16).unwrap(), true);
         assert!(!is_free(&map, air, None));
         // Untouched rock (the bottom of a fresh map) is fine too.
-        assert!(is_free(&map, ([896, 896, 0], [1024, 1024, 128]), None));
+        assert!(is_free(
+            &map,
+            Aabb::new([896, 896, 0], [1024, 1024, 128]),
+            None
+        ));
     }
 }

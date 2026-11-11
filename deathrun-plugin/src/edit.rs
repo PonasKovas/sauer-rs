@@ -7,6 +7,7 @@ use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
 use parking_lot::RwLock;
+use sauer_core::Aabb;
 use sauer_map::Map;
 use sauer_proto::{
     Client, channel0,
@@ -24,10 +25,10 @@ pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
 pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
 pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
 
-fn handle_edit_reject(ctx: &Context, min: [i32; 3], max: [i32; 3]) {
+fn handle_edit_reject(ctx: &Context, bounds: Aabb) {
     guard::reject(
         ctx,
-        (min, max),
+        bounds,
         "That area is protected (a trap button or the trap vault).",
     );
 }
@@ -248,7 +249,11 @@ impl Plugin for DeathrunEdit {
                     });
                 let shown = live.or_else(|| trap.geom.as_ref().map(|g| g.clip_box()));
 
-                if let Some((t_min, t_max)) = shown {
+                if let Some(Aabb {
+                    min: t_min,
+                    max: t_max,
+                }) = shown
+                {
                     edges_to_draw = Some(guard::box_edges(t_min, t_max, eye));
                 }
             }
@@ -851,11 +856,10 @@ impl Plugin for DeathrunEdit {
                     let loaded = crate::trap::persist::load(&map);
                     crate::trap::placement::rebuild_all_trap_buttons(&mut map, &loaded.traps);
                     for trap in &loaded.traps {
-                        let (min, max) = trap.button_box();
-                        map.protect_region(min, max);
+                        map.protect_region(trap.button_box());
                     }
                     if let Some(v) = loaded.vault {
-                        map.protect_region(v.bounds().0, v.bounds().1);
+                        map.protect_region(v.bounds());
                     }
 
                     let mut state = DeathrunState {
@@ -1050,7 +1054,7 @@ impl Plugin for DeathrunEdit {
                 .as_ref()
                 .map(|m| m.size)
                 .unwrap_or(0);
-            ([0, 0, 0], [s, s, s])
+            Aabb::cube([0; 3], s)
         };
         guard::geometry_edit(ctx, bounds, |map| map.apply_replace(packet));
         Flow::Continue
@@ -1083,32 +1087,32 @@ impl Plugin for DeathrunEdit {
 
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) -> Flow {
         let mut ok = true;
-        let (min, max) = packet.sel.bounds();
+        let bounds = packet.sel.bounds();
         with_map_state_mut(ctx, |state| {
-            if state.is_protected(min, max) {
+            if state.is_protected(&bounds) {
                 ok = false;
             }
         });
         let covers =
-            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), (min, max));
+            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), bounds);
         if !ok || covers {
-            handle_edit_reject(ctx, min, max);
+            handle_edit_reject(ctx, bounds);
         }
         Flow::Continue
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) -> Flow {
         let mut ok = true;
-        let (min, max) = packet.sel.bounds();
+        let bounds = packet.sel.bounds();
         with_map_state_mut(ctx, |state| {
-            if state.is_protected(min, max) {
+            if state.is_protected(&bounds) {
                 ok = false;
             }
         });
         let covers =
-            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), (min, max));
+            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), bounds);
         if !ok || covers {
-            handle_edit_reject(ctx, min, max);
+            handle_edit_reject(ctx, bounds);
         }
         Flow::Continue
     }
@@ -1153,13 +1157,9 @@ impl Plugin for DeathrunEdit {
 
         let payload = server.players.with(id, |p| p.clipboard.clone()).flatten();
         if let Some(payload) = payload {
-            let min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-            let max = [
-                min[0] + payload.sel.s.x * packet.sel.grid,
-                min[1] + payload.sel.s.y * packet.sel.grid,
-                min[2] + payload.sel.s.z * packet.sel.grid,
-            ];
-            guard::geometry_edit(ctx, (min, max), |map| map.apply_paste(packet, &payload));
+            let mut sel = packet.sel.clone();
+            sel.s = payload.sel.s;
+            guard::geometry_edit(ctx, sel.bounds(), |map| map.apply_paste(packet, &payload));
         }
         Flow::Continue
     }

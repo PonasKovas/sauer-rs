@@ -15,7 +15,7 @@ use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 use std::sync::Arc;
 
-type Box3 = ([i32; 3], [i32; 3]);
+use sauer_core::Aabb;
 
 /// Highest world size the engine allows (`mapscale` 16).
 const MAX_WORLD: i32 = 1 << 16;
@@ -24,11 +24,11 @@ const MAX_WORLD: i32 = 1 << 16;
 #[derive(Default)]
 pub struct Sync {
     pub enlarges: u32,
-    pub dirty: Vec<Box3>,
+    pub dirty: Vec<Aabb>,
 }
 
 impl Sync {
-    fn mark(&mut self, b: Box3) {
+    fn mark(&mut self, b: Aabb) {
         self.dirty.push(b);
     }
 
@@ -218,7 +218,7 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     if let Some(o) = old {
         for m in maps(state) {
             vault::erase(m, &o);
-            m.unprotect_region(o.bounds().0, o.bounds().1);
+            m.unprotect_region(o.bounds());
         }
         sync.mark(o.bounds());
     }
@@ -228,7 +228,7 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     let traps = state.traps.clone();
     for m in maps(state) {
         vault::build(m, &target, &traps, &rec);
-        m.protect_region(target.bounds().0, target.bounds().1);
+        m.protect_region(target.bounds());
     }
     sync.mark(target.bounds());
     Ok(())
@@ -254,15 +254,11 @@ pub fn save(state: &mut DeathrunState, sync: &mut Sync) -> Result<(), String> {
         })
         .collect();
     if !unplaced.is_empty() {
-        let taken: Vec<Box3> = state
+        let taken: Vec<Aabb> = state
             .traps
             .iter()
             .filter_map(|t| t.geom.as_ref())
-            .filter_map(|g| {
-                let shelf = g.shelf?;
-                let ext = g.extent();
-                Some((shelf, std::array::from_fn(|i| shelf[i] + ext[i])))
-            })
+            .filter_map(|g| Some(Aabb::sized(g.shelf?, g.extent())))
             .collect();
         let items: Vec<Item> = unplaced
             .iter()
@@ -306,7 +302,7 @@ pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<
     }
     for m in maps(state) {
         vault::erase(m, &v);
-        m.unprotect_region(v.bounds().0, v.bounds().1);
+        m.unprotect_region(v.bounds());
     }
     sync.mark(v.bounds());
     state.vault = Some(target);
@@ -315,7 +311,7 @@ pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<
     let traps = state.traps.clone();
     for m in maps(state) {
         vault::build(m, &target, &traps, &rec);
-        m.protect_region(target.bounds().0, target.bounds().1);
+        m.protect_region(target.bounds());
     }
     sync.mark(target.bounds());
     Ok(())
@@ -326,17 +322,16 @@ pub fn packets(state: &DeathrunState, sync: Sync) -> (u32, Vec<ClipboardPayload>
     let Some(map) = state.map.as_ref() else {
         return (sync.enlarges, Vec::new());
     };
-    let mut boxes: Vec<Box3> = Vec::new();
+    let mut boxes: Vec<Aabb> = Vec::new();
     for b in sync.dirty {
-        let inside = |o: &Box3| (0..3).all(|i| o.0[i] <= b.0[i] && b.1[i] <= o.1[i]);
-        if !boxes.iter().any(inside) {
-            boxes.retain(|o| !(0..3).all(|i| b.0[i] <= o.0[i] && o.1[i] <= b.1[i]));
+        if !boxes.iter().any(|o| o.contains(&b)) {
+            boxes.retain(|o| !b.contains(o));
             boxes.push(b);
         }
     }
     let payloads = boxes
         .into_iter()
-        .flat_map(|(min, max)| map.generate_restore_packets(min, max))
+        .flat_map(|b| map.generate_restore_packets(b))
         .collect();
     (sync.enlarges, payloads)
 }
@@ -505,7 +500,7 @@ mod tests {
             &vault::sel(&active, [96, 96, 512], [1, 1, 4], 8).unwrap(),
             true,
         );
-        let geom = capture_geometry(&active, ([96, 96, 512], [104, 104, 544]));
+        let geom = capture_geometry(&active, Aabb::new([96, 96, 512], [104, 104, 544]));
 
         let mut trap = Trap::new([8, 8, 512], 8, 0);
         trap.geom = Some(geom);

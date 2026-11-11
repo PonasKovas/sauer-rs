@@ -3,6 +3,7 @@ use crate::{Cube, Node, Selection, ValidSel};
 use ogz_rs::OgzMap;
 use ogz_rs::data::VSlot;
 use ogz_rs::data::{Entity, Lightmap, MapConfig, Variable};
+use sauer_core::Aabb;
 use sauer_proto::channel1;
 use sauer_proto::data::{EditVarValue, VSlotProps};
 use std::collections::{HashMap, HashSet};
@@ -31,7 +32,7 @@ pub struct Map {
     pub vars: Vec<Variable>,
 
     /// Bounding boxes identifying immutable sections of the geometry.
-    pub protected_regions: Vec<([i32; 3], [i32; 3])>,
+    pub protected_regions: Vec<Aabb>,
 
     // Preservation of original OGZ metadata for lossless saving
     pub version: i32,
@@ -318,13 +319,14 @@ impl Map {
 
     /// The bottom octants the engine fills with rock when enlarging to the
     /// current size (the ones [`Map::enlarge`] leaves as air).
-    pub fn enlarged_octants(&self) -> [([i32; 3], [i32; 3]); 3] {
+    pub fn enlarged_octants(&self) -> [Aabb; 3] {
         let h = self.size / 2;
-        [[h, 0, 0], [0, h, 0], [h, h, 0]].map(|o| (o, o.map(|v| v + h)))
+        [[h, 0, 0], [0, h, 0], [h, h, 0]].map(|o| Aabb::cube(o, h))
     }
 
     /// True when the box is untouched: all air, or all plain rock, with no materials.
-    pub fn is_untouched_region(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+    pub fn is_untouched_region(&self, b: Aabb) -> bool {
+        let Aabb { min, max } = b;
         // `want`: None until the first leaf decides between rock (true) and air (false).
         fn check(
             node: &Node,
@@ -385,32 +387,25 @@ impl Map {
     // --- Packet Consumers ---
 
     /// Checks if a bounding box intersects any protected region in the map.
-    pub fn is_protected(&self, min: [i32; 3], max: [i32; 3]) -> bool {
-        self.protected_regions
-            .iter()
-            .any(|(p_min, p_max)| (0..3).all(|i| min[i] < p_max[i] && max[i] > p_min[i]))
+    pub fn is_protected(&self, b: &Aabb) -> bool {
+        self.protected_regions.iter().any(|p| p.overlaps(b))
     }
 
     /// Marks a bounding box region as immutable, preventing future edits inside it.
-    pub fn protect_region(&mut self, min: [i32; 3], max: [i32; 3]) {
-        self.protected_regions.push((min, max));
+    pub fn protect_region(&mut self, b: Aabb) {
+        self.protected_regions.push(b);
     }
 
     /// Removes an exact bounding box from the protected regions list.
-    pub fn unprotect_region(&mut self, min: [i32; 3], max: [i32; 3]) {
-        self.protected_regions
-            .retain(|&(p_min, p_max)| p_min != min || p_max != max);
+    pub fn unprotect_region(&mut self, b: Aabb) {
+        self.protected_regions.retain(|&p| p != b);
     }
 
     /// Generates optimal network payload chunks to restore a region's geometry back to reality.
     /// This keeps networking out of `sauer-map`, allowing the caller to broadcast `DelCube`
     /// and `PasteServer` sequences using these payloads.
-    pub fn generate_restore_packets(
-        &self,
-        min: [i32; 3],
-        max: [i32; 3],
-    ) -> Vec<sauer_proto::data::ClipboardPayload> {
-        crate::chunking::chunk_region(self, min, max, 4000)
+    pub fn generate_restore_packets(&self, b: Aabb) -> Vec<sauer_proto::data::ClipboardPayload> {
+        crate::chunking::chunk_region(self, b, 4000)
     }
 
     /// Modifies a global map variable.
@@ -454,8 +449,7 @@ impl Map {
         let Some(sel) = packet.sel.validate(self.size) else {
             return true;
         };
-        let (min, max) = sel.bounds();
-        if self.is_protected(min, max) {
+        if self.is_protected(&sel.bounds()) {
             return false;
         }
         // Like the engine, a full vslot table leaves the faces as they are.
@@ -518,8 +512,7 @@ impl Map {
             (matid, matmask)
         };
 
-        let (min, max) = sel.bounds();
-        if self.is_protected(min, max) {
+        if self.is_protected(&sel.bounds()) {
             return false;
         }
 
@@ -556,8 +549,7 @@ impl Map {
         let Some(sel) = packet.sel.validate(self.size) else {
             return true;
         };
-        let (min, max) = sel.bounds();
-        if self.is_protected(min, max) {
+        if self.is_protected(&sel.bounds()) {
             return false;
         }
         self.fill(&sel, false);
@@ -572,8 +564,7 @@ impl Map {
             let Some(sel) = packet.sel.validate(self.size) else {
                 return true;
             };
-            let (min, max) = sel.bounds();
-            if self.is_protected(min, max) {
+            if self.is_protected(&sel.bounds()) {
                 return false;
             }
             Some(sel)
@@ -604,8 +595,7 @@ impl Map {
             return true;
         };
         let (dir, mode) = (packet.dir.clamp(-1, 1), packet.mode as i32);
-        let (min, max) = edit_face_bounds(&sel, dir, mode);
-        if self.is_protected(min, max) {
+        if self.is_protected(&edit_face_bounds(&sel, dir, mode)) {
             return false;
         }
 
@@ -618,9 +608,7 @@ impl Map {
     /// Returns `false` if the edit was rejected because the position fell within a protected region.
     pub fn apply_edit_ent(&mut self, packet: &channel1::EditEnt) -> bool {
         let pos = [packet.pos.x, packet.pos.y, packet.pos.z];
-        let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
-        let max = [min[0] + 1, min[1] + 1, min[2] + 1];
-        if self.is_protected(min, max) {
+        if self.is_protected(&Aabb::cube(pos.map(|v| v as i32), 1)) {
             return false;
         }
 
@@ -653,8 +641,7 @@ impl Map {
         let Some(sel) = packet.sel.validate(self.size) else {
             return true;
         };
-        let (min, max) = sel.bounds();
-        if self.is_protected(min, max) {
+        if self.is_protected(&sel.bounds()) {
             return false;
         }
         self.apply_vslots(&sel, packet.all_faces, packet.delta, &packet.vslot);
@@ -682,8 +669,7 @@ impl Map {
         let Some(paste_sel) = paste_sel.validate(self.size) else {
             return true;
         };
-        let (min, max) = paste_sel.bounds();
-        if self.is_protected(min, max) {
+        if self.is_protected(&paste_sel.bounds()) {
             return false;
         }
         // The clipboard uses the sending client's vslot numbering.
@@ -703,8 +689,7 @@ impl Map {
                 let Some(sel) = sel.validate(self.size) else {
                     return true;
                 };
-                let (min, max) = sel.bounds();
-                if self.is_protected(min, max) {
+                if self.is_protected(&sel.bounds()) {
                     return false;
                 }
                 // Undo blocks use the sending client's vslot numbering.
@@ -717,9 +702,7 @@ impl Map {
                 // Ensure none of the entities touch a protected region
                 for ue in ents {
                     let pos = ue.ent.position;
-                    let min = [pos[0] as i32, pos[1] as i32, pos[2] as i32];
-                    let max = [min[0] + 1, min[1] + 1, min[2] + 1];
-                    if self.is_protected(min, max) {
+                    if self.is_protected(&Aabb::cube(pos.map(|v| v as i32), 1)) {
                         return false;
                     }
                 }
@@ -839,7 +822,7 @@ impl Map {
     where
         F: FnMut(&mut Node, [i32; 3]),
     {
-        let (min, max) = sel.bounds();
+        let Aabb { min, max } = sel.bounds();
         apply_region(
             &mut self.root,
             self.size,
@@ -1276,8 +1259,8 @@ impl Map {
 /// The box an `N_EDITF` changes: the selection's face slab, or for an extrude
 /// (mode 1) the slab between the old and new face. Saturates, so it's safe on
 /// an unchecked selection.
-pub fn edit_face_bounds(sel: &Selection, dir: i32, mode: i32) -> ([i32; 3], [i32; 3]) {
-    let (mut min, mut max) = sel.bounds();
+pub fn edit_face_bounds(sel: &Selection, dir: i32, mode: i32) -> Aabb {
+    let Aabb { mut min, mut max } = sel.bounds();
     let d = (sel.orient as usize) >> 1;
     let dc = (sel.orient as usize) & 1;
     let step = dir.clamp(-1, 1).saturating_mul(sel.grid);
@@ -1295,5 +1278,5 @@ pub fn edit_face_bounds(sel: &Selection, dir: i32, mode: i32) -> ([i32; 3], [i32
     } else {
         max[d] = min[d].saturating_add(sel.grid);
     }
-    (min, max)
+    Aabb::new(min, max)
 }
