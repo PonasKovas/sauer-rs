@@ -4,6 +4,7 @@
 
 pub mod blendmap;
 pub mod data;
+pub mod pvs;
 mod de;
 mod error;
 mod ser;
@@ -33,7 +34,7 @@ pub struct OgzMap {
     pub octree: OctreeNode,
 
     pub lightmaps: Vec<Lightmap>,
-    pub pvs: Vec<u8>,
+    pub pvs: Option<pvs::Pvs>,
 
     /// The blendmap quadtree as its raw serialized bytes, if the map has one.
     pub blendmap: Option<Vec<u8>>,

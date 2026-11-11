@@ -9,7 +9,7 @@ use std::io::{Cursor, Read};
 const MAX_DECOMPRESSED: u64 = 512 * 1024 * 1024; // 512 MB
 const MAX_ENTITIES: i32 = 1_000_000;
 const MAX_LIGHTMAPS: i32 = 16_384;
-const MAX_PVS_BYTES: i32 = 256 * 1024 * 1024; // 256 MB
+const MAX_PVS_CELLS: i32 = 1 << 20;
 const MAX_VARS: i32 = 65_536;
 const MAX_VSLOTS: i32 = 0x10000; // indices are 16 bits
 const MAX_WORLD_SIZE: i32 = 1 << 16;
@@ -71,7 +71,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
     if numents > MAX_ENTITIES {
         return Err(OgzError::LimitExceeded("numents"));
     }
-    if numpvs > MAX_PVS_BYTES {
+    if numpvs > MAX_PVS_CELLS {
         return Err(OgzError::LimitExceeded("numpvs"));
     }
     if lightmaps > MAX_LIGHTMAPS {
@@ -333,10 +333,10 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         }
     }
 
-    let mut pvs_data = Vec::new();
+    // The header's `numpvs` is the number of view cells.
+    let mut pvs = None;
     if version >= 25 && numpvs > 0 {
-        pvs_data = vec![0u8; numpvs as usize];
-        cursor.read_exact(&mut pvs_data)?;
+        pvs = Some(crate::pvs::read(&mut cursor, numpvs as usize)?);
     }
 
     // The header field is only a "has blendmap" flag. The blendmap itself is a
@@ -360,7 +360,7 @@ pub fn parse_map(data: &[u8]) -> Result<OgzMap, OgzError> {
         vslots,
         octree,
         lightmaps: lm_vec,
-        pvs: pvs_data,
+        pvs,
         blendmap,
     })
 }

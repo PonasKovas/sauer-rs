@@ -21,6 +21,9 @@ pub enum OgzError {
     #[error("Invalid blendmap node type: {0}")]
     InvalidBlendmapNode(u8),
 
+    #[error("PVS cell lengths don't add up to its size")]
+    InvalidPvs,
+
     #[error("Cannot serialize map with legacy surfaces to v33. Convert to modern format first.")]
     CannotSerializeLegacy,
 

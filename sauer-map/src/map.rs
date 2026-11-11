@@ -36,7 +36,7 @@ pub struct Map {
     pub eif: u16,
     pub extra_game_data: Vec<u8>,
     pub mru_textures: Vec<u16>,
-    pub pvs: Vec<u8>,
+    pub pvs: Option<ogz_rs::pvs::Pvs>,
     pub blendmap: Option<Vec<u8>>,
 }
 
@@ -80,7 +80,7 @@ impl Map {
             eif: 0,
             extra_game_data: vec![],
             mru_textures: vec![],
-            pvs: vec![],
+            pvs: None,
             blendmap: None,
         }
     }
@@ -171,7 +171,7 @@ impl Map {
     }
 
     pub fn invalidate_cache(&mut self) {
-        self.pvs.clear();
+        self.pvs = None;
     }
 
     /// The vslot table without its trailing empty entries. Unused variants
@@ -282,6 +282,8 @@ impl Map {
         children[0] = old_root;
         self.root = Node::Branch(Box::new(children));
         self.size *= 2;
+        // Its view cells cover the old world size.
+        self.pvs = None;
         if let Some(data) = &self.blendmap {
             self.blendmap = Some(ogz_rs::blendmap::enlarged(data));
         }

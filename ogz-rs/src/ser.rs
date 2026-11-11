@@ -20,7 +20,8 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
     encoder.write_i32::<LittleEndian>(28)?; // headersize
     encoder.write_i32::<LittleEndian>(map.world_size)?;
     encoder.write_i32::<LittleEndian>(checked(map.entities.len(), "numents")?)?;
-    encoder.write_i32::<LittleEndian>(checked(map.pvs.len(), "numpvs")?)?;
+    let num_pvs = map.pvs.as_ref().map_or(0, |p| p.cells.len());
+    encoder.write_i32::<LittleEndian>(checked(num_pvs, "numpvs")?)?;
     encoder.write_i32::<LittleEndian>(checked(map.lightmaps.len(), "lightmaps")?)?;
 
     // The engine only checks whether the blendmap field is set.
@@ -188,8 +189,9 @@ pub fn serialize_map(map: &OgzMap, compression: Compression) -> Result<Vec<u8>, 
         encoder.write_all(&lm.data)?;
     }
 
-    if !map.pvs.is_empty() {
-        encoder.write_all(&map.pvs)?;
+    // The engine only reads it when the header counts view cells.
+    if let Some(pvs) = map.pvs.as_ref().filter(|_| num_pvs > 0) {
+        crate::pvs::write(&mut encoder, pvs)?;
     }
     if let Some(ref bdata) = map.blendmap {
         encoder.write_all(bdata)?;
