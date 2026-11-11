@@ -218,8 +218,8 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     if let Some(o) = old {
         for m in maps(state) {
             vault::erase(m, &o);
-            m.unprotect_region(o.bounds());
         }
+        state.protected.unprotect(o.bounds());
         sync.mark(o.bounds());
     }
     state.vault = Some(target);
@@ -228,8 +228,8 @@ fn rebuild(state: &mut DeathrunState, sync: &mut Sync, fresh_octant: bool) -> Re
     let traps = state.traps.clone();
     for m in maps(state) {
         vault::build(m, &target, &traps, &rec);
-        m.protect_region(target.bounds());
     }
+    state.protected.protect(target.bounds());
     sync.mark(target.bounds());
     Ok(())
 }
@@ -302,8 +302,8 @@ pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<
     }
     for m in maps(state) {
         vault::erase(m, &v);
-        m.unprotect_region(v.bounds());
     }
+    state.protected.unprotect(v.bounds());
     sync.mark(v.bounds());
     state.vault = Some(target);
     state.record_generation += 1;
@@ -311,8 +311,8 @@ pub fn relocate_if_needed(state: &mut DeathrunState, sync: &mut Sync) -> Result<
     let traps = state.traps.clone();
     for m in maps(state) {
         vault::build(m, &target, &traps, &rec);
-        m.protect_region(target.bounds());
     }
+    state.protected.protect(target.bounds());
     sync.mark(target.bounds());
     Ok(())
 }

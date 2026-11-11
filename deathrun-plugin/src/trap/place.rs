@@ -593,14 +593,18 @@ pub fn set_button_cells(
         }
         state.traps[i].geom = Some(geom);
     }
+    if let Some(key) = old {
+        state.protected.unprotect(cell_box(key));
+    }
+    if let Some(key) = new {
+        state.protected.protect(cell_box(key));
+    }
     for m in persist::maps(state) {
         if let Some(key) = old {
-            m.unprotect_region(cell_box(key));
             clear_button_cell(m, key.0, key.1);
         }
         if let Some(key) = new {
             build_button_geometry(m, key.0, key.1, key.2);
-            m.protect_region(cell_box(key));
         }
         m.invalidate_cache();
     }

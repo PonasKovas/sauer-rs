@@ -113,9 +113,6 @@ impl LoadedMap {
         }
 
         crate::trap::placement::rebuild_all_trap_buttons(&mut state, &traps);
-        for trap in &traps {
-            state.protect_region(trap.button_box());
-        }
         Ok(Self { state, traps })
     }
 }

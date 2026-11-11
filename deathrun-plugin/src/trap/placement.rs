@@ -221,7 +221,7 @@ pub fn build_button(
     map.set_material(&sel, mat);
 
     for pkt in get_outer_faces_vslot_packets(adj, size, orient, color) {
-        map.apply_vslot_edit(&pkt);
+        sauer_kit::coop_edit::edit_vslot(map, &pkt);
     }
 }
 
@@ -327,7 +327,7 @@ pub fn update_seethrough_button(server: &sauer_server::Server, id: u64, target: 
 pub fn reset_button_colors_by_pos(map: &mut sauer_map::Map, buttons: &[([i32; 3], i32, u8)]) {
     for &(pos, size, orient) in buttons {
         for pkt in get_outer_faces_vslot_packets(pos, size, orient, BUTTON_COLOR_READY) {
-            map.apply_vslot_edit(&pkt);
+            sauer_kit::coop_edit::edit_vslot(map, &pkt);
         }
     }
 }

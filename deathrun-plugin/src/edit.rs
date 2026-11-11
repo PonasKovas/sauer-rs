@@ -8,6 +8,7 @@ use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use sauer_core::Aabb;
+use sauer_kit::coop_edit;
 use sauer_map::Map;
 use sauer_proto::{
     Client, channel0,
@@ -24,14 +25,6 @@ pub const TRAP_EDIT_PARTICLE_ATTRS: [i32; 5] = [34, 100, 100, 0, 0];
 pub const TRAP_EDIT_PARTICLE_YAW_OFFSET: f32 = 30.0;
 pub const TRAP_EDIT_PARTICLE_PITCH_OFFSET: f32 = 0.0;
 pub const TRAP_EDIT_PARTICLE_MAX_DIST: f32 = 1000.0;
-
-fn handle_edit_reject(ctx: &Context, bounds: Aabb) {
-    guard::reject(
-        ctx,
-        bounds,
-        "That area is protected (a trap button or the trap vault).",
-    );
-}
 
 pub struct TrapHighlightState {
     pub trap: Option<crate::trap::TrapId>,
@@ -715,15 +708,17 @@ impl Plugin for DeathrunEdit {
 
                     let loaded = crate::trap::persist::load(&map);
                     crate::trap::placement::rebuild_all_trap_buttons(&mut map, &loaded.traps);
+                    let mut protected = sauer_kit::coop_edit::Protected::default();
                     for trap in &loaded.traps {
-                        map.protect_region(trap.button_box());
+                        protected.protect(trap.button_box());
                     }
                     if let Some(v) = loaded.vault {
-                        map.protect_region(v.bounds());
+                        protected.protect(v.bounds());
                     }
 
                     let mut state = DeathrunState {
                         map: Some(map),
+                        protected,
                         traps: loaded.traps,
                         vault: loaded.vault,
                         record_generation: loaded.generation,
@@ -879,101 +874,75 @@ impl Plugin for DeathrunEdit {
     // ── Coop-edit map tracking + Interceptors + Trap immunities ──────────────────────
 
     async fn edit_tex(&self, ctx: &mut Context, packet: &channel1::EditTex) -> Flow {
-        guard::geometry_edit(ctx, packet.sel.bounds(), |map| map.apply_edit_tex(packet));
+        guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
+            coop_edit::edit_tex(map, packet)
+        });
         Flow::Continue
     }
 
     async fn edit_mat(&self, ctx: &mut Context, packet: &channel1::EditMat) -> Flow {
-        guard::geometry_edit(ctx, packet.sel.bounds(), |map| map.apply_edit_mat(packet));
+        guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
+            coop_edit::edit_mat(map, packet)
+        });
         Flow::Continue
     }
 
     async fn del_cube(&self, ctx: &mut Context, packet: &channel1::DelCube) -> Flow {
         guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
-            let ok = map.apply_del_cube(packet);
-            if ok {
-                // The Sauerbraten client's `delcube` command locally calls `makeempty`,
-                // which resets materials to MAT_AIR. However, it does not send an explicit
-                // EditMat packet. We must manually mirror this material wipe on the server.
-                if let Some(sel) = packet.sel.validate(map.size) {
-                    map.set_material(&sel, Default::default());
-                }
-            }
-            ok
+            coop_edit::del_cube(map, packet)
         });
         Flow::Continue
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) -> Flow {
-        let bounds = if packet.in_sel {
-            packet.sel.bounds()
-        } else {
-            let s = get_server_state(ctx.server())
-                .read()
-                .map
-                .as_ref()
-                .map(|m| m.size)
-                .unwrap_or(0);
-            Aabb::cube([0; 3], s)
+        let size = get_server_state(ctx.server())
+            .read()
+            .map
+            .as_ref()
+            .map_or(0, |m| m.size);
+        let bounds = match packet.in_sel {
+            true => packet.sel.bounds(),
+            false => Aabb::cube([0; 3], size),
         };
-        guard::geometry_edit(ctx, bounds, |map| map.apply_replace(packet));
+        guard::geometry_edit(ctx, bounds, |map| coop_edit::replace(map, packet));
         Flow::Continue
     }
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) -> Flow {
-        let bounds = sauer_map::map::edit_face_bounds(&packet.sel, packet.dir, packet.mode as i32);
-        guard::geometry_edit(ctx, bounds, |map| map.apply_edit_face(packet));
+        let bounds = coop_edit::edit_face_bounds(&packet.sel, packet.dir, packet.mode as i32);
+        guard::geometry_edit(ctx, bounds, |map| coop_edit::edit_face(map, packet));
         Flow::Continue
     }
 
     async fn edit_ent(&self, ctx: &mut Context, packet: &channel1::EditEnt) -> Flow {
-        guard::entity_edit(ctx, &[packet.ent_id as usize], |map| {
-            map.apply_edit_ent(packet)
+        let pos = coop_edit::entity_box([packet.pos.x, packet.pos.y, packet.pos.z]);
+        guard::entity_edit(ctx, &[packet.ent_id as usize], &[pos], |map| {
+            coop_edit::edit_ent(map, packet)
         });
         Flow::Continue
     }
 
     async fn edit_var(&self, ctx: &mut Context, packet: &channel1::EditVar) -> Flow {
-        with_map_state_mut(ctx, |state| state.apply_edit_var(packet));
+        with_map_state_mut(ctx, |map| coop_edit::edit_var(map, packet));
         Flow::Continue
     }
 
     async fn edit_v_slot(&self, ctx: &mut Context, packet: &channel1::EditVSlot) -> Flow {
         guard::geometry_edit(ctx, packet.sel.bounds(), |map| {
-            map.apply_edit_v_slot(packet)
+            coop_edit::edit_vslot(map, packet)
         });
         Flow::Continue
     }
 
+    // The server doesn't track flips and rotations yet; it only refuses them
+    // where edits may not go.
     async fn flip(&self, ctx: &mut Context, packet: &channel1::Flip) -> Flow {
-        let mut ok = true;
-        let bounds = packet.sel.bounds();
-        with_map_state_mut(ctx, |state| {
-            if state.is_protected(&bounds) {
-                ok = false;
-            }
-        });
-        let covers =
-            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), bounds);
-        if !ok || covers {
-            handle_edit_reject(ctx, bounds);
-        }
+        guard::refuse_if_blocked(ctx, packet.sel.bounds());
         Flow::Continue
     }
 
     async fn rotate(&self, ctx: &mut Context, packet: &channel1::Rotate) -> Flow {
-        let mut ok = true;
-        let bounds = packet.sel.bounds();
-        with_map_state_mut(ctx, |state| {
-            if state.is_protected(&bounds) {
-                ok = false;
-            }
-        });
-        let covers =
-            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), bounds);
-        if !ok || covers {
-            handle_edit_reject(ctx, bounds);
-        }
+        guard::refuse_if_blocked(ctx, packet.sel.bounds());
         Flow::Continue
     }
 
@@ -1019,7 +988,9 @@ impl Plugin for DeathrunEdit {
         if let Some(payload) = payload {
             let mut sel = packet.sel.clone();
             sel.s = payload.sel.s;
-            guard::geometry_edit(ctx, sel.bounds(), |map| map.apply_paste(packet, &payload));
+            guard::geometry_edit(ctx, sel.bounds(), |map| {
+                coop_edit::paste(map, packet, &payload)
+            });
         }
         Flow::Continue
     }
@@ -1043,12 +1014,11 @@ impl Plugin for DeathrunEdit {
         let mut state = get_server_state(server).write();
         if packet.size >= 0 {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
-            state.map = Some(Map::new_empty(world_size));
-            state.traps.clear();
-            state.active_trap_stack.clear();
-            state.mode = Default::default();
-            state.base_map = None;
-            state.vault = None;
+            // A new map starts over: no traps, vault, protections or fake entities.
+            *state = DeathrunState {
+                map: Some(Map::new_empty(world_size)),
+                ..Default::default()
+            };
             return Flow::Continue;
         }
 
@@ -1123,11 +1093,15 @@ impl Plugin for DeathrunEdit {
 fn undo_redo(ctx: &Context, payload: &sauer_proto::data::UndoPayload) {
     match payload {
         sauer_proto::data::UndoPayload::Cubes { sel, .. } => {
-            guard::geometry_edit(ctx, sel.bounds(), |map| map.apply_undo_redo(payload));
+            guard::geometry_edit(ctx, sel.bounds(), |map| coop_edit::undo_redo(map, payload));
         }
         sauer_proto::data::UndoPayload::Entities(ents) => {
             let ids: Vec<usize> = ents.iter().map(|ue| ue.index as usize).collect();
-            guard::entity_edit(ctx, &ids, |map| map.apply_undo_redo(payload));
+            let boxes: Vec<Aabb> = ents
+                .iter()
+                .map(|ue| coop_edit::entity_box(ue.ent.position))
+                .collect();
+            guard::entity_edit(ctx, &ids, &boxes, |map| coop_edit::undo_redo(map, payload));
         }
     }
 }

@@ -33,14 +33,34 @@ pub fn reject(ctx: &Context, bounds: Aabb, msg: &str) {
     });
 }
 
+/// Why an edit of `bounds` may not happen, if it may not.
+fn blocked(state: &DeathrunState, bounds: Aabb) -> Option<&'static str> {
+    if state.protected.blocks(&bounds) {
+        Some(PROTECTED_MSG)
+    } else if super::place::covers_preview(state, bounds) {
+        Some("A trap button is being placed there.")
+    } else {
+        None
+    }
+}
+
+/// For edits the server doesn't apply: undoes one that touches a
+/// protected area or the placement preview.
+pub fn refuse_if_blocked(ctx: &Context, bounds: Aabb) {
+    let why = blocked(&get_server_state(ctx.server()).read(), bounds);
+    if let Some(why) = why {
+        reject(ctx, bounds, why);
+    }
+}
+
 /// Applies a geometry edit to the server maps. Rejects it if it touches a
 /// protected area, and reverts it if it pushes the trap being edited over
 /// the budget.
-pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map) -> bool) {
+pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map)) {
     let mut state = get_server_state(ctx.server()).write();
-    if super::place::covers_preview(&state, bounds) {
+    if let Some(why) = blocked(&state, bounds) {
         drop(state);
-        reject(ctx, bounds, "A trap button is being placed there.");
+        reject(ctx, bounds, why);
         return;
     }
     let snapshot = match (state.mode.editing(), &state.map) {
@@ -48,17 +68,11 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
         _ => None,
     };
 
-    let mut ok = true;
     if let Some(base) = state.base_map.as_mut() {
-        ok = apply(base);
+        apply(base);
     }
     if let Some(map) = state.map.as_mut() {
-        ok = apply(map);
-    }
-    if !ok {
-        drop(state);
-        reject(ctx, bounds, PROTECTED_MSG);
-        return;
+        apply(map);
     }
 
     let Some((pos, s, grid, payload)) = snapshot else {
@@ -91,7 +105,8 @@ fn base_entities(state: &DeathrunState) -> Option<&Vec<ogz_rs::data::Entity>> {
 
 /// Applies an entity edit to the server maps. Rejects it in protected areas,
 /// and unlinks traps from base-state entities that were changed or deleted.
-pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map) -> bool) {
+/// `boxes` are where the edited entities end up.
+pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl FnMut(&mut Map)) {
     let server = ctx.server();
     let mut state = get_server_state(server).write();
 
@@ -143,12 +158,14 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map)
         .map(|&i| base_entities(&state).and_then(|e| e.get(i).cloned()))
         .collect();
 
-    let mut ok = true;
-    if let Some(base) = state.base_map.as_mut() {
-        ok = apply(base);
-    }
-    if let Some(map) = state.map.as_mut() {
-        ok = apply(map);
+    let ok = !boxes.iter().any(|b| state.protected.blocks(b));
+    if ok {
+        if let Some(base) = state.base_map.as_mut() {
+            apply(base);
+        }
+        if let Some(map) = state.map.as_mut() {
+            apply(map);
+        }
     }
     for (i, live, base) in saved {
         if let (Some(e), Some(m)) = (live, state.map.as_mut()) {

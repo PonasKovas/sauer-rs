@@ -31,6 +31,8 @@ pub struct DeathrunState {
     pub active_trap_stack: Vec<crate::trap::TrapId>,
     /// Per-player fake entities in `map`.
     pub virt: sauer_kit::virt_ents::VirtEnts,
+    /// Where client edits may not go: trap buttons and the vault.
+    pub protected: sauer_kit::coop_edit::Protected,
     /// Where trap geometry and the trap record live in the map, once created.
     pub vault: Option<crate::trap::vault::Vault>,
     /// Generation of the last trap record written to the anchor.
@@ -90,6 +92,7 @@ impl Default for DeathrunState {
             base_map: None,
             active_trap_stack: Vec::new(),
             virt: Default::default(),
+            protected: Default::default(),
             vault: None,
             record_generation: 0,
         }
