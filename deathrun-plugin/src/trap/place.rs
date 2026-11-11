@@ -264,7 +264,7 @@ fn show(server: &Server, state: &mut DeathrunState, old: Target, new: Target) {
     };
     let mut payloads = unghost(map, old);
     payloads.extend(ghost(map, new));
-    crate::geo_sync::broadcast_now(server, crate::SERVER_BOT_CN, payloads);
+    crate::map_sync::paste_preview(server, payloads);
     send_frames(server, state, new);
 }
 
@@ -276,7 +276,7 @@ pub fn repaint(server: &Server) {
     };
     if let Some(map) = state.map.as_mut() {
         let payloads = ghost(map, target);
-        crate::geo_sync::broadcast_now(server, crate::SERVER_BOT_CN, payloads);
+        crate::map_sync::paste_preview(server, payloads);
     }
 }
 

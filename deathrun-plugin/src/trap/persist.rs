@@ -348,10 +348,7 @@ pub fn send(server: &Arc<Server>, (enlarges, payloads): (u32, Vec<ClipboardPaylo
             packet: channel1::NewMap { size: -1 },
         });
     }
-    let server = server.clone();
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&server, cn, payloads, 0).await;
-    });
+    crate::map_sync::paste_everywhere(server, payloads);
 }
 
 /// Saves under the lock and sends the result. Errors are reported to `report_to`.

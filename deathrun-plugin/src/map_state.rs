@@ -1,8 +1,6 @@
 use parking_lot::RwLock;
-use sauer_proto::channel2;
 use sauer_server::Server;
 use sauer_server::plugin::Context;
-use tracing::error;
 
 pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
     let items = map.entities.iter().enumerate().filter_map(|(i, ent)| {
@@ -118,31 +116,4 @@ where
     if let Some(map) = state.map.as_mut() {
         f(map);
     }
-}
-
-pub(crate) fn send_map_to_async(server: &std::sync::Arc<Server>, id: u64) {
-    let server_clone = std::sync::Arc::clone(server);
-    tokio::spawn(async move {
-        let state_opt = {
-            let lock = get_server_state(&server_clone).read();
-            lock.map.clone()
-        };
-
-        if let Some(state) = state_opt {
-            let out_bytes = tokio::task::spawn_blocking(move || {
-                state.to_ogz_bytes_merged(flate2::Compression::fast())
-            })
-            .await
-            .expect("to_ogz_bytes panicked");
-
-            match out_bytes {
-                Ok(bytes) => {
-                    server_clone.send(id, &channel2::SendMap { data: bytes });
-                }
-                Err(e) => {
-                    error!("failed to serialize map state: {e}");
-                }
-            }
-        }
-    });
 }

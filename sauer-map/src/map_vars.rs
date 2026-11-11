@@ -167,3 +167,21 @@ pub fn accepts(name: &str, value: &sauer_proto::data::EditVarValue) -> bool {
                 )
         })
 }
+
+/// The var as an `N_EDITVAR` value.
+pub fn edit_value(var: &Variable) -> sauer_proto::data::EditVarValue {
+    use sauer_proto::data::EditVarValue;
+    match var {
+        Variable::Int { value, .. } => EditVarValue::Int(*value),
+        Variable::Float { value, .. } => EditVarValue::Float(*value),
+        Variable::String { value, .. } => EditVarValue::String(value.clone()),
+    }
+}
+
+pub fn var_name(var: &Variable) -> &cube_string::CubeString {
+    match var {
+        Variable::Int { name, .. }
+        | Variable::Float { name, .. }
+        | Variable::String { name, .. } => name,
+    }
+}

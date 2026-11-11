@@ -1,9 +1,6 @@
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY, Trap, TrapId, TrapPhase};
 use crate::map_state::get_server_state;
-use sauer_proto::{
-    Client, channel1,
-    data::{GameMode, Vec3},
-};
+use sauer_proto::{Client, channel1, data::GameMode};
 use sauer_server::Server;
 use std::{sync::Arc, time::Duration};
 
@@ -78,12 +75,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
 
     // Compute entity changes
     let mut diff_ent_ids = std::collections::HashSet::new();
-    let empty_ent = ogz_rs::data::Entity {
-        position: [0.0; 3],
-        attrs: [0; 5],
-        ent_type: ogz_rs::data::EntityType::Empty,
-        extra_data: vec![],
-    };
+    let empty_ent = ogz_rs::data::Entity::EMPTY;
     for i in 0..new_map.entities.len().max(old_map.entities.len()) {
         if state.virt.is_virtual(i) {
             continue;
@@ -99,39 +91,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     state.map = Some(new_map);
     crate::map_state::update_server_items(state.map.as_ref().unwrap(), server);
 
-    // Network the changes
-    let actor_cn = crate::SERVER_BOT_CN;
-
-    let mut batch = Vec::new();
-    for &id in &diff_ent_ids {
-        let ent = state
-            .map
-            .as_ref()
-            .unwrap()
-            .entities
-            .get(id)
-            .unwrap_or(&empty_ent);
-        batch.push(Client {
-            client_num: actor_cn,
-            packet: channel1::EditEnt {
-                ent_id: id as i32,
-                pos: Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent.ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            },
-        });
-        if batch.len() >= 50 {
-            server.broadcast(batch.clone());
-            batch.clear();
-        }
-    }
-    if !batch.is_empty() {
-        server.broadcast(batch);
-    }
+    crate::map_sync::broadcast_ents(server, state.map.as_ref().unwrap(), diff_ent_ids);
 
     if !changed.is_empty() {
         let map = state.map.as_ref().unwrap();
@@ -140,10 +100,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
             .flat_map(|b| sauer_kit::paste::chunk_region(map, b, usize::MAX))
             .collect();
 
-        let s_clone = server.clone();
-        tokio::spawn(async move {
-            crate::geo_sync::broadcast_payloads(&s_clone, actor_cn, payloads, 0).await;
-        });
+        crate::map_sync::paste_everywhere(server, payloads);
     }
 }
 

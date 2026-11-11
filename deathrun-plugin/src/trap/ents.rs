@@ -75,12 +75,7 @@ impl EntChange {
 }
 
 fn empty() -> Entity {
-    Entity {
-        position: [0.0; 3],
-        attrs: [0; 5],
-        ent_type: EntityType::Empty,
-        extra_data: Vec::new(),
-    }
+    Entity::EMPTY
 }
 
 /// Compares two entity lists slot by slot. `skip` holds virtual entity slots.

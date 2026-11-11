@@ -3,9 +3,9 @@ use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
 use sauer_proto::{
-    Client, Encode,
+    Encode,
     channel1::{self, ServMsg},
-    data::{ClipboardPayload, Vec3},
+    data::ClipboardPayload,
     route::{Chan1, S2C},
 };
 use sauer_server::Server;
@@ -81,47 +81,11 @@ pub fn edit_size(state: &DeathrunState) -> usize {
         .map_or(0, |b| payload_size(&capture_geometry(current, b).payload))
 }
 
-fn broadcast_ents(server: &Server, map: &Map, ids: impl IntoIterator<Item = usize>) {
-    let cn = crate::SERVER_BOT_CN;
-    let empty = ogz_rs::data::Entity {
-        position: [0.0; 3],
-        attrs: [0; 5],
-        ent_type: ogz_rs::data::EntityType::Empty,
-        extra_data: vec![],
-    };
-    let mut batch = Vec::new();
-    for id in ids {
-        let ent = map.entities.get(id).unwrap_or(&empty);
-        batch.push(Client {
-            client_num: cn,
-            packet: channel1::EditEnt {
-                ent_id: id as i32,
-                pos: Vec3 {
-                    x: ent.position[0],
-                    y: ent.position[1],
-                    z: ent.position[2],
-                },
-                type_: ent.ent_type,
-                attrs: ent.attrs.map(|x| x as i32),
-            },
-        });
-        if batch.len() >= 50 {
-            server.broadcast(std::mem::take(&mut batch));
-        }
-    }
-    if !batch.is_empty() {
-        server.broadcast(batch);
-    }
-}
-
 fn spawn_payloads(server: &Arc<Server>, payloads: Vec<ClipboardPayload>) {
     if payloads.is_empty() {
         return;
     }
-    let s = server.clone();
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&s, crate::SERVER_BOT_CN, payloads, 0).await;
-    });
+    crate::map_sync::paste_everywhere(server, payloads);
 }
 
 /// Why `trap` can't be changed right now, if it can't.
@@ -373,7 +337,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
     map.invalidate_cache();
     crate::map_state::update_server_items(map, server);
 
-    broadcast_ents(server, map, touched);
+    crate::map_sync::broadcast_ents(server, map, touched);
     let payloads = match &trap.geom {
         Some(g) => sauer_kit::paste::restore_payloads(map, g.clip_box()),
         None => Vec::new(),
@@ -449,7 +413,7 @@ fn end_edit(
         .map(|b| sauer_kit::paste::restore_payloads(state.map.as_ref().unwrap(), b))
         .unwrap_or_default();
     let map_snapshot = state.map.as_ref().unwrap();
-    broadcast_ents(server, map_snapshot, changed_ent_ids);
+    crate::map_sync::broadcast_ents(server, map_snapshot, changed_ent_ids);
     drop(state);
 
     spawn_payloads(server, restore);

@@ -676,3 +676,13 @@ pub struct Entity {
     pub ent_type: EntityType,
     pub extra_data: Vec<u8>,
 }
+
+impl Entity {
+    /// An unused entity slot.
+    pub const EMPTY: Entity = Entity {
+        position: [0.0; 3],
+        attrs: [0; 5],
+        ent_type: EntityType::Empty,
+        extra_data: Vec::new(),
+    };
+}

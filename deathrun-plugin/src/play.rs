@@ -311,62 +311,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
             server.set_spectator(id, true);
         }
 
-        let has_team_1 = map
-            .entities
-            .iter()
-            .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 1);
-        let has_team_2 = map
-            .entities
-            .iter()
-            .any(|e| e.ent_type == EntityType::PlayerStart && e.attrs[1] == 2);
-
-        let author_cn = crate::SERVER_BOT_CN;
-        crate::recreate::visual_rebuild_map(
-            &server,
-            &ids,
-            author_cn,
-            &map,
-            20,
-            true,
-            move |id, _i, ent| {
-                let is_evil = Some(id) == evil_id;
-
-                let ent_type = ent.ent_type;
-                let mut attrs = ent.attrs;
-
-                if ent_type == EntityType::PlayerStart {
-                    let team_attr = attrs[1];
-                    if team_attr == 2 {
-                        if is_evil {
-                            attrs[1] = 0;
-                        } else {
-                            return None;
-                        }
-                    } else if team_attr == 1 {
-                        if !is_evil {
-                            attrs[1] = 0;
-                        } else {
-                            return None;
-                        }
-                    } else if team_attr == 0 {
-                        if is_evil && has_team_2 {
-                            return None;
-                        }
-                        if !is_evil && has_team_1 {
-                            return None;
-                        }
-                    }
-                }
-
-                Some(ogz_rs::data::Entity {
-                    position: ent.position,
-                    attrs,
-                    ent_type,
-                    extra_data: vec![],
-                })
-            },
-        )
-        .await;
+        crate::map_sync::rebuild(&server, &ids, &map, evil_id).await;
 
         let current_evil;
         {
@@ -636,48 +581,7 @@ fn send_map_to_client(
 
     let maps_arc = Arc::clone(maps);
     tokio::spawn(async move {
-        let author_cn = crate::SERVER_BOT_CN;
-        crate::recreate::visual_rebuild_map(
-            &server,
-            &[target_id],
-            author_cn,
-            &map,
-            20,
-            true,
-            |id, _i, ent| {
-                let is_evil = Some(id) == evil_id;
-
-                let ent_type = ent.ent_type;
-                let mut attrs = ent.attrs;
-
-                if ent_type == EntityType::PlayerStart {
-                    let team_attr = attrs[1];
-                    if team_attr == 0 {
-                        return None;
-                    } else if team_attr == 2 {
-                        if is_evil {
-                            attrs[1] = 0;
-                        } else {
-                            return None;
-                        }
-                    } else if team_attr == 1 {
-                        if !is_evil {
-                            attrs[1] = 0;
-                        } else {
-                            return None;
-                        }
-                    }
-                }
-
-                Some(ogz_rs::data::Entity {
-                    position: ent.position,
-                    attrs,
-                    ent_type,
-                    extra_data: vec![],
-                })
-            },
-        )
-        .await;
+        crate::map_sync::rebuild(&server, &[target_id], &map, evil_id).await;
 
         if welcome {
             let (is_solo, map_name) = {
@@ -764,7 +668,7 @@ impl Plugin for DeathrunPlay {
             game.mode = GameMode::TeamPlay;
             game.master_mode = MasterMode::Veto;
         }
-        server.extra.insert(crate::recreate::KnownVars::default());
+        server.extra.insert(crate::map_sync::KnownVars::default());
         // Rounds set the master mode, so it must not snap back to open.
         server.config.write().reopen_when_masterless = false;
         crate::add_server_bot(server);
@@ -875,7 +779,7 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
         maps.read().afk.lock().remove(id);
-        if let Some(known) = server.extra.get::<crate::recreate::KnownVars>() {
+        if let Some(known) = server.extra.get::<crate::map_sync::KnownVars>() {
             known.forget(id);
         }
         self.highlights.forget(id);

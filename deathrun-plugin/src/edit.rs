@@ -427,7 +427,7 @@ impl Plugin for DeathrunEdit {
         if let Some((_, step)) = self.pending_welcome.remove(&id) {
             let has_map = get_server_state(server).read().map.is_some();
             if matches!(step, WelcomeStep::InitialLoad) && has_map {
-                crate::map_state::send_map_to_async(server, id);
+                crate::map_sync::send_map_file(server, id);
                 info!("sent map state to id {id} after welcome");
                 self.pending_welcome.insert(id, WelcomeStep::SentMap);
             } else {
@@ -647,7 +647,7 @@ impl Plugin for DeathrunEdit {
 
     async fn get_map(&self, ctx: &mut Context, _packet: &channel1::GetMap) -> Flow {
         let id = ctx.id();
-        crate::map_state::send_map_to_async(ctx.server(), id);
+        crate::map_sync::send_map_file(ctx.server(), id);
         info!("sent map state to id {id} on N_GETMAP");
         Flow::Cancel
     }
@@ -801,7 +801,7 @@ impl Plugin for DeathrunEdit {
         let busy = get_server_state(server).read().mode.busy_reason();
         if let Some(why) = busy {
             ui::send_warn(server, id, &format!("Cannot use newmap while {why}."));
-            crate::map_state::send_map_to_async(ctx.server(), id);
+            crate::map_sync::send_map_file(ctx.server(), id);
             return Flow::Cancel;
         }
         let server = ctx.server();

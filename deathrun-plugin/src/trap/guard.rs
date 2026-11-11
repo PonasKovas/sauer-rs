@@ -30,9 +30,7 @@ pub fn reject(ctx: &Context, bounds: Aabb, msg: &str) {
             .map(|m| sauer_kit::paste::restore_payloads(m, bounds))
             .unwrap_or_default()
     };
-    tokio::spawn(async move {
-        crate::geo_sync::broadcast_payloads(&server, crate::SERVER_BOT_CN, payloads, 0).await;
-    });
+    crate::map_sync::paste_everywhere(&server, payloads);
 }
 
 /// Why an edit of `bounds` may not happen, if it may not.
@@ -189,38 +187,8 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
     }
     if !ok {
         // The edit was already relayed: put the server's entities back everywhere.
-        let map = state.map.as_ref().unwrap();
-        let cn = crate::SERVER_BOT_CN;
-        let restore: Vec<_> = ids
-            .iter()
-            .map(|&i| {
-                let e = map
-                    .entities
-                    .get(i)
-                    .cloned()
-                    .unwrap_or(ogz_rs::data::Entity {
-                        position: [0.0; 3],
-                        attrs: [0; 5],
-                        ent_type: EntityType::Empty,
-                        extra_data: vec![],
-                    });
-                Client {
-                    client_num: cn,
-                    packet: channel1::EditEnt {
-                        ent_id: i as i32,
-                        pos: sauer_proto::data::Vec3 {
-                            x: e.position[0],
-                            y: e.position[1],
-                            z: e.position[2],
-                        },
-                        type_: e.ent_type,
-                        attrs: e.attrs.map(|x| x as i32),
-                    },
-                }
-            })
-            .collect();
+        crate::map_sync::broadcast_ents(server, state.map.as_ref().unwrap(), ids.iter().copied());
         drop(state);
-        server.broadcast(restore);
         crate::ui::send_warn(server, ctx.id(), PROTECTED_MSG);
         return;
     }

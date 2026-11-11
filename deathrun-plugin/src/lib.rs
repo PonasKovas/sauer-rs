@@ -1,9 +1,8 @@
 pub mod aim;
 pub mod edit;
-pub mod geo_sync;
 pub mod map_state;
+pub mod map_sync;
 pub mod play;
-mod recreate;
 pub mod trap;
 pub mod ui;
 

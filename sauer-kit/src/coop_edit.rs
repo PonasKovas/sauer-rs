@@ -334,3 +334,17 @@ pub fn edit_face_bounds(sel: &Selection, dir: i32, mode: i32) -> Aabb {
     }
     Aabb::new(min, max)
 }
+
+/// The `N_EDITENT` that puts `ent` in slot `index`.
+pub fn edit_ent_packet(index: usize, ent: &Entity) -> channel1::EditEnt {
+    channel1::EditEnt {
+        ent_id: index as i32,
+        pos: sauer_proto::data::Vec3 {
+            x: ent.position[0],
+            y: ent.position[1],
+            z: ent.position[2],
+        },
+        type_: ent.ent_type,
+        attrs: ent.attrs.map(i32::from),
+    }
+}
