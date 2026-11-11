@@ -17,16 +17,21 @@ pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
 
 pub use crate::trap::Trap;
 
+/// The traps whose active state is in the map, and the map without them.
+pub struct ActiveLayer {
+    pub base: Box<sauer_map::Map>,
+    /// Oldest first.
+    pub stack: Vec<crate::trap::TrapId>,
+}
+
 pub struct DeathrunState {
     pub map: sauer_map::Map,
-    /// True while waiting for a player to upload a map after a map vote.
-    pub waiting_for_map: bool,
-    pub uploading_map_name: Option<cube_string::CubeString>,
+    /// After a map vote: the voted map's name, until someone uploads it.
+    pub awaiting_upload: Option<cube_string::CubeString>,
     pub traps: Vec<Trap>,
     pub mode: crate::trap::TrapMode,
-    pub base_map: Option<Box<sauer_map::Map>>,
-    /// Traps whose active state is in the map, oldest first.
-    pub active_trap_stack: Vec<crate::trap::TrapId>,
+    /// Set while traps are firing.
+    pub active: Option<ActiveLayer>,
     /// Per-player fake entities in `map`.
     pub virt: sauer_kit::virt_ents::VirtEnts,
     /// Where client edits may not go: trap buttons and the vault.
@@ -38,6 +43,16 @@ pub struct DeathrunState {
 }
 
 impl DeathrunState {
+    /// The map with no trap firing.
+    pub fn base_map(&self) -> &sauer_map::Map {
+        self.active.as_ref().map_or(&self.map, |a| &a.base)
+    }
+
+    /// The copy of the map without the firing traps, if any are firing.
+    pub fn base_map_mut(&mut self) -> Option<&mut sauer_map::Map> {
+        self.active.as_mut().map(|a| &mut *a.base)
+    }
+
     pub fn trap_index(&self, id: crate::trap::TrapId) -> Option<usize> {
         self.traps.iter().position(|t| t.id == id)
     }
@@ -81,12 +96,10 @@ impl Default for DeathrunState {
     fn default() -> Self {
         Self {
             map: sauer_map::Map::default_empty(),
-            waiting_for_map: false,
-            uploading_map_name: None,
+            awaiting_upload: None,
             traps: Vec::new(),
             mode: Default::default(),
-            base_map: None,
-            active_trap_stack: Vec::new(),
+            active: None,
             virt: Default::default(),
             protected: Default::default(),
             vault: None,
@@ -100,7 +113,7 @@ pub(crate) fn get_server_state(server: &Server) -> &RwLock<DeathrunState> {
 }
 
 pub(crate) fn is_waiting_for_map(server: &Server) -> bool {
-    get_server_state(server).read().waiting_for_map
+    get_server_state(server).read().awaiting_upload.is_some()
 }
 
 pub(crate) fn with_map_state_mut<F>(ctx: &Context, mut f: F)
@@ -108,7 +121,7 @@ where
     F: FnMut(&mut sauer_map::Map),
 {
     let mut state = get_server_state(ctx.server()).write();
-    if let Some(base) = state.base_map.as_mut() {
+    if let Some(base) = state.base_map_mut() {
         f(base);
     }
     {

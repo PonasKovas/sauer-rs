@@ -107,7 +107,10 @@ fn busy(server: &Server, state: &DeathrunState) -> Option<String> {
     if let Some(msg) = super::place::busy_message(server, state) {
         return Some(msg);
     }
-    (!state.active_trap_stack.is_empty()).then(|| "Wait for the active traps to reset.".to_string())
+    state
+        .active
+        .is_some()
+        .then(|| "Wait for the active traps to reset.".to_string())
 }
 
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {

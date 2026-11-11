@@ -126,7 +126,7 @@ fn install(server: &Server, id: u64, parsed: Parsed, size: usize) {
             update_server_items(map, server);
         }
         let name = s
-            .uploading_map_name
+            .awaiting_upload
             .take()
             .unwrap_or_else(|| "untitled".lossy_cubestring());
         *s = state;
@@ -167,8 +167,7 @@ pub(super) fn vote(server: &Server, id: u64, packet: &channel1::MapVote) -> Flow
     }
     {
         let mut state = get_server_state(server).write();
-        state.waiting_for_map = true;
-        state.uploading_map_name = Some(packet.map_name.clone());
+        state.awaiting_upload = Some(packet.map_name.clone());
     }
     for client_id in server.client_ids() {
         server.set_spectator(client_id, true);

@@ -64,7 +64,7 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
         _ => None,
     };
 
-    if let Some(base) = state.base_map.as_mut() {
+    if let Some(base) = state.base_map_mut() {
         apply(base);
     }
     {
@@ -93,7 +93,7 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
 }
 
 fn base_entities(state: &DeathrunState) -> &[ogz_rs::data::Entity] {
-    &state.base_map.as_deref().unwrap_or(&state.map).entities
+    &state.base_map().entities
 }
 
 /// Applies an entity edit to the server maps. Rejects it in protected areas,
@@ -138,9 +138,9 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
                 i,
                 state.map.entities.get(i).cloned(),
                 state
-                    .base_map
+                    .active
                     .as_ref()
-                    .and_then(|m| m.entities.get(i).cloned()),
+                    .and_then(|a| a.base.entities.get(i).cloned()),
             )
         })
         .collect();
@@ -153,7 +153,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
 
     let ok = !boxes.iter().any(|b| state.protected.blocks(b));
     if ok {
-        if let Some(base) = state.base_map.as_mut() {
+        if let Some(base) = state.base_map_mut() {
             apply(base);
         }
         {
@@ -166,18 +166,15 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
             let m = &mut state.map;
             m.entities[i] = e;
         }
-        if let (Some(e), Some(m)) = (base, state.base_map.as_mut()) {
+        if let (Some(e), Some(m)) = (base, state.base_map_mut()) {
             m.entities[i] = e;
         }
     }
     // An undo can bring back entities from before a virtual slot was taken.
     let DeathrunState {
-        map,
-        base_map,
-        virt,
-        ..
+        map, active, virt, ..
     } = &mut *state;
-    for m in std::iter::once(map).chain(base_map.as_deref_mut()) {
+    for m in std::iter::once(map).chain(active.as_mut().map(|a| &mut *a.base)) {
         virt.reconcile(&mut m.entities);
     }
     if !ok {

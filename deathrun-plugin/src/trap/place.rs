@@ -170,7 +170,7 @@ fn frames_around(state: &DeathrunState, cell: Aabb) -> Vec<Aabb> {
 
 fn verdict(state: &DeathrunState, moving: Option<TrapId>, key: ButtonKey) -> Verdict {
     let cell = cell_box(key);
-    if !state.active_trap_stack.is_empty() {
+    if state.active.is_some() {
         return Verdict::Bad("Wait for the active traps to reset.");
     }
     if state.vault.is_some_and(|v| cell.overlaps(&v.bounds())) {

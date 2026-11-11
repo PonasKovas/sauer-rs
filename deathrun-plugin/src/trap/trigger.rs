@@ -1,5 +1,5 @@
 use super::{BUTTON_COLOR_ACTIVE, BUTTON_COLOR_READY, Trap, TrapId, TrapPhase};
-use crate::map_state::get_server_state;
+use crate::map_state::{ActiveLayer, get_server_state};
 use sauer_proto::{Client, channel1, data::GameMode};
 use sauer_server::Server;
 use std::{sync::Arc, time::Duration};
@@ -21,21 +21,17 @@ pub fn apply_active_state(
 pub fn recompose_traps(server: &std::sync::Arc<Server>) {
     let mut state = get_server_state(server).write();
 
-    let base_map = match state.base_map.as_ref() {
-        Some(b) => b.clone(),
-        None => return, // Nothing to recompose
+    let Some(layer) = state.active.as_ref() else {
+        return; // Nothing to recompose
     };
-
     let old_map = state.map.clone();
-    let mut new_map = *base_map;
-
-    // Apply all active traps in chronological order
-    for trap in state
-        .active_trap_stack
-        .iter()
-        .filter_map(|&id| state.trap(id))
-    {
+    let mut new_map = (*layer.base).clone();
+    for trap in layer.stack.iter().filter_map(|&id| state.trap(id)) {
         apply_active_state(&mut new_map, trap, state.virt.slots());
+    }
+    // The last trap reverted: the map is the base again.
+    if layer.stack.is_empty() {
+        state.active = None;
     }
 
     // A trap's geometry can cover other traps' buttons and paste them back as
@@ -123,10 +119,12 @@ pub fn trigger_trap(server: &Arc<Server>, id: TrapId, actor_id: u64) {
     trap.phase = TrapPhase::Firing;
     let button = (trap.button_pos, trap.button_size, trap.button_orient);
     let (time, timeout) = (trap.time, trap.timeout);
-    if state.base_map.is_none() {
-        state.base_map = Some(Box::new(state.map.clone()));
-    }
-    state.active_trap_stack.push(id);
+    let s = &mut *state;
+    let layer = s.active.get_or_insert_with(|| ActiveLayer {
+        base: Box::new(s.map.clone()),
+        stack: Vec::new(),
+    });
+    layer.stack.push(id);
     drop(state);
 
     let is_edit_mode = server.game.read().mode == GameMode::CoopEdit;
@@ -238,13 +236,11 @@ fn revert(server: &Arc<Server>, id: TrapId) {
             Some(trap) if trap.phase == TrapPhase::Firing => trap.phase = TrapPhase::Cooldown,
             _ => return,
         }
-        state.active_trap_stack.retain(|&i| i != id);
+        if let Some(layer) = state.active.as_mut() {
+            layer.stack.retain(|&i| i != id);
+        }
     }
     recompose_traps(server);
-    let mut state = get_server_state(server).write();
-    if state.active_trap_stack.is_empty() {
-        state.base_map = None;
-    }
 }
 
 type ButtonPos = [i32; 3];
@@ -301,7 +297,7 @@ pub fn set_button_color(server: &Server, pos: [i32; 3], size: i32, orient: u8, c
             let map = &mut state.map;
             sauer_kit::coop_edit::edit_vslot(map, &packet);
         }
-        if let Some(base) = state.base_map.as_mut() {
+        if let Some(base) = state.base_map_mut() {
             sauer_kit::coop_edit::edit_vslot(base, &packet);
         }
         server.broadcast(&Client {
