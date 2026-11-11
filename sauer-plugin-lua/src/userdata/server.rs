@@ -1,8 +1,10 @@
 use crate::extra::LuaExtraRegistry;
 use crate::userdata::task_handle::TaskHandle;
+use cube_string::CubeString;
 use mlua::{
     FromLua, IntoLua, Lua, RegistryKey, Table, UserData, UserDataFields, UserDataMethods, Value,
 };
+use sauer_proto::data::{Cn, MasterMode, Privilege, SetTeamReason};
 use sauer_proto::{
     channel1,
     server_query::{ExtInfoResponse, PlayerStats, PlayerStatsBody, ScoreData, ServerQueryResponse},
@@ -73,9 +75,98 @@ impl UserData for LuaServer {
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        /// Disconnect a client by peer ID.
-        methods.add_method("disconnect", |_lua, this, id: u64| {
-            this.inner.disconnect(id);
+        /// Disconnect a client by peer ID, optionally with an engine `DISC_*` reason number.
+        methods.add_method(
+            "disconnect",
+            |_lua, this, (id, reason): (u64, Option<u32>)| {
+                this.inner.disconnect_with(id, reason.unwrap_or(0));
+                Ok(())
+            },
+        );
+
+        /// The peer ID of the client using a cn, or nil.
+        methods.add_method("get_id", |_lua, this, cn: Cn| Ok(this.inner.get_id(cn)));
+
+        /// Peer IDs of every connected client.
+        methods.add_method("client_ids", |_lua, this, ()| Ok(this.inner.client_ids()));
+
+        /// A table about a player (`name`, `team`, `model`, `privilege`, `state`,
+        /// `frags`, `deaths`, `flags`, `ping`), or nil.
+        methods.add_method("player", |lua, this, id: u64| {
+            let Some(p) = this.inner.players.with(id, |p| p.clone()) else {
+                return Ok(Value::Nil);
+            };
+            let t = lua.create_table()?;
+            t.set("name", p.name)?;
+            t.set("team", p.team)?;
+            t.set("model", p.model)?;
+            t.set("privilege", p.privilege)?;
+            t.set("state", p.status.client_state())?;
+            t.set("frags", p.frags)?;
+            t.set("deaths", p.deaths)?;
+            t.set("flags", p.flags)?;
+            t.set("ping", p.ping)?;
+            Ok(Value::Table(t))
+        });
+
+        /// The current map name.
+        methods.add_method("map_name", |_lua, this, ()| {
+            Ok(this.inner.game.read().map_name.clone())
+        });
+
+        /// The current game mode.
+        methods.add_method("game_mode", |_lua, this, ()| {
+            Ok(this.inner.game.read().mode)
+        });
+
+        /// The current master mode.
+        methods.add_method("master_mode", |_lua, this, ()| Ok(this.inner.master_mode()));
+
+        /// Sets the master mode and tells everyone.
+        methods.add_method("set_master_mode", |_lua, this, mode: MasterMode| {
+            this.inner.set_master_mode(mode);
+            Ok(())
+        });
+
+        /// Renames a player and tells everyone.
+        methods.add_method("set_name", |_lua, this, (id, name): (u64, CubeString)| {
+            this.inner.set_name(id, name);
+            Ok(())
+        });
+
+        /// Moves a player to a team and tells everyone.
+        methods.add_method("set_team", |_lua, this, (id, team): (u64, CubeString)| {
+            this.inner.set_team(id, team, SetTeamReason::Forced);
+            Ok(())
+        });
+
+        /// Makes a player spectate (true) or play (false).
+        methods.add_method(
+            "set_spectator",
+            |_lua, this, (id, spectate): (u64, bool)| {
+                this.inner.set_spectator(id, spectate);
+                Ok(())
+            },
+        );
+
+        /// Gives a player a privilege (`"None"`, `"Master"`, `"Auth"`, `"Admin"`).
+        methods.add_method(
+            "set_privilege",
+            |_lua, this, (id, privilege): (u64, Privilege)| {
+                this.inner.set_privilege(id, privilege);
+                Ok(())
+            },
+        );
+
+        /// Kills a living player as a suicide (no `on_player_died`). Returns whether they were alive.
+        methods.add_method("kill", |_lua, this, id: u64| Ok(this.inner.kill_player(id)));
+
+        /// Kicks a player and bans their IP for 4 hours, like `/kick`.
+        methods.add_method("ban", |_lua, this, id: u64| {
+            if let Some(addr) = this.inner.peer_addr(id) {
+                this.inner.ban_ip(addr.ip());
+                this.inner.disconnect_with(id, sauer_server::DISC_KICK);
+            }
             Ok(())
         });
 

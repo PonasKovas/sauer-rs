@@ -28,6 +28,7 @@ pub mod ui;
 pub mod utils;
 mod welcome;
 
+pub use bans::{DISC_IPBAN, DISC_KICK};
 pub use builder::ServerBuilder;
 pub use game::{Config, Game};
 pub use items::{

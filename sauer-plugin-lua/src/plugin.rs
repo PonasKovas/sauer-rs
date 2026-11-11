@@ -2,7 +2,12 @@ use crate::{
     LuaPlugin,
     callbacks::LuaCallback,
     extra::LuaExtraRegistry,
-    userdata::{event::EventUD, server::LuaServer, spawn_state::SpawnStateUD},
+    userdata::{
+        event::EventUD,
+        hook_value::{ChatUD, DamageUD},
+        server::LuaServer,
+        spawn_state::SpawnStateUD,
+    },
 };
 use bytes::Bytes;
 use cube_string::CubeString;
@@ -132,16 +137,41 @@ impl Plugin for LuaPlugin {
     }
 
     async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
-        let text_lua = match self.lua.create_string(text.as_bytes()) {
-            Ok(s) => s,
-            Err(e) => {
-                error!(target: "lua", "{e}");
-                return Flow::Continue;
-            }
+        let Ok(ud) = self.lua.create_userdata(ChatUD { text: text.clone() }) else {
+            return Flow::Continue;
         };
-        self.dispatch(&self.callbacks.on_chat, |_| {
-            (ctx.id(), text_lua.clone()).into_lua_multi(&self.lua)
-        })
+        let flow = self.dispatch(&self.callbacks.on_chat, |_| {
+            (ctx.id(), ud.clone()).into_lua_multi(&self.lua)
+        });
+        if let Ok(changed) = ud.borrow::<ChatUD>() {
+            *text = changed.text.clone();
+        }
+        flow
+    }
+
+    async fn on_damage(
+        &self,
+        _ctx: &mut Context,
+        target_id: u64,
+        actor_id: u64,
+        damage: &mut i32,
+    ) -> Flow {
+        let Ok(ud) = self.lua.create_userdata(DamageUD { amount: *damage }) else {
+            return Flow::Continue;
+        };
+        let flow = self.dispatch(&self.callbacks.on_damage, |_| {
+            (target_id, actor_id, ud.clone()).into_lua_multi(&self.lua)
+        });
+        if let Ok(changed) = ud.borrow::<DamageUD>() {
+            *damage = changed.amount;
+        }
+        flow
+    }
+
+    async fn on_player_died(&self, _ctx: &mut Context, victim_id: u64, actor_id: u64) {
+        self.notify(&self.callbacks.on_player_died, || {
+            (victim_id, actor_id).into_lua_multi(&self.lua)
+        });
     }
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) -> Flow {

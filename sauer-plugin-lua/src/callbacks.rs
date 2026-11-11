@@ -45,6 +45,8 @@ sauer_server::for_each_packet_hook!(
     on_spawn,
     on_chat,
     on_command,
+    on_damage,
+    on_player_died,
     map,
     server_query
 );
