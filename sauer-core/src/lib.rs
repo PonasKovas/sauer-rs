@@ -207,7 +207,9 @@ const _: () = {
     impl FromLua for EntityType {
         fn from_lua(value: Value, lua: &mlua::Lua) -> mlua::Result<Self> {
             if let Value::Integer(i) = value {
-                return Ok(EntityType::GameSpecific(i as i32));
+                // `from` maps known numbers to their named variant.
+                let i = i32::try_from(i).map_err(mlua::Error::external)?;
+                return Ok(EntityType::from(i));
             }
             let s = String::from_lua(value, lua)?;
             match s.as_str() {
@@ -590,7 +592,7 @@ const _: () = {
 };
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFromPrimitive, IntoPrimitive,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromPrimitive, IntoPrimitive,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(i32)]

@@ -1,3 +1,4 @@
+use crate::error::EnumConvertResultExt;
 use crate::internal::{
     constants::{DMF, DNF},
     macros::{make_enum, make_struct},
@@ -37,7 +38,7 @@ impl crate::internal::SauerWrite for Orient {
 }
 impl crate::internal::SauerRead for Orient {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
-        Ok(Orient::try_from(i32::sauer_read(reader)?).unwrap_or(Orient::Left))
+        Orient::try_from(i32::sauer_read(reader)?).in_enum("Orient")
     }
 }
 impl crate::internal::SauerWrite for EntityType {
@@ -47,7 +48,8 @@ impl crate::internal::SauerWrite for EntityType {
 }
 impl crate::internal::SauerRead for EntityType {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
-        Ok(EntityType::try_from(i32::sauer_read(reader)?).unwrap_or(EntityType::Empty))
+        // Unknown types land in `GameSpecific`.
+        Ok(EntityType::from(i32::sauer_read(reader)?))
     }
 }
 impl crate::internal::SauerWrite for ItemType {
@@ -57,7 +59,21 @@ impl crate::internal::SauerWrite for ItemType {
 }
 impl crate::internal::SauerRead for ItemType {
     fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
-        Ok(ItemType::try_from(i32::sauer_read(reader)?).unwrap_or(ItemType::Shells))
+        ItemType::try_from(i32::sauer_read(reader)?).in_enum("ItemType")
+    }
+}
+/// A base's ammo type: 0 means it holds none.
+impl crate::internal::SauerWrite for Option<ItemType> {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        self.map_or(0, |t| t as i32).sauer_write(out);
+    }
+}
+impl crate::internal::SauerRead for Option<ItemType> {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, crate::ParseError> {
+        match i32::sauer_read(reader)? {
+            0 => Ok(None),
+            v => ItemType::try_from(v).in_enum("ItemType").map(Some),
+        }
     }
 }
 

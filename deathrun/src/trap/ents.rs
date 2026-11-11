@@ -31,7 +31,7 @@ impl EntRec {
         Entity {
             position: self.pos,
             attrs: self.attrs,
-            ent_type: EntityType::try_from(self.ty as i32).unwrap_or(EntityType::Empty),
+            ent_type: EntityType::from(i32::from(self.ty)),
             extra_data: Vec::new(),
         }
     }

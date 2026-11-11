@@ -383,7 +383,7 @@ fn read_entity(reader: &mut &[u8]) -> Result<Entity, ParseError> {
     Ok(Entity {
         position,
         attrs,
-        ent_type: EntityType::try_from(ent_type as i32).unwrap_or(EntityType::Empty),
+        ent_type: EntityType::from(i32::from(ent_type)),
         extra_data: Vec::new(),
     })
 }

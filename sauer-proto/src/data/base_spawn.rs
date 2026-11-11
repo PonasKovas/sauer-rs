@@ -1,4 +1,8 @@
-use crate::data::{ItemType, Vec3};
+use crate::{
+    ParseError,
+    data::{ItemType, Vec3, vec3},
+    internal::{SauerRead, SauerWrite, constants::DMF},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -6,6 +10,22 @@ pub struct BaseSpawn {
     /// The ammo type stored at this base, or `None` if the base holds no ammo.
     pub ammotype: Option<ItemType>,
     pub pos: Vec3<f32>,
+}
+
+impl SauerWrite for BaseSpawn {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        self.ammotype.sauer_write(out);
+        vec3::write_quantized::<DMF>(&self.pos, out);
+    }
+}
+
+impl SauerRead for BaseSpawn {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+        Ok(Self {
+            ammotype: Option::<ItemType>::sauer_read(reader)?,
+            pos: vec3::read_quantized::<DMF>(reader)?,
+        })
+    }
 }
 
 #[cfg(feature = "lua")]

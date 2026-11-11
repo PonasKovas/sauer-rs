@@ -1410,8 +1410,7 @@ impl SauerWrite for BasesClient {
         N_BASES.sauer_write(out);
         (self.bases.len() as i32).sauer_write(out);
         for b in &self.bases {
-            b.ammotype.map_or(0, |t| t as i32).sauer_write(out);
-            data::vec3::write_quantized::<DMF>(&b.pos, out);
+            b.sauer_write(out);
         }
     }
 }
@@ -1428,21 +1427,7 @@ impl SauerRead for BasesClient {
             }
             let mut bases = Vec::with_capacity(num_bases as usize);
             for _ in 0..num_bases {
-                let ammotype_val = i32::sauer_read(reader)?;
-                let ammotype = if ammotype_val == 0 {
-                    None
-                } else {
-                    Some(ItemType::try_from(ammotype_val).map_err(|_| {
-                        crate::ParseError::InvalidEnumValue {
-                            value: ammotype_val,
-                            enum_name: "ItemType",
-                        }
-                    })?)
-                };
-                bases.push(BaseSpawn {
-                    ammotype,
-                    pos: data::vec3::read_quantized::<DMF>(reader)?,
-                });
+                bases.push(BaseSpawn::sauer_read(reader)?);
             }
             Ok(BasesClient { bases })
         }
