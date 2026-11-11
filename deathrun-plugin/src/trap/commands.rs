@@ -1,4 +1,6 @@
+use super::place::Kind;
 use super::{Trap, TrapEditState, TrapGeom, TrapId, TrapMode, TrapPhase, persist};
+use crate::aim::Aim;
 use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
@@ -435,4 +437,111 @@ fn end_edit(
     server.broadcast(&ServMsg {
         text: text.lossy_cubestring(),
     });
+}
+
+/// The trap commands players type in the edit server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Command {
+    New,
+    Move,
+    Edit,
+    Del,
+    Clear,
+    Info,
+    Time,
+    Timeout,
+}
+
+impl Command {
+    pub const ALL: [Command; 8] = [
+        Command::New,
+        Command::Move,
+        Command::Edit,
+        Command::Del,
+        Command::Clear,
+        Command::Info,
+        Command::Time,
+        Command::Timeout,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Command::New => "#tnew",
+            Command::Move => "#tmove",
+            Command::Edit => "#tedit",
+            Command::Clear => "#tclear",
+            Command::Del => "#tdel",
+            Command::Info => "#tinfo",
+            Command::Time => "#ttime",
+            Command::Timeout => "#ttimeout",
+        }
+    }
+
+    pub fn usage(self) -> &'static str {
+        match self {
+            Command::Time | Command::Timeout => "<ms>",
+            _ => "",
+        }
+    }
+
+    pub fn desc(self) -> &'static str {
+        match self {
+            Command::New => "place a new trap button; type again to put it down",
+            Command::Move => "move the aimed trap button; type again to put it down",
+            Command::Edit => "edit the aimed trap; type again to save and finish",
+            Command::Clear => "remove what the aimed trap does, keep its button",
+            Command::Del => "remove the aimed trap",
+            Command::Info => "print info about the aimed trap (size, overhead)",
+            Command::Time => "extend duration (default 2 000ms)",
+            Command::Timeout => "set trap timeout (default 20 000ms)",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.name() == name)
+    }
+
+    pub fn register_all(server: &mut Server) {
+        for c in Self::ALL {
+            server.register_command(c.name(), c.desc(), c.usage());
+        }
+    }
+}
+
+/// Runs a trap command `id` typed while aiming along `aim`.
+pub fn run(ctx: &Context, cmd: Command, args: &[cube_string::CubeString], aim: Aim) {
+    let server = ctx.server();
+    match cmd {
+        Command::New => return super::place::command(server, ctx.id(), Kind::New, aim),
+        Command::Move => return super::place::command(server, ctx.id(), Kind::Move, aim),
+        _ => {}
+    }
+    let hit_pt = {
+        let state = get_server_state(server).read();
+        let Some(map) = state.map.as_ref() else {
+            return;
+        };
+        aim.hit(map).map(|hit| aim.at(hit.dist))
+    };
+    // Finishing an edit works wherever the player aims.
+    if cmd == Command::Edit {
+        return cmd_edittrap(ctx, hit_pt);
+    }
+    let Some(hit_pt) = hit_pt else {
+        return;
+    };
+    let ms = args
+        .get(1)
+        .and_then(|s| s.as_str())
+        .and_then(|s| s.parse::<u32>().ok());
+    match (cmd, ms) {
+        (Command::Del, _) => cmd_deltrap(ctx, hit_pt),
+        (Command::Clear, _) => cmd_cleartrap(ctx, hit_pt),
+        (Command::Info, _) => cmd_trapinfo(ctx, hit_pt),
+        (Command::Time, Some(t)) => cmd_traptime(ctx, hit_pt, t),
+        (Command::Time, None) => cmd_traptime_print(ctx, hit_pt),
+        (Command::Timeout, Some(t)) => cmd_traptimeout(ctx, hit_pt, t),
+        (Command::Timeout, None) => cmd_traptimeout_print(ctx, hit_pt),
+        (Command::New | Command::Move | Command::Edit, _) => {}
+    }
 }

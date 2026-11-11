@@ -3,7 +3,7 @@ use crate::map_state::{
     DeathrunState, get_server_state, is_waiting_for_map, update_server_items, with_map_state_mut,
 };
 use crate::trap::frame;
-use crate::trap::{cmd_deltrap, guard, place::Kind};
+use crate::trap::{commands::Command, guard};
 use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
@@ -162,30 +162,7 @@ impl Plugin for DeathrunEdit {
             .extra
             .insert(crate::trap::placement::SeeThrough::default());
 
-        server.register_command(
-            "#tnew",
-            "place a new trap button (type again to put it down)",
-            "",
-        );
-        server.register_command(
-            "#tmove",
-            "move the aimed trap button (type again to put it down)",
-            "",
-        );
-        server.register_command("#tdel", "remove the trap at the aimed surface", "");
-        server.register_command(
-            "#tclear",
-            "remove what the aimed trap does, keep its button",
-            "",
-        );
-        server.register_command(
-            "#tedit",
-            "edit the aimed trap; type again to save and finish",
-            "",
-        );
-        server.register_command("#tinfo", "print info about the trap (size, overhead)", "");
-        server.register_command("#ttime", "extend duration (default 2 000ms)", "<ms>");
-        server.register_command("#ttimeout", "set trap timeout (default 20 000ms)", "<ms>");
+        Command::register_all(server);
 
         // Matches how play.rs reads the map: playerstart attr 2 is the team,
         // and good players finish by touching any flag.
@@ -274,24 +251,12 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) -> Flow {
-        const TRAP_COMMANDS: [&str; 8] = [
-            "#tnew",
-            "#tmove",
-            "#tdel",
-            "#tclear",
-            "#tedit",
-            "#tinfo",
-            "#ttime",
-            "#ttimeout",
-        ];
-        let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
-        if !TRAP_COMMANDS.contains(&cmd) {
+        let name = args.first().and_then(|s| s.as_str()).unwrap_or("");
+        let Some(cmd) = Command::parse(name) else {
             return Flow::Continue;
-        }
-
+        };
         let id = ctx.id();
-        let server = ctx.server().clone();
-
+        let server = ctx.server();
         let Some((spectating, pos)) = server
             .players
             .with(id, |p| (p.status == Status::Spectator, p.position))
@@ -299,69 +264,13 @@ impl Plugin for DeathrunEdit {
             return Flow::Continue;
         };
         if spectating {
-            ui::send_warn(&server, id, "Cannot use trap commands while spectating.");
+            ui::send_warn(server, id, "Cannot use trap commands while spectating.");
             return Flow::Continue;
         }
-
         let Some(dir) = self.player_dirs.get(&id).map(|d| *d) else {
             return Flow::Continue;
         };
-        let aim = Aim::new(pos, dir);
-
-        match cmd {
-            "#tnew" => {
-                crate::trap::place::command(&server, id, Kind::New, aim);
-                return Flow::Continue;
-            }
-            "#tmove" => {
-                crate::trap::place::command(&server, id, Kind::Move, aim);
-                return Flow::Continue;
-            }
-            _ => {}
-        }
-
-        let hit_pt = {
-            let state = get_server_state(&server).read();
-            let Some(map) = state.map.as_ref() else {
-                return Flow::Continue;
-            };
-            aim.hit(map).map(|hit| aim.at(hit.dist))
-        };
-
-        // Finishing an edit works wherever the player aims.
-        if cmd == "#tedit" {
-            crate::trap::cmd_edittrap(ctx, hit_pt);
-            return Flow::Continue;
-        }
-        let Some(hit_pt) = hit_pt else {
-            return Flow::Continue;
-        };
-
-        if cmd == "#tdel" {
-            cmd_deltrap(ctx, hit_pt);
-        } else if cmd == "#tclear" {
-            crate::trap::cmd_cleartrap(ctx, hit_pt);
-        } else if cmd == "#tinfo" {
-            crate::trap::cmd_trapinfo(ctx, hit_pt);
-        } else if cmd == "#ttime" {
-            let time = args
-                .get(1)
-                .and_then(|s| s.as_str())
-                .and_then(|s| s.parse::<u32>().ok());
-            match time {
-                Some(t) => crate::trap::cmd_traptime(ctx, hit_pt, t),
-                None => crate::trap::cmd_traptime_print(ctx, hit_pt),
-            }
-        } else if cmd == "#ttimeout" {
-            let timeout = args
-                .get(1)
-                .and_then(|s| s.as_str())
-                .and_then(|s| s.parse::<u32>().ok());
-            match timeout {
-                Some(t) => crate::trap::cmd_traptimeout(ctx, hit_pt, t),
-                None => crate::trap::cmd_traptimeout_print(ctx, hit_pt),
-            }
-        }
+        crate::trap::commands::run(ctx, cmd, args, Aim::new(pos, dir));
         Flow::Continue
     }
 

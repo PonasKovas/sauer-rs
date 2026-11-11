@@ -159,24 +159,23 @@ pub fn send_welcome_edit(server: &Server, id: u64) {
             .build(),
         section("Trap commands  (aim at a wall first)"),
         tip("#help", "list all server commands"),
-        tip("#ttimeout <ms>", "set trap timeout (default 20 000ms)"),
-        tip("#ttime <ms>", "extend duration  (default 2 000ms)"),
-        tip("#tinfo", "print info about the trap (size, overhead)"),
-        tip("#tclear", "remove what the trap does, keep its button"),
-        tip("#tdel", "remove the trap at the aimed surface"),
-        tip("#tedit", "edit the trap; type again to save and finish"),
-        tip("#tmove", "move the button; type again to put it down"),
-        tip(
-            "#tnew",
-            "place a new trap button; type again to put it down",
-        ),
+    ];
+    // Newest at the bottom, so the first command shows last.
+    for c in crate::trap::commands::Command::ALL.into_iter().rev() {
+        let usage = match c.usage() {
+            "" => c.name().to_string(),
+            u => format!("{} {u}", c.name()),
+        };
+        lines.push(tip(&usage, c.desc()));
+    }
+    lines.extend([
         section("Getting started"),
         body("  Just start editing, or"),
         tip(
             "/map",
             "select local map to start editing (/sendmap afterwards to start editing)",
         ),
-    ];
+    ]);
     lines.extend(server_notes(server));
     lines.push(body("  Build and test Deathrun maps here."));
     lines.push(header("DEATHRUN EDIT SERVER"));
