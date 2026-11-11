@@ -67,15 +67,8 @@ pub struct PlayMaps {
     pub spawned_this_round: HashSet<u64>,
     pub round_start_time: Option<Instant>,
     pub finished_players: Vec<(u64, Duration)>,
-    /// Last recorded position per connected player.
-    afk_last_pos: HashMap<u64, [f32; 3]>,
-    /// Time of the last significant movement per player.
-    afk_last_move: HashMap<u64, Instant>,
-    /// Players who have already received the AFK warning sound.
-    afk_warned: HashSet<u64>,
-    /// Players spectated for being AFK who haven't moved since. They are not
-    /// picked as terrorist: they would likely waste the whole round.
-    afk_spectated: HashSet<u64>,
+    /// Its own lock: every position packet updates it.
+    pub afk: parking_lot::Mutex<Afk>,
 }
 
 impl Default for PlayMaps {
@@ -92,16 +85,15 @@ impl Default for PlayMaps {
             spawned_this_round: HashSet::new(),
             round_start_time: None,
             finished_players: Vec::new(),
-            afk_last_pos: HashMap::new(),
-            afk_last_move: HashMap::new(),
-            afk_warned: HashSet::new(),
-            afk_spectated: HashSet::new(),
+            afk: Default::default(),
         }
     }
 }
 
-impl PlayMaps {
-    pub fn add_map(&mut self, name: String, data: &[u8]) -> Result<(), String> {
+impl LoadedMap {
+    /// Loads a map file with its traps. Slow for big maps: call it without
+    /// holding the `PlayMaps` lock, then [`PlayMaps::insert`] the result.
+    pub fn parse(name: &str, data: &[u8]) -> Result<Self, String> {
         let mut state = Map::from_bytes(data).map_err(|e| e.to_string())?;
         state.strip_virtual_entities();
 
@@ -124,7 +116,13 @@ impl PlayMaps {
             let (min, max) = trap.button_box();
             state.protect_region(min, max);
         }
+        Ok(Self { state, traps })
+    }
+}
 
+impl PlayMaps {
+    /// Adds a map to the rotation, or replaces the one with that name.
+    pub fn insert(&mut self, name: String, map: LoadedMap) {
         if !self.rotation.contains(&name) {
             self.rotation.push(name.clone());
         }
@@ -133,8 +131,7 @@ impl PlayMaps {
             self.current_map = Some(self.rotation[0].clone());
         }
 
-        self.maps.insert(name, LoadedMap { state, traps });
-        Ok(())
+        self.maps.insert(name, map);
     }
 
     pub fn remove_map(&mut self, name: &str) {
@@ -164,25 +161,41 @@ impl PlayMaps {
         }
         (None, ds)
     }
+}
 
-    pub fn update_afk_pos(&mut self, id: u64, pos: [f32; 3]) {
-        let moved = self.afk_last_pos.get(&id).map_or(true, |last| {
+/// Who is moving, for spectating players who stand still too long.
+#[derive(Default)]
+pub struct Afk {
+    /// Last recorded position per connected player.
+    last_pos: HashMap<u64, [f32; 3]>,
+    /// Time of the last significant movement per player.
+    last_move: HashMap<u64, Instant>,
+    /// Players who have already received the AFK warning sound.
+    warned: HashSet<u64>,
+    /// Players spectated for being AFK who haven't moved since. They are not
+    /// picked as terrorist: they would likely waste the whole round.
+    spectated: HashSet<u64>,
+}
+
+impl Afk {
+    pub fn update_pos(&mut self, id: u64, pos: [f32; 3]) {
+        let moved = self.last_pos.get(&id).map_or(true, |last| {
             let d = [pos[0] - last[0], pos[1] - last[1], pos[2] - last[2]];
             d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 0.25 // 0.5 unit threshold
         });
-        self.afk_last_pos.insert(id, pos);
+        self.last_pos.insert(id, pos);
         if moved {
-            self.afk_last_move.insert(id, Instant::now());
-            self.afk_warned.remove(&id);
-            self.afk_spectated.remove(&id);
+            self.last_move.insert(id, Instant::now());
+            self.warned.remove(&id);
+            self.spectated.remove(&id);
         }
     }
 
-    pub fn remove_player_afk(&mut self, id: u64) {
-        self.afk_last_pos.remove(&id);
-        self.afk_last_move.remove(&id);
-        self.afk_warned.remove(&id);
-        self.afk_spectated.remove(&id);
+    pub fn remove(&mut self, id: u64) {
+        self.last_pos.remove(&id);
+        self.last_move.remove(&id);
+        self.warned.remove(&id);
+        self.spectated.remove(&id);
     }
 }
 
@@ -214,7 +227,9 @@ impl DeathrunPlay {
     }
 
     pub fn add_map(&self, name: String, data: &[u8]) -> Result<(), String> {
-        self.maps.write().add_map(name, data)
+        let map = LoadedMap::parse(&name, data)?;
+        self.maps.write().insert(name, map);
+        Ok(())
     }
 
     pub fn remove_map(&self, name: &str) {
@@ -223,8 +238,8 @@ impl DeathrunPlay {
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
+    let mut lock = maps.write();
     let (map, my_epoch, initial_participants) = {
-        let mut lock = maps.write();
         if lock.rotation.is_empty() {
             return;
         }
@@ -250,16 +265,18 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         lock.current_map = Some(next_map);
 
         let (_, new_state) = lock.make_active_state();
+        let Some(map) = new_state.map.clone() else {
+            lock.round_state = RoundState::NotStarted;
+            return;
+        };
         *get_server_state(&server).write() = new_state;
-
-        let state_lock = get_server_state(&server);
-        let state_read = state_lock.read();
-        let map = state_read.map.as_ref().unwrap();
-        (map.clone(), epoch, server.client_ids())
+        (map, epoch, server.client_ids())
     };
 
+    // Spawned and stored under the same lock, so a round started meanwhile
+    // can't have its handle overwritten by this older one.
     let maps_clone = Arc::clone(&maps);
-    let handle = tokio::spawn(async move {
+    lock.round_task = Some(tokio::spawn(async move {
         let ids = initial_participants;
         if ids.is_empty() {
             let mut lock = maps_clone.write();
@@ -272,7 +289,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
         let evil_id = if ids.len() > 1 {
             // Skip players who were spectated for being AFK, unless that's everyone.
-            let afk = maps_clone.read().afk_spectated.clone();
+            let afk = maps_clone.read().afk.lock().spectated.clone();
             let active: Vec<u64> = ids.iter().copied().filter(|id| !afk.contains(id)).collect();
             let pool = if active.is_empty() { &ids } else { &active };
             Some(*pool.choose(&mut rand::thread_rng()).unwrap())
@@ -412,9 +429,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         if lock.round_epoch == my_epoch {
             lock.round_task = None;
         }
-    });
-
-    maps.write().round_task = Some(handle);
+    }));
 }
 
 fn check_win_conditions(
@@ -582,6 +597,7 @@ fn declare_win(
     top_times: &[(String, f32)],
 ) {
     lock.round_state = RoundState::Ended;
+    let epoch = lock.round_epoch;
     ui::broadcast_round_over(server, winner_text, top_times);
 
     for id in server.client_ids() {
@@ -600,7 +616,10 @@ fn declare_win(
     let m = Arc::clone(maps);
     tokio::spawn(async move {
         sleep(Duration::from_secs(3)).await;
-        start_round_sequence(s, m, None);
+        // Unless someone started another round meanwhile.
+        if m.read().round_epoch == epoch {
+            start_round_sequence(s, m, None);
+        }
     });
 }
 
@@ -687,7 +706,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
     let mut to_spectate = Vec::new();
     let mut to_warn = Vec::new();
     {
-        let mut lock = maps.write();
+        let lock = maps.read();
         if lock.round_state != RoundState::Playing {
             return;
         }
@@ -695,6 +714,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
         if ids.len() <= 1 {
             return;
         }
+        let mut afk = lock.afk.lock();
         for id in ids {
             if !server
                 .players
@@ -703,14 +723,14 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
             {
                 continue;
             }
-            if let Some(&t) = lock.afk_last_move.get(&id) {
+            if let Some(&t) = afk.last_move.get(&id) {
                 let elapsed = now.duration_since(t);
                 if elapsed >= timeout {
                     to_spectate.push(id);
-                    lock.afk_warned.remove(&id);
-                } else if elapsed >= warn_timeout && !lock.afk_warned.contains(&id) {
+                    afk.warned.remove(&id);
+                } else if elapsed >= warn_timeout && !afk.warned.contains(&id) {
                     to_warn.push(id);
-                    lock.afk_warned.insert(id);
+                    afk.warned.insert(id);
                 }
             }
         }
@@ -738,7 +758,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
             ui::warn_msg(&format!("{name} was spectated for being AFK.")),
         );
         server.set_spectator(*id, true);
-        maps.write().afk_spectated.insert(*id);
+        maps.read().afk.lock().spectated.insert(*id);
     }
 
     if !to_spectate.is_empty() {
@@ -838,9 +858,9 @@ impl Plugin for DeathrunPlay {
     async fn pos(&self, ctx: &mut Context, packet: &channel0::Position) -> Flow {
         let id = ctx.id();
         let server = ctx.server();
-        let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
-        maps.write()
-            .update_afk_pos(id, [packet.pos.x, packet.pos.y, packet.pos.z]);
+        let maps = &self.maps;
+        let pos = [packet.pos.x, packet.pos.y, packet.pos.z];
+        maps.read().afk.lock().update_pos(id, pos);
 
         let (is_playing, is_good, not_finished, round_start, is_evil) = {
             let lock = maps.read();
@@ -1316,7 +1336,7 @@ impl Plugin for DeathrunPlay {
         let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
-        maps.write().remove_player_afk(id);
+        maps.read().afk.lock().remove(id);
         if let Some(known) = server.extra.get::<crate::recreate::KnownVars>() {
             known.forget(id);
         }

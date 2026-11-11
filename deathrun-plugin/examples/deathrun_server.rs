@@ -233,8 +233,9 @@ async fn sync_map_dir(
 
                         if needs_update {
                             match fs::read(&path).await {
-                                Ok(data) => match maps.write().add_map(name_str.clone(), &data) {
-                                    Ok(()) => {
+                                Ok(data) => match parse_map(name_str.clone(), data).await {
+                                    Ok(map) => {
+                                        maps.write().insert(name_str.clone(), map);
                                         info!("Map dir: loaded/updated '{name_str}'");
                                         known_files.insert(name_str, modified);
                                     }
@@ -334,4 +335,14 @@ async fn main() {
             }
         }
     }
+}
+
+/// Parses a map on a blocking thread, away from the `PlayMaps` lock.
+async fn parse_map(
+    name: String,
+    data: Vec<u8>,
+) -> Result<deathrun_plugin::play::LoadedMap, String> {
+    tokio::task::spawn_blocking(move || deathrun_plugin::play::LoadedMap::parse(&name, &data))
+        .await
+        .map_err(|e| e.to_string())?
 }
