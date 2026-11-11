@@ -1,6 +1,7 @@
 mod edit;
 mod geom;
 pub mod map;
+pub mod merges;
 pub mod octree;
 pub mod virt_ents;
 

@@ -39,6 +39,10 @@ pub struct Map {
     pub config: MapConfig,
 
     pub virt_state: crate::virt_ents::VirtEntState,
+
+    /// Face merges from the loaded file, written back where the geometry
+    /// hasn't changed since.
+    pub merges: Option<std::sync::Arc<crate::merges::Merges>>,
 }
 
 impl Map {
@@ -88,6 +92,7 @@ impl Map {
             config: MapConfig::Modern { variables: vec![] },
             protected_regions: vec![],
             virt_state: Default::default(),
+            merges: None,
         }
     }
 
@@ -99,9 +104,12 @@ impl Map {
             _ => vec![],
         };
 
+        let root = crate::octree::build_node(&ogz.octree);
+        let merges = crate::merges::Merges::collect(&ogz.octree, &root, ogz.world_size)
+            .map(std::sync::Arc::new);
         let mut map = Map {
             size: ogz.world_size,
-            root: crate::octree::build_node(&ogz.octree),
+            root,
             vslots: ogz.vslots,
             entities: ogz.entities,
             vars,
@@ -117,6 +125,7 @@ impl Map {
             config: ogz.config,
             protected_regions: vec![],
             virt_state: Default::default(),
+            merges,
         };
 
         map.compact_vslots();
@@ -151,7 +160,15 @@ impl Map {
             mru_textures: self.mru_textures.clone(),
             entities: self.entities.clone(),
             vslots: compacted_vslots,
-            octree: crate::octree::node_to_ogz(&self.root),
+            octree: match &self.merges {
+                Some(m) => crate::octree::node_to_ogz_with(
+                    &self.root,
+                    [0; 3],
+                    self.size,
+                    &m.kept(&self.root, self.size),
+                ),
+                None => crate::octree::node_to_ogz(&self.root),
+            },
             lightmaps: self.lightmaps.clone(),
             pvs: self.pvs.clone(),
             blendmap_resolution: self.blendmap_resolution,
