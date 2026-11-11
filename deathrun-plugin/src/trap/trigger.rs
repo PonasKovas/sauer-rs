@@ -53,7 +53,7 @@ pub fn recompose_traps(server: &std::sync::Arc<Server>) {
                 orient,
                 BUTTON_COLOR_ACTIVE,
             ) {
-                new_map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
+                new_map.apply_vslot_edit(&pkt);
             }
         }
     }
@@ -498,20 +498,10 @@ pub fn set_button_color(
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
         if let Some(map) = state.map.as_mut() {
-            map.apply_vslots(
-                &packet.sel,
-                packet.all_faces,
-                packet.delta != 0,
-                &packet.extra_data,
-            );
+            map.apply_vslot_edit(&packet);
         }
         if let Some(base) = state.base_map.as_mut() {
-            base.apply_vslots(
-                &packet.sel,
-                packet.all_faces,
-                packet.delta != 0,
-                &packet.extra_data,
-            );
+            base.apply_vslot_edit(&packet);
         }
         server.broadcast_chan1(&Client {
             client_num: actor_cn,

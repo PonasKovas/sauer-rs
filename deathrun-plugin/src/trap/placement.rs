@@ -148,16 +148,16 @@ pub fn get_outer_faces_vslot_packets(
 
     let mut packets = Vec::new();
     for sel in get_outer_face_selections(adj, size, orient) {
-        let extra_data = if sel.orient == proto_orient {
+        let vslot = if sel.orient == proto_orient {
             data_front.clone()
         } else {
             data_sides.clone()
         };
         packets.push(sauer_proto::channel1::EditVSlot {
             sel,
-            delta: 0,
+            delta: false,
             all_faces: false,
-            extra_data,
+            vslot,
         });
     }
     packets
@@ -234,7 +234,7 @@ pub fn build_button(
     map.set_material(&sel, mat);
 
     for pkt in get_outer_faces_vslot_packets(adj, size, orient, color) {
-        map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
+        map.apply_vslot_edit(&pkt);
     }
 }
 
@@ -341,7 +341,7 @@ pub fn update_seethrough_button(server: &sauer_server::Server, id: u64, target: 
 pub fn reset_button_colors_by_pos(map: &mut sauer_map::Map, buttons: &[([i32; 3], i32, u8)]) {
     for &(pos, size, orient) in buttons {
         for pkt in get_outer_faces_vslot_packets(pos, size, orient, BUTTON_COLOR_READY) {
-            map.apply_vslots(&pkt.sel, pkt.all_faces, pkt.delta != 0, &pkt.extra_data);
+            map.apply_vslot_edit(&pkt);
         }
     }
 }

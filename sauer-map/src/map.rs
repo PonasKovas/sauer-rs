@@ -445,12 +445,10 @@ impl Map {
         if self.is_protected(min, max) {
             return false;
         }
-        let extra = &mut &packet.extra_data[..];
-        // Malformed data: the client ignores the edit too.
-        if let Some(tex) = crate::vslot::unpack_tex(&mut self.vslots, packet.tex, extra, true) {
-            self.set_texture(&packet.sel, tex, packet.all_faces);
-            self.invalidate_cache();
-        }
+        let tex = crate::vslot::resolve_tex(&mut self.vslots, &packet.tex, true)
+            .expect("inserting lookup always succeeds");
+        self.set_texture(&packet.sel, tex, packet.all_faces);
+        self.invalidate_cache();
         true
     }
 
@@ -549,7 +547,7 @@ impl Map {
     /// Replaces all instances of a texture with another, optionally within a selection.
     /// Returns `false` if the edit was rejected because it intersected a protected region.
     pub fn apply_replace(&mut self, packet: &channel1::Replace) -> bool {
-        if packet.in_sel != 0 {
+        if packet.in_sel {
             let (min, max) = packet.sel.bounds();
             if self.is_protected(min, max) {
                 return false;
@@ -557,23 +555,15 @@ impl Map {
         } else if !self.protected_regions.is_empty() {
             return false;
         }
-        let sel = if packet.in_sel != 0 {
-            Some(packet.sel.clone())
-        } else {
-            None
-        };
+        let sel = packet.in_sel.then(|| packet.sel.clone());
         // Like the engine's `mpreplacetex`: the old texture must already exist,
         // the new one is created if needed; on failure nothing changes.
-        let extra = &mut &packet.extra_data[..];
-        let Some(old_tex) =
-            crate::vslot::unpack_tex(&mut self.vslots, packet.old_tex, extra, false)
+        let Some(old_tex) = crate::vslot::resolve_tex(&mut self.vslots, &packet.old_tex, false)
         else {
             return true;
         };
-        let Some(new_tex) = crate::vslot::unpack_tex(&mut self.vslots, packet.new_tex, extra, true)
-        else {
-            return true;
-        };
+        let new_tex = crate::vslot::resolve_tex(&mut self.vslots, &packet.new_tex, true)
+            .expect("inserting lookup always succeeds");
         self.replace_texture(sel.as_ref(), old_tex, new_tex);
         self.invalidate_cache();
         true
@@ -663,21 +653,21 @@ impl Map {
     /// Applies VSlot delta configurations (color, scroll, offset) to geometry faces.
     /// Returns `false` if the edit was rejected because it intersected a protected region.
     pub fn apply_edit_v_slot(&mut self, packet: &channel1::EditVSlot) -> bool {
-        if packet.extra_data.is_empty() {
+        if packet.vslot.is_empty() {
             return true;
         }
         let (min, max) = packet.sel.bounds();
         if self.is_protected(min, max) {
             return false;
         }
-        self.apply_vslots(
-            &packet.sel,
-            packet.all_faces,
-            packet.delta != 0,
-            &packet.extra_data,
-        );
+        self.apply_vslot_edit(packet);
         self.invalidate_cache();
         true
+    }
+
+    /// Applies an `N_EDITVSLOT` without checking protected regions.
+    pub fn apply_vslot_edit(&mut self, packet: &channel1::EditVSlot) {
+        self.apply_vslots(&packet.sel, packet.all_faces, packet.delta, &packet.vslot);
     }
 
     /// Pastes copied geometry back into the octree at the target selection.

@@ -1035,7 +1035,7 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn replace(&self, ctx: &mut Context, packet: &channel1::Replace) {
-        let bounds = if packet.in_sel != 0 {
+        let bounds = if packet.in_sel {
             packet.sel.bounds()
         } else {
             let s = get_server_state(ctx.server())

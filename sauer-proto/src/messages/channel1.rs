@@ -2,6 +2,7 @@ use crate::ParseError;
 use crate::Session;
 use crate::data;
 use crate::data::*;
+use crate::data::tex_ref;
 use crate::error::ParseResultExt;
 use crate::internal::SauerReadStateful;
 use crate::internal::macros::{make_packet_enum, make_struct};
@@ -9,8 +10,8 @@ use crate::internal::{
     SauerRead, SauerWrite, check_tag,
     constants::*,
     primitives::{
-        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_data, read_short_pref_vslot_delta,
-        read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq, write_short_pref_data,
+        read_neg_term_seq, read_nonpos_term_seq, read_short_pref_vslot_delta,
+        read_varint_pref_seq, write_neg_term_seq, write_nonpos_term_seq,
         write_short_pref_vslot_delta, write_varint_pref_seq,
     },
 };
@@ -339,14 +340,69 @@ make_struct!(
     mode: EditFaceMode,
 });
 
-make_struct!(
 /// `N_EDITT` Coop Edit: Texture Modification.
-[N_EDITT] EditTex {
-    sel: SelInfo,
-    tex: i32,
-    all_faces: bool,
-    extra_data: Vec<u8> => write_short_pref_data, read_short_pref_data,
-});
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EditTex {
+    pub sel: SelInfo,
+    pub tex: TexRef,
+    pub all_faces: bool,
+}
+impl crate::PacketDescriptor for EditTex {
+    fn packet_names(&self) -> Vec<&'static str> {
+        vec![crate::internal::msg_id_to_name(N_EDITT)]
+    }
+}
+impl SauerWrite for EditTex {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        N_EDITT.sauer_write(out);
+        self.sel.sauer_write(out);
+        tex_ref::write_index(&self.tex, out);
+        self.all_faces.sauer_write(out);
+        tex_ref::write_extra(&[&self.tex], out);
+    }
+}
+impl SauerRead for EditTex {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+        fn inner(reader: &mut &[u8]) -> Result<EditTex, ParseError> {
+            check_tag(reader, N_EDITT)?;
+            let sel = SelInfo::sauer_read(reader).in_field("sel")?;
+            let mut tex = tex_ref::read_index(reader).in_field("tex")?;
+            let all_faces = bool::sauer_read(reader).in_field("all_faces")?;
+            tex_ref::read_extra(&mut [&mut tex], reader).in_field("tex")?;
+            Ok(EditTex {
+                sel,
+                tex,
+                all_faces,
+            })
+        }
+        inner(reader).in_struct("N_EDITT")
+    }
+}
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{FromLua, UserData, UserDataFields};
+
+    impl UserData for EditTex {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("sel", |_lua, this| Ok(this.sel.clone()));
+            fields.add_field_method_get("tex", |_lua, this| Ok(this.tex.clone()));
+            fields.add_field_method_get("all_faces", |_lua, this| Ok(this.all_faces));
+        }
+    }
+
+    impl FromLua for EditTex {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                sel: table.get("sel")?,
+                tex: table.get("tex")?,
+                all_faces: table.get("all_faces")?,
+            })
+        }
+    }
+};
 
 make_struct!(
 /// `N_EDITM` Coop Edit: Material Modification.
@@ -369,15 +425,76 @@ make_struct!(
     dir: i32,
 });
 
-make_struct!(
 /// `N_REPLACE` Coop Edit: Replace texture.
-[N_REPLACE] Replace {
-    sel: SelInfo,
-    old_tex: i32,
-    new_tex: i32,
-    in_sel: i32,
-    extra_data: Vec<u8> => write_short_pref_data, read_short_pref_data,
-});
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Replace {
+    pub sel: SelInfo,
+    pub old_tex: TexRef,
+    pub new_tex: TexRef,
+    /// Only replace inside `sel`, not in the whole map.
+    pub in_sel: bool,
+}
+impl crate::PacketDescriptor for Replace {
+    fn packet_names(&self) -> Vec<&'static str> {
+        vec![crate::internal::msg_id_to_name(N_REPLACE)]
+    }
+}
+impl SauerWrite for Replace {
+    fn sauer_write(&self, out: &mut Vec<u8>) {
+        N_REPLACE.sauer_write(out);
+        self.sel.sauer_write(out);
+        tex_ref::write_index(&self.old_tex, out);
+        tex_ref::write_index(&self.new_tex, out);
+        self.in_sel.sauer_write(out);
+        tex_ref::write_extra(&[&self.old_tex, &self.new_tex], out);
+    }
+}
+impl SauerRead for Replace {
+    fn sauer_read(reader: &mut &[u8]) -> Result<Self, ParseError> {
+        fn inner(reader: &mut &[u8]) -> Result<Replace, ParseError> {
+            check_tag(reader, N_REPLACE)?;
+            let sel = SelInfo::sauer_read(reader).in_field("sel")?;
+            let mut old_tex = tex_ref::read_index(reader).in_field("old_tex")?;
+            let mut new_tex = tex_ref::read_index(reader).in_field("new_tex")?;
+            let in_sel = bool::sauer_read(reader).in_field("in_sel")?;
+            tex_ref::read_extra(&mut [&mut old_tex, &mut new_tex], reader).in_field("extra")?;
+            Ok(Replace {
+                sel,
+                old_tex,
+                new_tex,
+                in_sel,
+            })
+        }
+        inner(reader).in_struct("N_REPLACE")
+    }
+}
+
+#[cfg(feature = "lua")]
+const _: () = {
+    use mlua::{FromLua, UserData, UserDataFields};
+
+    impl UserData for Replace {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("sel", |_lua, this| Ok(this.sel.clone()));
+            fields.add_field_method_get("old_tex", |_lua, this| Ok(this.old_tex.clone()));
+            fields.add_field_method_get("new_tex", |_lua, this| Ok(this.new_tex.clone()));
+            fields.add_field_method_get("in_sel", |_lua, this| Ok(this.in_sel));
+        }
+    }
+
+    impl FromLua for Replace {
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                sel: table.get("sel")?,
+                old_tex: table.get("old_tex")?,
+                new_tex: table.get("new_tex")?,
+                in_sel: table.get("in_sel")?,
+            })
+        }
+    }
+};
 
 make_struct!(
 /// `N_DELCUBE` Coop Edit: Delete a cube.
@@ -389,9 +506,9 @@ make_struct!(
 /// `N_EDITVSLOT` Coop Edit: Modify texture V-Slots.
 [N_EDITVSLOT] EditVSlot {
     sel: SelInfo,
-    delta: i32,
+    delta: bool,
     all_faces: bool,
-    extra_data: data::VSlotDelta => write_short_pref_vslot_delta, read_short_pref_vslot_delta,
+    vslot: data::VSlotDelta => write_short_pref_vslot_delta, read_short_pref_vslot_delta,
 });
 
 make_struct!(

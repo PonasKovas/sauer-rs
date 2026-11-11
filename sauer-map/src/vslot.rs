@@ -1,7 +1,7 @@
 use crate::Node;
 use ogz_rs::data::{VSlot, VSlotParam};
 use sauer_proto::data::clipboard::VSlotData;
-use sauer_proto::data::{VSlotDelta, VSlotDeltaParam};
+use sauer_proto::data::{TexRef, VSlotDelta, VSlotDeltaParam};
 use std::collections::HashMap;
 
 pub fn root_base_of(vslots: &[Option<VSlot>], idx: u16) -> i32 {
@@ -223,25 +223,20 @@ pub fn to_delta(vs: &VSlot) -> VSlotDelta {
     }
 }
 
-/// Resolves a texture a client sent as `0x10000 | slot` plus a packed vslot
-/// (`N_EDITT`, `N_REPLACE`) to a local index, like the engine's `unpacktex`.
-/// Plain indices are returned as they are. `None` when `insert` is false and
-/// no such variant exists, or the data is malformed.
-pub fn unpack_tex(
-    vslots: &mut Vec<Option<VSlot>>,
-    tex: i32,
-    extra: &mut &[u8],
-    insert: bool,
-) -> Option<u16> {
-    if tex < 0x10000 {
-        return Some(tex as u16);
+/// Resolves a texture a client sent (`N_EDITT`, `N_REPLACE`) to a local
+/// index, like the engine's `unpacktex`. Plain indices are returned as they
+/// are. `None` when `insert` is false and no such variant exists.
+pub fn resolve_tex(vslots: &mut Vec<Option<VSlot>>, tex: &TexRef, insert: bool) -> Option<u16> {
+    match tex {
+        TexRef::Index(i) => Some(*i),
+        TexRef::Variant { slot, vslot } => {
+            let root = root_of_slot(vslots, *slot);
+            if vslot.is_empty() {
+                return Some(root);
+            }
+            lookup_vslot(vslots, root, vslot, false, insert)
+        }
     }
-    let ds = VSlotDelta::read(extra).ok()?;
-    let root = root_of_slot(vslots, (tex & 0xFFFF) as u16);
-    if ds.is_empty() {
-        return Some(root);
-    }
-    lookup_vslot(vslots, root, &ds, false, insert)
 }
 
 /// Brings a client's packed vslots (from a clipboard or undo block) into this
