@@ -93,8 +93,8 @@ const _: () = {
 
     impl UserData for Selection {
         fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-            fields.add_field_method_get("o", |_lua, this| Ok(this.o.clone()));
-            fields.add_field_method_get("s", |_lua, this| Ok(this.s.clone()));
+            fields.add_field_method_get("o", |_lua, this| Ok(this.o));
+            fields.add_field_method_get("s", |_lua, this| Ok(this.s));
             fields.add_field_method_get("grid", |_lua, this| Ok(this.grid));
             fields.add_field_method_get("orient", |_lua, this| Ok(this.orient));
             fields.add_field_method_get("cx", |_lua, this| Ok(this.cx));

@@ -66,7 +66,7 @@ fn parse(data: &[u8]) -> Result<Parsed, String> {
 
     let loaded = persist::ingest(&mut map);
     let mut state = DeathrunState {
-        map: map,
+        map,
         protected: loaded.protected(),
         traps: loaded.traps,
         vault: loaded.vault,

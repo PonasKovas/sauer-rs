@@ -36,6 +36,6 @@ impl Server {
     }
 
     pub fn count_players_in(&self, team: &CubeStr) -> u32 {
-        self.players.count(|_, p| &p.team == team) as u32
+        self.players.count(|_, p| p.team == team) as u32
     }
 }

@@ -343,10 +343,8 @@ impl Plugin for DeathrunPlay {
         let round_state = maps.read().round_state;
 
         // Prevent self-unspectating during the game (even for masters to prevent cheating the 1-life limit).
-        if round_state.is_playing() || round_state == RoundState::MapLoading {
-            if !packet.val {
-                return Flow::Cancel;
-            }
+        if (round_state.is_playing() || round_state == RoundState::MapLoading) && !packet.val {
+            return Flow::Cancel;
         }
         Flow::Continue
     }

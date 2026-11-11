@@ -74,7 +74,7 @@ fn midedge(a: &[i32; 3], b: &[i32; 3], xd: usize, yd: usize, perfect: &mut bool)
     let s = risex / (bx - ax);
     let y = s / 256 + ay;
 
-    if (s.abs() & 0xFF) != 0 || (crossy && y != 8) || y < 0 || y > 16 {
+    if (s.abs() & 0xFF) != 0 || (crossy && y != 8) || !(0..=16).contains(&y) {
         *perfect = false;
     }
 
@@ -141,16 +141,7 @@ pub fn subdivide(cube: &Cube) -> [Cube; 8] {
             textures: cube.textures,
             material: cube.material,
         };
-        return [
-            child.clone(),
-            child.clone(),
-            child.clone(),
-            child.clone(),
-            child.clone(),
-            child.clone(),
-            child.clone(),
-            child.clone(),
-        ];
+        return [child, child, child, child, child, child, child, child];
     }
 
     let mut ch = [Cube {
@@ -215,7 +206,7 @@ pub fn subdivide(cube: &Cube) -> [Cube; 8] {
                 0,
                 0,
                 z,
-                (e[rd][cd] as i32 - dd as i32 * 8).clamp(0, 8) as u8,
+                (e[rd][cd] - dd as i32 * 8).clamp(0, 8) as u8,
             );
             set_cubeedge(
                 &mut ch[i],
@@ -223,7 +214,7 @@ pub fn subdivide(cube: &Cube) -> [Cube; 8] {
                 1,
                 0,
                 z,
-                (e[1 + rd][cd] as i32 - dd as i32 * 8).clamp(0, 8) as u8,
+                (e[1 + rd][cd] - dd as i32 * 8).clamp(0, 8) as u8,
             );
             set_cubeedge(
                 &mut ch[i],
@@ -231,7 +222,7 @@ pub fn subdivide(cube: &Cube) -> [Cube; 8] {
                 0,
                 1,
                 z,
-                (e[rd][1 + cd] as i32 - dd as i32 * 8).clamp(0, 8) as u8,
+                (e[rd][1 + cd] - dd as i32 * 8).clamp(0, 8) as u8,
             );
             set_cubeedge(
                 &mut ch[i],
@@ -239,7 +230,7 @@ pub fn subdivide(cube: &Cube) -> [Cube; 8] {
                 1,
                 1,
                 z,
-                (e[1 + rd][1 + cd] as i32 - dd as i32 * 8).clamp(0, 8) as u8,
+                (e[1 + rd][1 + cd] - dd as i32 * 8).clamp(0, 8) as u8,
             );
         }
     }

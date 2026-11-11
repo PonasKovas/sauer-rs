@@ -248,9 +248,9 @@ async fn client_session<P: Plugin>(
         id,
     };
 
-    if plugin.connected(&mut ctx).await == Flow::Continue {
-        if let Err(e) = handle_client(&server, &plugin, rx, id).await {
-            error!("handling peer: {e}");
-        }
+    if plugin.connected(&mut ctx).await == Flow::Continue
+        && let Err(e) = handle_client(&server, &plugin, rx, id).await
+    {
+        error!("handling peer: {e}");
     }
 }

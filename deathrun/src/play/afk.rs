@@ -27,7 +27,7 @@ pub struct Afk {
 
 impl Afk {
     pub fn update_pos(&mut self, id: u64, pos: [f32; 3]) {
-        let moved = self.last_pos.get(&id).map_or(true, |last| {
+        let moved = self.last_pos.get(&id).is_none_or(|last| {
             let d = [pos[0] - last[0], pos[1] - last[1], pos[2] - last[2]];
             d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 0.25 // 0.5 unit threshold
         });

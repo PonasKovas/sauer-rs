@@ -132,7 +132,7 @@ pub(super) fn start_round_sequence(
         }
 
         for &id in &ids {
-            if server.players.contains(id) == false {
+            if !server.players.contains(id) {
                 continue;
             }
 
@@ -154,14 +154,14 @@ pub(super) fn start_round_sequence(
             .and_then(|id| server.players.with(id, |p| p.name.strip_colors().to_utf8()));
 
         // Send the generic connection welcome rules to the new player first
-        if let Some(w_id) = welcome_id {
-            if server.players.contains(w_id) {
-                let (is_solo, map_name) = {
-                    let lock = maps_clone.read();
-                    (lock.evil_id.is_none(), lock.current_map.clone())
-                };
-                ui::send_welcome_play(&server, w_id, map_name.as_deref(), is_solo);
-            }
+        if let Some(w_id) = welcome_id
+            && server.players.contains(w_id)
+        {
+            let (is_solo, map_name) = {
+                let lock = maps_clone.read();
+                (lock.evil_id.is_none(), lock.current_map.clone())
+            };
+            ui::send_welcome_play(&server, w_id, map_name.as_deref(), is_solo);
         }
 
         if end_if_decided_at_start(&server, &maps_clone, my_epoch, current_evil) {
@@ -223,7 +223,7 @@ pub(super) fn check_win_conditions(
         if evil_out == Some(true) {
             let mut top = Vec::new();
             let mut sorted = lock.finished_players.clone();
-            sorted.sort_by(|a, b| a.1.cmp(&b.1));
+            sorted.sort_by_key(|a| a.1);
             for (f_id, dur) in sorted.into_iter().take(3) {
                 let name = crate::ui::player_name(server, f_id);
                 top.push((name, dur.as_secs_f32()));
@@ -242,11 +242,11 @@ pub(super) fn check_win_conditions(
             let is_finished = lock.finished_players.iter().any(|(f_id, _)| *f_id == id);
             if !is_finished {
                 // If they are still connected and alive, the round is still playing
-                if ids.contains(&id) {
-                    if server.players.with(id, |p| p.status == Status::Alive) == Some(true) {
-                        good_still_playing = true;
-                        break;
-                    }
+                if ids.contains(&id)
+                    && server.players.with(id, |p| p.status == Status::Alive) == Some(true)
+                {
+                    good_still_playing = true;
+                    break;
                 }
             }
         }
@@ -256,7 +256,7 @@ pub(super) fn check_win_conditions(
             if !lock.finished_players.is_empty() {
                 let mut top = Vec::new();
                 let mut sorted = lock.finished_players.clone();
-                sorted.sort_by(|a, b| a.1.cmp(&b.1));
+                sorted.sort_by_key(|a| a.1);
                 for (f_id, dur) in sorted.into_iter().take(3) {
                     let name = crate::ui::player_name(server, f_id);
                     top.push((name, dur.as_secs_f32()));

@@ -92,8 +92,8 @@ pub fn edit_tex(map: &mut Map, packet: &channel1::EditTex) {
 
 /// Applies a material filter modification to a geometry selection.
 pub fn edit_mat(map: &mut Map, packet: &channel1::EditMat) {
-    let packet_mat = packet.mat as i32;
-    let packet_filter = packet.filter as i32;
+    let packet_mat = packet.mat;
+    let packet_filter = packet.filter;
     let mut filtermat = 0u16;
     let mut filtermask = 0u16;
     let mut filtergeom = 0i32;

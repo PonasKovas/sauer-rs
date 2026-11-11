@@ -59,18 +59,20 @@ pub fn root_of_slot(vslots: &[Option<VSlot>], slot: u16) -> u16 {
 pub fn find_chain_tail(vslots: &[Option<VSlot>], root: i32) -> i32 {
     let mut is_parent = vec![false; vslots.len()];
     for vs_opt in vslots.iter() {
-        if let Some(vs) = vs_opt {
-            if vs.prev >= 0 && (vs.prev as usize) < vslots.len() {
-                is_parent[vs.prev as usize] = true;
-            }
+        if let Some(vs) = vs_opt
+            && vs.prev >= 0
+            && (vs.prev as usize) < vslots.len()
+        {
+            is_parent[vs.prev as usize] = true;
         }
     }
 
     for i in 0..vslots.len() {
-        if let Some(Some(_)) = vslots.get(i) {
-            if !is_parent[i] && root_base_of(vslots, i as u16) == root {
-                return i as i32;
-            }
+        if let Some(Some(_)) = vslots.get(i)
+            && !is_parent[i]
+            && root_base_of(vslots, i as u16) == root
+        {
+            return i as i32;
         }
     }
     root
@@ -108,10 +110,11 @@ pub fn lookup_vslot(
     props.merge(ds, delta);
 
     for (i, vs_opt) in vslots.iter().enumerate() {
-        if let Some(vs) = vs_opt {
-            if root_base_of(vslots, i as u16) == root && vs.props == props {
-                return Some(i as u16);
-            }
+        if let Some(vs) = vs_opt
+            && root_base_of(vslots, i as u16) == root
+            && vs.props == props
+        {
+            return Some(i as u16);
         }
     }
     if !insert || vslots.len() >= MAX_VSLOTS {
@@ -160,10 +163,10 @@ pub fn import(vslots: &mut Vec<Option<VSlot>>, incoming: &[VSlotData], nodes: &m
         .map(|vd| (vd, root_of_slot(vslots, vd.slot)))
         .collect();
     // Bases past the end must exist before variants get appended there.
-    if let Some(max) = incoming.iter().map(|(_, r)| *r as usize).max() {
-        if vslots.len() <= max {
-            vslots.resize(max + 1, None);
-        }
+    if let Some(max) = incoming.iter().map(|(_, r)| *r as usize).max()
+        && vslots.len() <= max
+    {
+        vslots.resize(max + 1, None);
     }
     let mut map = HashMap::new();
     for (vd, root) in incoming {

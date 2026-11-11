@@ -38,7 +38,7 @@ pub fn getint(reader: &mut &[u8]) -> Option<i32> {
 }
 
 pub fn putuint(out: &mut Vec<u8>, n: i32) {
-    if n < 0 || n >= (1 << 21) {
+    if !(0..(1 << 21)).contains(&n) {
         out.push((0x80 | (n & 0x7F)) as u8);
         out.push((0x80 | ((n >> 7) & 0x7F)) as u8);
         out.push((0x80 | ((n >> 14) & 0x7F)) as u8);

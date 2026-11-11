@@ -11,7 +11,7 @@ impl IntoLua for CubeString {
     }
 }
 
-impl<'a> IntoLua for &'a CubeStr {
+impl IntoLua for &CubeStr {
     fn into_lua(self, lua: &Lua) -> mlua::Result<Value> {
         let s: String = self.as_bytes().iter().map(|&b| raw::cube2uni(b)).collect();
         Ok(Value::String(lua.create_string(s)?))

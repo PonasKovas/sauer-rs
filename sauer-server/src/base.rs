@@ -55,10 +55,10 @@ impl<P: Plugin> Base<P> {
         if same {
             return;
         }
-        if server.kill_player(target) {
-            if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_player_died(ctx, target, target).await;
-            }
+        if server.kill_player(target)
+            && let Some(plugin) = self.plugin.upgrade()
+        {
+            plugin.on_player_died(ctx, target, target).await;
         }
         // A spectator switching teams is not announced.
         let reason = match reason {
@@ -415,11 +415,11 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn try_spawn(&self, ctx: &mut Context, _packet: &channel1::TrySpawn) -> Flow {
         let id = ctx.id();
-        if let Some(mut state) = ctx.server().compute_spawn_state(id) {
-            if let Some(plugin) = self.plugin.upgrade() {
-                // Base applies the spawn at the end of the chain, so a cancel already stopped it.
-                let _ = plugin.on_spawn(ctx, &mut state).await;
-            }
+        if let Some(mut state) = ctx.server().compute_spawn_state(id)
+            && let Some(plugin) = self.plugin.upgrade()
+        {
+            // Base applies the spawn at the end of the chain, so a cancel already stopped it.
+            let _ = plugin.on_spawn(ctx, &mut state).await;
         }
         Flow::Continue
     }
@@ -466,10 +466,10 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn suicide(&self, ctx: &mut Context, _packet: &channel1::Suicide) -> Flow {
         let id = ctx.id();
-        if ctx.server().kill_player(id) {
-            if let Some(plugin) = self.plugin.upgrade() {
-                plugin.on_player_died(ctx, id, id).await;
-            }
+        if ctx.server().kill_player(id)
+            && let Some(plugin) = self.plugin.upgrade()
+        {
+            plugin.on_player_died(ctx, id, id).await;
         }
         Flow::Continue
     }
@@ -525,10 +525,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 continue;
             }
 
-            if server.apply_damage(target_id, id, packet.gun, damage, hit.dir) {
-                if let Some(plugin) = self.plugin.upgrade() {
-                    plugin.on_player_died(ctx, target_id, id).await;
-                }
+            if server.apply_damage(target_id, id, packet.gun, damage, hit.dir)
+                && let Some(plugin) = self.plugin.upgrade()
+            {
+                plugin.on_player_died(ctx, target_id, id).await;
             }
         }
         Flow::Continue
@@ -568,10 +568,10 @@ impl<P: Plugin> Plugin for Base<P> {
                 continue;
             }
 
-            if server.apply_damage(target_id, id, packet.gun, damage, hit.dir) {
-                if let Some(plugin) = self.plugin.upgrade() {
-                    plugin.on_player_died(ctx, target_id, id).await;
-                }
+            if server.apply_damage(target_id, id, packet.gun, damage, hit.dir)
+                && let Some(plugin) = self.plugin.upgrade()
+            {
+                plugin.on_player_died(ctx, target_id, id).await;
             }
         }
         Flow::Continue
@@ -611,7 +611,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         if bytes.first() == Some(&b'#') {
             let args = parse_command_args(bytes);
-            let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
+            let cmd = args.first().and_then(|s| s.as_str()).unwrap_or("");
 
             if cmd == "#help" {
                 let mut cmds = ctx.server().commands.read().clone();
@@ -620,7 +620,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 for c in cmds {
                     let mut usage = c.name.clone();
                     if !c.usage.is_empty() {
-                        usage.push_str(" ");
+                        usage.push(' ');
                         usage.push_str(&c.usage);
                     }
                     lines.push(crate::ui::tip(&usage, &c.desc));

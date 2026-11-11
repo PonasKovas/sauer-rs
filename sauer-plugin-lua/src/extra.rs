@@ -61,3 +61,9 @@ impl LuaExtraRegistry {
         self.entries.insert(name.into(), Arc::new(factory));
     }
 }
+
+impl Default for LuaExtraRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}

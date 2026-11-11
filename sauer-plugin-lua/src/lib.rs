@@ -106,7 +106,7 @@ async fn load_plugin(
     let path_str = path.to_str().ok_or(LuaPluginLoadError::NonUtf8Path)?;
 
     lua.load(&contents)
-        .set_name(&format!("@{path_str}"))
+        .set_name(format!("@{path_str}"))
         .set_environment(env.clone())
         .exec()
         .map_err(|e| LuaPluginLoadError::LuaErrorInPlugin {

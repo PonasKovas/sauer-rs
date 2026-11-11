@@ -86,13 +86,13 @@ impl SauerWrite for Position {
         let o_y = (self.pos.y * DMF as f32) as i32;
         let o_z = (self.pos.z * DMF as f32) as i32;
 
-        if o_x < 0 || o_x > 0xFFFF {
+        if !(0..=0xFFFF).contains(&o_x) {
             flags |= 1 << 0;
         }
-        if o_y < 0 || o_y > 0xFFFF {
+        if !(0..=0xFFFF).contains(&o_y) {
             flags |= 1 << 1;
         }
-        if o_z < 0 || o_z > 0xFFFF {
+        if !(0..=0xFFFF).contains(&o_z) {
             flags |= 1 << 2;
         }
 
@@ -122,7 +122,7 @@ impl SauerWrite for Position {
         for o in [o_x, o_y, o_z] {
             (o as u8).sauer_write(out);
             ((o >> 8) as u8).sauer_write(out);
-            if o < 0 || o > 0xFFFF {
+            if !(0..=0xFFFF).contains(&o) {
                 ((o >> 16) as u8).sauer_write(out);
             }
         }

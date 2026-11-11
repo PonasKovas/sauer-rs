@@ -26,13 +26,11 @@ impl Server {
             })
             .unwrap_or(false);
 
-        if changed {
-            if let Some(cn) = self.get_cn(id) {
-                self.broadcast(&SpectatorServer {
-                    client_num: cn,
-                    is_spectator: spectate,
-                });
-            }
+        if changed && let Some(cn) = self.get_cn(id) {
+            self.broadcast(&SpectatorServer {
+                client_num: cn,
+                is_spectator: spectate,
+            });
         }
     }
 }

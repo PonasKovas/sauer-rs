@@ -33,9 +33,9 @@ pub fn apply_region<F>(
         if let Node::Branch(children) = node {
             let half = node_size / 2;
             for i in 0..8 {
-                let cx = (i & 1) as i32;
-                let cy = ((i >> 1) & 1) as i32;
-                let cz = ((i >> 2) & 1) as i32;
+                let cx = i & 1;
+                let cy = (i >> 1) & 1;
+                let cz = (i >> 2) & 1;
                 let child_origin = [
                     origin[0] + cx * half,
                     origin[1] + cy * half,

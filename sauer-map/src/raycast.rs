@@ -77,21 +77,22 @@ where
     let min_bound = [0.0, 0.0, 0.0];
     let max_bound = [map.size as f32, map.size as f32, map.size as f32];
 
-    if let Some((tmin, tmax, axis)) = ray_aabb(origin, ray_norm, inv_ray, min_bound, max_bound) {
-        if tmin <= max_dist && tmax >= 0.0 {
-            return traverse(
-                &map.root,
-                origin,
-                ray_norm,
-                inv_ray,
-                [0, 0, 0],
-                map.size,
-                tmin,
-                tmax.min(max_dist),
-                axis,
-                filter,
-            );
-        }
+    if let Some((tmin, tmax, axis)) = ray_aabb(origin, ray_norm, inv_ray, min_bound, max_bound)
+        && tmin <= max_dist
+        && tmax >= 0.0
+    {
+        return traverse(
+            &map.root,
+            origin,
+            ray_norm,
+            inv_ray,
+            [0, 0, 0],
+            map.size,
+            tmin,
+            tmax.min(max_dist),
+            axis,
+            filter,
+        );
     }
     None
 }
@@ -156,17 +157,17 @@ where
                     ((v0, v1, v2), (v0, v2, v3)) // Order 0
                 };
 
-                if let Some(t) = ray_triangle(origin, ray, tri1.0, tri1.1, tri1.2) {
-                    if t < best_t {
-                        best_t = t;
-                        best_orient = orient as u8;
-                    }
+                if let Some(t) = ray_triangle(origin, ray, tri1.0, tri1.1, tri1.2)
+                    && t < best_t
+                {
+                    best_t = t;
+                    best_orient = orient as u8;
                 }
-                if let Some(t) = ray_triangle(origin, ray, tri2.0, tri2.1, tri2.2) {
-                    if t < best_t {
-                        best_t = t;
-                        best_orient = orient as u8;
-                    }
+                if let Some(t) = ray_triangle(origin, ray, tri2.0, tri2.1, tri2.2)
+                    && t < best_t
+                {
+                    best_t = t;
+                    best_orient = orient as u8;
                 }
             }
 
@@ -209,12 +210,12 @@ where
 
                 if let Some((ct_min, ct_max, c_axis)) =
                     ray_aabb(origin, ray, inv_ray, min_bound, max_bound)
+                    && ct_max >= 0.0
+                    && ct_min <= t_max
                 {
-                    if ct_max >= 0.0 && ct_min <= t_max {
-                        let active_axis = if ct_min <= 0.0 { entry_axis } else { c_axis };
-                        hits[num_hits] = (ct_min, ct_max, active_axis, i);
-                        num_hits += 1;
-                    }
+                    let active_axis = if ct_min <= 0.0 { entry_axis } else { c_axis };
+                    hits[num_hits] = (ct_min, ct_max, active_axis, i);
+                    num_hits += 1;
                 }
             }
 

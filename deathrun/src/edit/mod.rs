@@ -59,6 +59,12 @@ impl DeathrunEdit {
     }
 }
 
+impl Default for DeathrunEdit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Plugin for DeathrunEdit {
     async fn disconnected(&self, ctx: &mut Context) {
         let id = ctx.id();

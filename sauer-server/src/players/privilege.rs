@@ -34,12 +34,12 @@ impl Server {
 
     /// Sends the current master state to a single client (call during welcome).
     pub fn send_current_master(&self, id: u64) {
-        self.send(id, &self.build_current_master());
+        self.send(id, self.build_current_master());
     }
 
     /// Broadcasts the current master state to all connected clients.
     pub fn broadcast_current_master(&self) {
-        self.broadcast(&self.build_current_master());
+        self.broadcast(self.build_current_master());
     }
 
     /// Returns a player's current privilege level.

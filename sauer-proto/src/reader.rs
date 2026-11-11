@@ -73,7 +73,7 @@ impl<'a, R> Reader<'a, R> {
 
                 // Only allow the envelope to extend up to the end of our current slice
                 let clamped_len = (len as usize).min(temp_slice.len());
-                let end_addr = temp_slice.as_ptr() as usize + clamped_len as usize;
+                let end_addr = temp_slice.as_ptr() as usize + clamped_len;
 
                 self.active_wrapper = Some(ClientWrapperState {
                     client_num: cn,

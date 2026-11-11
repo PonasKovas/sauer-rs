@@ -1368,7 +1368,7 @@ impl SauerRead for BasesClient {
         fn inner(reader: &mut &[u8]) -> Result<BasesClient, ParseError> {
             check_tag(reader, N_BASES)?;
             let num_bases = i32::sauer_read(reader)?;
-            if num_bases < 0 || num_bases > 256 {
+            if !(0..=256).contains(&num_bases) {
                 return Err(ParseError::ValueOutOfRange {
                     value: num_bases,
                     max: 256,

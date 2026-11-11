@@ -76,22 +76,22 @@ impl Plugin for TelegramBridge {
                 move |msg: Message, _bot: Bot, server: Arc<Server>| {
                     let bot_cn = bot_cn;
                     async move {
-                        if msg.chat.id == target_chat_id {
-                            if let Some(text) = msg.text() {
-                                let sender = msg
-                                    .from
-                                    .as_ref()
-                                    .and_then(|u| u.username.clone())
-                                    .or_else(|| msg.from.as_ref().map(|u| u.first_name.clone()))
-                                    .unwrap_or_else(|| "Unknown".to_string());
+                        if msg.chat.id == target_chat_id
+                            && let Some(text) = msg.text()
+                        {
+                            let sender = msg
+                                .from
+                                .as_ref()
+                                .and_then(|u| u.username.clone())
+                                .or_else(|| msg.from.as_ref().map(|u| u.first_name.clone()))
+                                .unwrap_or_else(|| "Unknown".to_string());
 
-                                server.broadcast(&sauer_proto::Client {
-                                    client_num: bot_cn,
-                                    packet: sauer_proto::channel1::Text {
-                                        text: format!("{}: {}", sender, text).lossy_cubestring(),
-                                    },
-                                });
-                            }
+                            server.broadcast(&sauer_proto::Client {
+                                client_num: bot_cn,
+                                packet: sauer_proto::channel1::Text {
+                                    text: format!("{}: {}", sender, text).lossy_cubestring(),
+                                },
+                            });
                         }
                         Ok::<(), std::convert::Infallible>(())
                     }

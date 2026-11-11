@@ -136,12 +136,11 @@ impl Map {
         let merged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::facemerge::node_to_ogz_merged(&self.root, self.size)
         }));
-        if let Ok(octree) = merged {
-            if let Ok(bytes) = self.serialize(compression, octree) {
-                if bytes.len() <= MAX_SENT_MAP {
-                    return Ok(bytes);
-                }
-            }
+        if let Ok(octree) = merged
+            && let Ok(bytes) = self.serialize(compression, octree)
+            && bytes.len() <= MAX_SENT_MAP
+        {
+            return Ok(bytes);
         }
         self.to_ogz_bytes_with(compression)
     }
@@ -568,7 +567,7 @@ impl Map {
                 [2, 3, 5, 7],
             ];
             for i in 0..2 {
-                let a = FACEEDGESIDX[orient][i * 2 + 0];
+                let a = FACEEDGESIDX[orient][i * 2];
                 let b = FACEEDGESIDX[orient][i * 2 + 1];
                 for j in 0..2 {
                     if crushededge(cube.edges[a], j)
