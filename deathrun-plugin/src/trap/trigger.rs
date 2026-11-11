@@ -13,13 +13,7 @@ pub fn apply_active_state(
 ) -> Vec<usize> {
     let touched = super::ents::apply(&mut map.entities, &trap.ents, virt_pool);
     if let Some(geom) = &trap.geom {
-        let mut sel = geom.payload.sel.clone();
-        sel.o = Vec3 {
-            x: geom.clip_pos[0],
-            y: geom.clip_pos[1],
-            z: geom.clip_pos[2],
-        };
-        map.apply_block(&sel, geom.payload.nodes.clone(), false);
+        geom.paste_into(map);
     }
     touched
 }

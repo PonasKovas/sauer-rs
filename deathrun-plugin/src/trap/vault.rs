@@ -11,7 +11,7 @@
 //!   textured with the record vslot.
 
 use super::{Trap, TrapGeom};
-use sauer_map::{Map, Selection};
+use sauer_map::{Map, Selection, ValidSel};
 use sauer_proto::data::{ClipboardPayload, Orient, VSlotProps, Vec3};
 
 pub const MIN_SIZE: i32 = 64;
@@ -150,30 +150,22 @@ pub fn pack_fresh(start: i32, items: &[Item]) -> Option<(i32, Vec<[i32; 3]>)> {
 
 // ─── Map operations ──────────────────────────────────────────────────────────
 
-pub fn sel(o: [i32; 3], s: [i32; 3], grid: i32) -> Selection {
-    Selection {
-        o: Vec3 {
-            x: o[0],
-            y: o[1],
-            z: o[2],
-        },
-        s: Vec3 {
-            x: s[0],
-            y: s[1],
-            z: s[2],
-        },
-        grid,
-        orient: Orient::Left,
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
-    }
+/// A box the plugin builds itself, checked against the map. Those always
+/// fit the world, so a `None` is a bug: debug builds stop, release builds
+/// skip the edit.
+pub fn sel(map: &Map, o: [i32; 3], s: [i32; 3], grid: i32) -> Option<ValidSel> {
+    let valid = Selection::new(o, s, grid, Orient::Left).validate(map.size);
+    debug_assert!(
+        valid.is_some(),
+        "selection {o:?} {s:?} {grid} doesn't fit the map"
+    );
+    valid
 }
 
 fn fill_rock(map: &mut Map, origin: [i32; 3], size: i32) {
-    let s = sel(origin, [1; 3], size);
+    let Some(s) = sel(map, origin, [1; 3], size) else {
+        return;
+    };
     map.fill(&s, true);
     let rock = sauer_map::vslot::root_of_slot(&map.vslots, ANCHOR_SLOT);
     map.set_texture(&s, rock, true);
@@ -181,27 +173,31 @@ fn fill_rock(map: &mut Map, origin: [i32; 3], size: i32) {
 
 /// Removes a vault, leaving plain air (what enlarging adds).
 pub fn erase(map: &mut Map, vault: &Vault) {
-    map.fill(&sel(vault.origin, [1; 3], vault.size), false);
+    if let Some(s) = sel(map, vault.origin, [1; 3], vault.size) {
+        map.fill(&s, false);
+    }
 }
 
 fn clear(map: &mut Map, min: [i32; 3], extent: [i32; 3], grid: i32) {
-    map.fill(&sel(min, extent.map(|e| e / grid), grid), false);
+    if let Some(s) = sel(map, min, extent.map(|e| e / grid), grid) {
+        map.fill(&s, false);
+    }
 }
 
 pub fn write_anchor(map: &mut Map, vault: &Vault, record: &VSlotProps) {
     let (min, _) = vault.anchor_box();
-    let s = sel(min, [1; 3], 1);
+    let Some(s) = sel(map, min, [1; 3], 1) else {
+        return;
+    };
     map.fill(&s, true);
     map.assign_vslot(&s, true, ANCHOR_SLOT, record);
 }
 
 pub fn write_shelf(map: &mut Map, vault: &Vault, geom: &TrapGeom) {
-    if let Some((min, _)) = vault.shelf_box(geom) {
-        map.apply_block(
-            &sel(min, geom.clip_s, geom.clip_grid),
-            geom.payload.nodes.clone(),
-            false,
-        );
+    if let Some((min, _)) = vault.shelf_box(geom)
+        && let Some(s) = sel(map, min, geom.clip_s, geom.clip_grid)
+    {
+        map.apply_block(&s, geom.payload.nodes.clone(), false);
     }
 }
 
@@ -326,7 +322,7 @@ mod tests {
         assert!(is_free(&map, vault.bounds(), None));
 
         let mut src = Map::new_empty(2048);
-        src.fill(&sel([100, 100, 600], [1; 3], 4), true);
+        src.fill(&sel(&src, [100, 100, 600], [1; 3], 4).unwrap(), true);
         let payload =
             sauer_map::clipboard::generate_clipboard_for_region(&src, [96, 96, 600], [2; 3], 8);
         let shelf = pack(
@@ -378,7 +374,7 @@ mod tests {
         let air = Vault::at_far_corner(2048, 128).bounds();
         assert!(is_free(&map, air, None));
         // A mapper's build in the corner makes it unusable.
-        map.fill(&sel([1984, 1984, 0], [1; 3], 16), true);
+        map.fill(&sel(&map, [1984, 1984, 0], [1; 3], 16).unwrap(), true);
         assert!(!is_free(&map, air, None));
         // Untouched rock (the bottom of a fresh map) is fine too.
         assert!(is_free(&map, ([896, 896, 0], [1024, 1024, 128]), None));

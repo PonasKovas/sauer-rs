@@ -18,7 +18,7 @@ use crate::map_state::{DeathrunState, get_server_state};
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
 use sauer_map::virt_ents::{FakeEnt, VirtEntUpdates};
-use sauer_proto::data::{ClipboardPayload, EntityType, Vec3};
+use sauer_proto::data::{ClipboardPayload, EntityType};
 use sauer_proto::{Client, channel1};
 use sauer_server::Server;
 use std::sync::Arc;
@@ -228,7 +228,9 @@ fn ghost(map: &mut Map, target: Target) -> Vec<ClipboardPayload> {
     let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, min, max);
     build_button(map, pos, size, orient, verdict.color(), true);
     let out = map.generate_restore_packets(min, max);
-    map.apply_block(&super::vault::sel(o, s, grid), saved.nodes, false);
+    if let Some(sel) = super::vault::sel(map, o, s, grid) {
+        map.apply_block(&sel, saved.nodes, false);
+    }
     out
 }
 
@@ -648,13 +650,7 @@ fn rerecord(
     let (o, s, grid, saved) =
         sauer_map::clipboard::generate_region_clipboard(map, region.0, region.1);
 
-    let mut sel = g.payload.sel.clone();
-    sel.o = Vec3 {
-        x: g.clip_pos[0],
-        y: g.clip_pos[1],
-        z: g.clip_pos[2],
-    };
-    map.apply_block(&sel, g.payload.nodes.clone(), false);
+    g.paste_into(map);
     if let Some((pos, size, _)) = old {
         clear_button_cell(map, pos, size);
     }
@@ -663,7 +659,9 @@ fn rerecord(
     }
     let geom = super::commands::capture_geometry(map, clip);
 
-    map.apply_block(&super::vault::sel(o, s, grid), saved.nodes, false);
+    if let Some(sel) = super::vault::sel(map, o, s, grid) {
+        map.apply_block(&sel, saved.nodes, false);
+    }
     geom
 }
 
@@ -689,7 +687,10 @@ mod tests {
     fn recordings_follow_buttons_in_and_out_of_frames() {
         let map = Map::new_empty(1024);
         let mut active = map.clone();
-        active.fill(&vault::sel([64, 64, 512], [1, 1, 1], 16), true);
+        active.fill(
+            &vault::sel(&active, [64, 64, 512], [1, 1, 1], 16).unwrap(),
+            true,
+        );
         let mut trap = Trap::new([0, 0, 512], BUTTON_SIZE, 0);
         trap.geom = Some(capture_geometry(&active, ([64, 64, 512], [128, 128, 576])));
         let mut state = DeathrunState {

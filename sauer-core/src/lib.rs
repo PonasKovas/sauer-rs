@@ -249,14 +249,91 @@ const _: () = {
     }
 };
 impl Selection {
+    /// A box of `s` cubes of size `grid` at `o`, facing `orient`.
+    pub fn new(o: [i32; 3], s: [i32; 3], grid: i32, orient: Orient) -> Self {
+        Self {
+            o: Vec3 {
+                x: o[0],
+                y: o[1],
+                z: o[2],
+            },
+            s: Vec3 {
+                x: s[0],
+                y: s[1],
+                z: s[2],
+            },
+            grid,
+            orient,
+            cx: 0,
+            cxs: 0,
+            cy: 0,
+            cys: 0,
+            corner: 0,
+        }
+    }
+
+    /// The box the selection covers. Saturates instead of overflowing, so an
+    /// unchecked selection gives a huge box rather than a wrapped one.
     pub fn bounds(&self) -> ([i32; 3], [i32; 3]) {
         let min = [self.o.x, self.o.y, self.o.z];
-        let max = [
-            min[0] + self.s.x * self.grid,
-            min[1] + self.s.y * self.grid,
-            min[2] + self.s.z * self.grid,
-        ];
+        let max = [0, 1, 2].map(|i| min[i].saturating_add(self.s[i].saturating_mul(self.grid)));
         (min, max)
+    }
+
+    /// Checks the selection against a world, like the engine's
+    /// `selinfo::validate`, plus what our octree code needs. See [`ValidSel`].
+    pub fn validate(&self, world_size: i32) -> Option<ValidSel> {
+        let grid = self.grid;
+        if grid <= 0 || grid >= world_size || !(grid as u32).is_power_of_two() {
+            return None;
+        }
+        let mut sel = self.clone();
+        for i in 0..3 {
+            let (o, s) = (sel.o[i] as i64, sel.s[i] as i64);
+            let (grid, world) = (grid as i64, world_size as i64);
+            if o >= world {
+                return None;
+            }
+            // Cut off what sticks out below the world, then what sticks out above.
+            let (o, s) = if o < 0 {
+                (0, s - (grid - 1 - o) / grid)
+            } else {
+                (o, s)
+            };
+            sel.o[i] = o as i32;
+            sel.s[i] = s.clamp(0, (world - o) / grid) as i32;
+        }
+        let cubes = (0..3).map(|i| sel.s[i] as i64).product::<i64>();
+        if cubes == 0 || cubes > MAX_SEL_CUBES {
+            return None;
+        }
+        sel.corner &= 3;
+        Some(ValidSel(sel))
+    }
+}
+
+/// Most grid cubes one edit may cover. The engine has no limit, but every
+/// client would freeze looping over more than this, and the server's copy
+/// of the map would need that many nodes.
+pub const MAX_SEL_CUBES: i64 = 1 << 21;
+
+/// A [`Selection`] checked against a world: `grid` is a power of two smaller
+/// than the world, the box lies inside the world and isn't empty, it covers
+/// at most [`MAX_SEL_CUBES`] cubes, and `corner` is 0..4. Edits from clients
+/// only reach the octree as one of these.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidSel(Selection);
+
+impl ValidSel {
+    pub fn into_inner(self) -> Selection {
+        self.0
+    }
+}
+
+impl std::ops::Deref for ValidSel {
+    type Target = Selection;
+    fn deref(&self) -> &Selection {
+        &self.0
     }
 }
 

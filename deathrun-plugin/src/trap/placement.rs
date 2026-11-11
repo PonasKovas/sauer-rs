@@ -176,9 +176,10 @@ pub fn build_button_geometry(map: &mut sauer_map::Map, adj: [i32; 3], size: i32,
 
 /// Clears a button's cell: the whole cell belongs to the button.
 pub fn clear_button_cell(map: &mut sauer_map::Map, adj: [i32; 3], size: i32) {
-    let cell = super::vault::sel(adj, [1, 1, 1], size);
-    map.fill(&cell, false);
-    map.set_material(&cell, Default::default());
+    if let Some(cell) = super::vault::sel(map, adj, [1, 1, 1], size) {
+        map.fill(&cell, false);
+        map.set_material(&cell, Default::default());
+    }
 }
 
 /// Builds a button's cell: air, with the button on the `orient` side.
@@ -201,25 +202,11 @@ pub fn build_button(
     let mut s = [size; 3];
     s[d] = 2;
 
-    let sel = sauer_map::Selection {
-        o: sauer_proto::data::Vec3 {
-            x: min[0],
-            y: min[1],
-            z: min[2],
-        },
-        s: sauer_proto::data::Vec3 {
-            x: s[0],
-            y: s[1],
-            z: s[2],
-        },
-        grid: 1, // fill exactly with 1x1x1 cubes, robust to deformation
-        orient: sauer_proto::data::Orient::try_from(orient as i32)
-            .unwrap_or(sauer_proto::data::Orient::Left),
-        cx: 0,
-        cxs: 0,
-        cy: 0,
-        cys: 0,
-        corner: 0,
+    // Grid 1: fill exactly with 1x1x1 cubes, robust to deformation.
+    let sel_orient = sauer_proto::data::Orient::try_from(orient as i32)
+        .unwrap_or(sauer_proto::data::Orient::Left);
+    let Some(sel) = sauer_map::Selection::new(min, s, 1, sel_orient).validate(map.size) else {
+        return;
     };
 
     map.fill(&sel, true);

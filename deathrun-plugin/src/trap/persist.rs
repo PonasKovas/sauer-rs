@@ -434,7 +434,12 @@ pub fn load(map: &Map) -> Loaded {
                 clip_s: g.clip_s,
                 clip_grid: g.clip_grid,
                 payload: ClipboardPayload {
-                    sel: vault::sel(g.clip_pos, g.clip_s, g.clip_grid),
+                    sel: sauer_map::Selection::new(
+                        g.clip_pos,
+                        g.clip_s,
+                        g.clip_grid,
+                        sauer_proto::data::Orient::Left,
+                    ),
                     nodes: Vec::new(),
                     vslots: Vec::new(),
                 },
@@ -496,7 +501,10 @@ mod tests {
         let mut map = Map::new_empty(1024);
         map.entities.push(light([100.0, 100.0, 600.0]));
         let mut active = map.clone();
-        active.fill(&vault::sel([96, 96, 512], [1, 1, 4], 8), true);
+        active.fill(
+            &vault::sel(&active, [96, 96, 512], [1, 1, 4], 8).unwrap(),
+            true,
+        );
         let geom = capture_geometry(&active, ([96, 96, 512], [104, 104, 544]));
 
         let mut trap = Trap::new([8, 8, 512], 8, 0);

@@ -36,7 +36,9 @@ pub fn extract_node_at(
     target_pos: [i32; 3],
     target_size: i32,
 ) -> Node {
-    if node_size == target_size {
+    // `<=` and the size check stop a bad target (not a power of two, or
+    // outside the world) from recursing forever.
+    if node_size <= target_size || node_size <= 1 {
         return node.clone();
     }
     match node {

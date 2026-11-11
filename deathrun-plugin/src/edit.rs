@@ -1040,7 +1040,9 @@ impl Plugin for DeathrunEdit {
                 // The Sauerbraten client's `delcube` command locally calls `makeempty`,
                 // which resets materials to MAT_AIR. However, it does not send an explicit
                 // EditMat packet. We must manually mirror this material wipe on the server.
-                map.set_material(&packet.sel, Default::default());
+                if let Some(sel) = packet.sel.validate(map.size) {
+                    map.set_material(&sel, Default::default());
+                }
             }
             ok
         });
@@ -1064,9 +1066,8 @@ impl Plugin for DeathrunEdit {
     }
 
     async fn edit_face(&self, ctx: &mut Context, packet: &channel1::EditFace) -> Flow {
-        guard::geometry_edit(ctx, guard::edit_face_bounds(packet), |map| {
-            map.apply_edit_face(packet)
-        });
+        let bounds = sauer_map::map::edit_face_bounds(&packet.sel, packet.dir, packet.mode as i32);
+        guard::geometry_edit(ctx, bounds, |map| map.apply_edit_face(packet));
         Flow::Continue
     }
 
@@ -1136,9 +1137,10 @@ impl Plugin for DeathrunEdit {
             .map
             .as_mut()
         {
-            let payload = state.copy_selection(&packet.sel);
-
-            server.players.with_mut(id, |p| p.clipboard = Some(payload));
+            if let Some(sel) = packet.sel.validate(state.size) {
+                let payload = state.copy_selection(&sel);
+                server.players.with_mut(id, |p| p.clipboard = Some(payload));
+            }
         }
 
         let cn = server.get_cn(id).unwrap_or(sauer_proto::data::Cn(0));

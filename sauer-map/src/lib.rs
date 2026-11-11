@@ -15,4 +15,4 @@ pub mod vslot;
 pub use edit::{apply_region, fill, set_material, set_texture};
 pub use geom::subdivide;
 pub use map::Map;
-pub use sauer_core::{Cube, Node, Selection};
+pub use sauer_core::{Cube, Node, Selection, ValidSel};

@@ -95,29 +95,33 @@ pub fn generate_clipboard_for_region(
     }
 }
 
+/// The grid-aligned box a region is copied as: the region clipped to the
+/// world, padded out to a grid coarse enough that it spans at most 8 cubes
+/// and doesn't split a shaped leaf. Returns `(origin, size in cubes, grid)`.
+pub(crate) fn region_layout(map: &Map, min: [i32; 3], max: [i32; 3]) -> ([i32; 3], [i32; 3], i32) {
+    let min = min.map(|v| v.clamp(0, map.size));
+    let max: [i32; 3] = std::array::from_fn(|i| max[i].clamp(min[i], map.size));
+    let max_span = (0..3).map(|i| max[i] - min[i]).max().unwrap_or(1).max(1);
+    let mut grid = 1i32;
+    while (max_span + grid - 1) / grid > 8 {
+        grid <<= 1;
+    }
+    let shaped = crate::octree::max_shaped_leaf(&map.root, [0; 3], map.size, min, max);
+    let grid = grid.max(shaped).min(map.size);
+
+    let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
+    let padded_max: [i32; 3] =
+        std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(map.size));
+    let s = std::array::from_fn(|i| (padded_max[i] - padded_min[i]) / grid);
+    (padded_min, s, grid)
+}
+
 pub fn generate_region_clipboard(
     map: &Map,
     min: [i32; 3],
     max: [i32; 3],
 ) -> ([i32; 3], [i32; 3], i32, ClipboardPayload) {
-    let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-    let max_span = spans.iter().copied().max().unwrap_or(1).max(1);
-    let mut grid = 1i32;
-    while (max_span + grid - 1) / grid > 8 {
-        grid <<= 1;
-    }
-    grid = grid.max(crate::octree::max_shaped_leaf(
-        &map.root, [0; 3], map.size, min, max,
-    ));
-
-    let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
-    let padded_max: [i32; 3] =
-        std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(map.size));
-    let sx = (padded_max[0] - padded_min[0]) / grid;
-    let sy = (padded_max[1] - padded_min[1]) / grid;
-    let sz = (padded_max[2] - padded_min[2]) / grid;
-    let s = [sx, sy, sz];
-
-    let payload = generate_clipboard_for_region(map, padded_min, s, grid);
-    (padded_min, s, grid, payload)
+    let (o, s, grid) = region_layout(map, min, max);
+    let payload = generate_clipboard_for_region(map, o, s, grid);
+    (o, s, grid, payload)
 }

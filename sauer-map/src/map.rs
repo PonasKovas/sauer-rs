@@ -1,5 +1,5 @@
 use crate::edit::{apply_region, fill, set_material, set_texture};
-use crate::{Cube, Node, Selection};
+use crate::{Cube, Node, Selection, ValidSel};
 use ogz_rs::OgzMap;
 use ogz_rs::data::VSlot;
 use ogz_rs::data::{Entity, Lightmap, MapConfig, Variable};
@@ -368,7 +368,7 @@ impl Map {
     /// props in `ds` (like `N_EDITT` with `tex = 0x10000 | slot`). Returns the vslot index.
     pub fn assign_vslot(
         &mut self,
-        sel: &Selection,
+        sel: &ValidSel,
         all_faces: bool,
         slot: u16,
         ds: &VSlotProps,
@@ -441,13 +441,16 @@ impl Map {
     /// Applies a texture modification to a geometry selection.
     /// Returns `false` if the edit was rejected because it intersected a protected region.
     pub fn apply_edit_tex(&mut self, packet: &channel1::EditTex) -> bool {
-        let (min, max) = packet.sel.bounds();
+        let Some(sel) = packet.sel.validate(self.size) else {
+            return true;
+        };
+        let (min, max) = sel.bounds();
         if self.is_protected(min, max) {
             return false;
         }
         let tex = crate::vslot::resolve_tex(&mut self.vslots, &packet.tex, true)
             .expect("inserting lookup always succeeds");
-        self.set_texture(&packet.sel, tex, packet.all_faces);
+        self.set_texture(&sel, tex, packet.all_faces);
         self.invalidate_cache();
         true
     }
@@ -473,6 +476,9 @@ impl Map {
             };
         }
 
+        let Some(sel) = packet.sel.validate(self.size) else {
+            return true;
+        };
         let (matid, matmask) = if packet_mat < 0 {
             let matmask = if (filtermat & 0x1C) == 0x0C {
                 filtermask & !0xE0u16
@@ -500,12 +506,12 @@ impl Map {
             (matid, matmask)
         };
 
-        let (min, max) = packet.sel.bounds();
+        let (min, max) = sel.bounds();
         if self.is_protected(min, max) {
             return false;
         }
 
-        self.edit_sel(&packet.sel, |node, _| match node {
+        self.edit_sel(&sel, |node, _| match node {
             Node::Leaf(cube) => {
                 let current = cube.material.to_bits();
                 if (current & filtermask) == filtermat {
@@ -535,11 +541,14 @@ impl Map {
     /// Clears geometry (fills with air) in a selection.
     /// Returns `false` if the edit was rejected because it intersected a protected region.
     pub fn apply_del_cube(&mut self, packet: &channel1::DelCube) -> bool {
-        let (min, max) = packet.sel.bounds();
+        let Some(sel) = packet.sel.validate(self.size) else {
+            return true;
+        };
+        let (min, max) = sel.bounds();
         if self.is_protected(min, max) {
             return false;
         }
-        self.fill(&packet.sel, false);
+        self.fill(&sel, false);
         self.invalidate_cache();
         true
     }
@@ -547,15 +556,20 @@ impl Map {
     /// Replaces all instances of a texture with another, optionally within a selection.
     /// Returns `false` if the edit was rejected because it intersected a protected region.
     pub fn apply_replace(&mut self, packet: &channel1::Replace) -> bool {
-        if packet.in_sel {
-            let (min, max) = packet.sel.bounds();
+        let sel = if packet.in_sel {
+            let Some(sel) = packet.sel.validate(self.size) else {
+                return true;
+            };
+            let (min, max) = sel.bounds();
             if self.is_protected(min, max) {
                 return false;
             }
+            Some(sel)
         } else if !self.protected_regions.is_empty() {
             return false;
-        }
-        let sel = packet.in_sel.then(|| packet.sel.clone());
+        } else {
+            None
+        };
         // Like the engine's `mpreplacetex`: the old texture must already exist,
         // the new one is created if needed; on failure nothing changes.
         let Some(old_tex) = crate::vslot::resolve_tex(&mut self.vslots, &packet.old_tex, false)
@@ -572,53 +586,16 @@ impl Map {
     /// Modifies the topology of the map by extruding, cornering, or filling a face.
     /// Returns `false` if the edit was rejected because it intersected a protected region.
     pub fn apply_edit_face(&mut self, packet: &channel1::EditFace) -> bool {
-        let mut min = [packet.sel.o.x, packet.sel.o.y, packet.sel.o.z];
-        let mut max = [
-            min[0] + packet.sel.s.x * packet.sel.grid,
-            min[1] + packet.sel.s.y * packet.sel.grid,
-            min[2] + packet.sel.s.z * packet.sel.grid,
-        ];
-
-        let d = (packet.sel.orient as usize) >> 1;
-        let dc = (packet.sel.orient as usize) & 1;
-        let dir = packet.dir;
-        let grid = packet.sel.grid;
-
-        let mut actual_mode = packet.mode as i32;
-        if actual_mode == 1
-            && (packet.sel.cx > 0
-                || packet.sel.cy > 0
-                || (packet.sel.cxs & 1) != 0
-                || (packet.sel.cys & 1) != 0)
-        {
-            actual_mode = 0;
-        }
-
-        if actual_mode == 1 {
-            if dc == 1 {
-                let old_face = max[d];
-                let new_face = max[d] - dir * grid;
-                min[d] = old_face.min(new_face);
-                max[d] = old_face.max(new_face);
-            } else {
-                let old_face = min[d];
-                let new_face = min[d] + dir * grid;
-                min[d] = old_face.min(new_face);
-                max[d] = old_face.max(new_face);
-            }
-        } else {
-            if dc == 1 {
-                min[d] = max[d] - grid;
-            } else {
-                max[d] = min[d] + grid;
-            }
-        }
-
+        let Some(sel) = packet.sel.validate(self.size) else {
+            return true;
+        };
+        let (dir, mode) = (packet.dir.clamp(-1, 1), packet.mode as i32);
+        let (min, max) = edit_face_bounds(&sel, dir, mode);
         if self.is_protected(min, max) {
             return false;
         }
 
-        self.edit_face(&packet.sel, packet.dir, packet.mode as i32);
+        self.edit_face(&sel, dir, mode);
         self.invalidate_cache();
         true
     }
@@ -656,18 +633,23 @@ impl Map {
         if packet.vslot.is_empty() {
             return true;
         }
-        let (min, max) = packet.sel.bounds();
+        let Some(sel) = packet.sel.validate(self.size) else {
+            return true;
+        };
+        let (min, max) = sel.bounds();
         if self.is_protected(min, max) {
             return false;
         }
-        self.apply_vslot_edit(packet);
+        self.apply_vslots(&sel, packet.all_faces, packet.delta, &packet.vslot);
         self.invalidate_cache();
         true
     }
 
     /// Applies an `N_EDITVSLOT` without checking protected regions.
     pub fn apply_vslot_edit(&mut self, packet: &channel1::EditVSlot) {
-        self.apply_vslots(&packet.sel, packet.all_faces, packet.delta, &packet.vslot);
+        if let Some(sel) = packet.sel.validate(self.size) {
+            self.apply_vslots(&sel, packet.all_faces, packet.delta, &packet.vslot);
+        }
     }
 
     /// Pastes copied geometry back into the octree at the target selection.
@@ -680,6 +662,9 @@ impl Map {
         let mut paste_sel = packet.sel.clone();
         paste_sel.s = payload.sel.s;
         paste_sel.orient = payload.sel.orient;
+        let Some(paste_sel) = paste_sel.validate(self.size) else {
+            return true;
+        };
         let (min, max) = paste_sel.bounds();
         if self.is_protected(min, max) {
             return false;
@@ -698,6 +683,9 @@ impl Map {
             sauer_proto::data::UndoPayload::Cubes {
                 sel, nodes, vslots, ..
             } => {
+                let Some(sel) = sel.validate(self.size) else {
+                    return true;
+                };
                 let (min, max) = sel.bounds();
                 if self.is_protected(min, max) {
                     return false;
@@ -705,7 +693,7 @@ impl Map {
                 // Undo blocks use the sending client's vslot numbering.
                 let mut nodes = nodes.clone();
                 crate::vslot::import(&mut self.vslots, vslots, &mut nodes);
-                self.apply_block(sel, nodes, false);
+                self.apply_block(&sel, nodes, false);
                 true
             }
             sauer_proto::data::UndoPayload::Entities(ents) => {
@@ -742,7 +730,7 @@ impl Map {
     }
 
     /// Extracts geometry within the given selection to create a payload for a clipboard copy.
-    pub fn copy_selection(&mut self, sel: &Selection) -> sauer_proto::data::ClipboardPayload {
+    pub fn copy_selection(&mut self, sel: &ValidSel) -> sauer_proto::data::ClipboardPayload {
         let d = sel.orient as usize >> 1;
         let r_dim = [1usize, 2, 0][d];
         let c_dim = [2usize, 0, 1][d];
@@ -780,7 +768,7 @@ impl Map {
         let vslots = crate::clipboard::extract_vslots(&extracted_nodes, &self.vslots);
 
         sauer_proto::data::ClipboardPayload {
-            sel: sel.clone(),
+            sel: (**sel).clone(),
             nodes: extracted_nodes,
             vslots,
         }
@@ -827,13 +815,10 @@ impl Map {
         }
     }
 
-    pub fn edit_sel<F>(&mut self, sel: &Selection, mut f: F)
+    pub fn edit_sel<F>(&mut self, sel: &ValidSel, mut f: F)
     where
         F: FnMut(&mut Node, [i32; 3]),
     {
-        if sel.grid <= 0 || [sel.s.x, sel.s.y, sel.s.z].into_iter().any(|n| n <= 0) {
-            return;
-        }
         let (min, max) = sel.bounds();
         apply_region(
             &mut self.root,
@@ -846,11 +831,11 @@ impl Map {
         );
     }
 
-    pub fn set_material(&mut self, sel: &Selection, mat: ogz_rs::data::Material) {
+    pub fn set_material(&mut self, sel: &ValidSel, mat: ogz_rs::data::Material) {
         self.edit_sel(sel, |node, _| set_material(node, mat));
     }
 
-    pub fn set_texture(&mut self, sel: &Selection, tex: u16, all_faces: bool) {
+    pub fn set_texture(&mut self, sel: &ValidSel, tex: u16, all_faces: bool) {
         let orient = if all_faces {
             None
         } else {
@@ -859,7 +844,7 @@ impl Map {
         self.edit_sel(sel, |node, _| set_texture(node, tex, orient));
     }
 
-    pub fn fill(&mut self, sel: &Selection, is_solid: bool) {
+    pub fn fill(&mut self, sel: &ValidSel, is_solid: bool) {
         self.edit_sel(sel, |node, _| fill(node, is_solid));
     }
 
@@ -903,7 +888,7 @@ impl Map {
         recurse(&mut self.root, [0, 0, 0], self.size, pos, size, node);
     }
 
-    pub fn replace_texture(&mut self, sel: Option<&Selection>, old_tex: u16, new_tex: u16) {
+    pub fn replace_texture(&mut self, sel: Option<&ValidSel>, old_tex: u16, new_tex: u16) {
         fn replace(node: &mut Node, old_tex: u16, new_tex: u16) {
             match node {
                 Node::Leaf(cube) => {
@@ -927,7 +912,7 @@ impl Map {
         }
     }
 
-    pub fn apply_vslots(&mut self, sel: &Selection, all_faces: bool, delta: bool, ds: &VSlotProps) {
+    pub fn apply_vslots(&mut self, sel: &ValidSel, all_faces: bool, delta: bool, ds: &VSlotProps) {
         let orient = sel.orient as usize;
 
         fn crushededge(e: u8, dc: usize) -> bool {
@@ -1082,7 +1067,7 @@ impl Map {
         });
     }
 
-    pub fn edit_face(&mut self, sel: &Selection, dir: i32, mode: i32) {
+    pub fn edit_face(&mut self, sel: &ValidSel, dir: i32, mode: i32) {
         use crate::geom::{C, R, dimcoord, dimension, linked_push, optiface};
         let d = dimension(sel.orient as usize);
         let dc = dimcoord(sel.orient as usize);
@@ -1093,7 +1078,7 @@ impl Map {
         {
             actual_mode = 0;
         }
-        let mut local_sel = sel.clone();
+        let mut local_sel: Selection = (**sel).clone();
 
         if actual_mode == 1 {
             let h = local_sel.o[d] + (dc as i32) * local_sel.grid;
@@ -1130,7 +1115,11 @@ impl Map {
             }
         }
 
-        self.edit_sel(&local_sel, |node, pos| {
+        // The face slice of a valid selection still lies in the world.
+        let Some(face_sel) = local_sel.validate(self.size) else {
+            return;
+        };
+        self.edit_sel(&face_sel, |node, pos| {
             let (inherited_tex, inherited_mat) = match node {
                 Node::Leaf(c) => (c.textures, c.material),
                 Node::Branch(children) => {
@@ -1218,12 +1207,7 @@ impl Map {
         });
     }
 
-    pub fn apply_block(
-        &mut self,
-        sel: &Selection,
-        nodes: Vec<sauer_core::Node>,
-        transparent: bool,
-    ) {
+    pub fn apply_block(&mut self, sel: &ValidSel, nodes: Vec<sauer_core::Node>, transparent: bool) {
         if nodes.is_empty() {
             return;
         }
@@ -1266,4 +1250,29 @@ impl Map {
         });
         self.invalidate_cache();
     }
+}
+
+/// The box an `N_EDITF` changes: the selection's face slab, or for an extrude
+/// (mode 1) the slab between the old and new face. Saturates, so it's safe on
+/// an unchecked selection.
+pub fn edit_face_bounds(sel: &Selection, dir: i32, mode: i32) -> ([i32; 3], [i32; 3]) {
+    let (mut min, mut max) = sel.bounds();
+    let d = (sel.orient as usize) >> 1;
+    let dc = (sel.orient as usize) & 1;
+    let step = dir.clamp(-1, 1).saturating_mul(sel.grid);
+    let extrude = mode == 1 && sel.cx <= 0 && sel.cy <= 0 && sel.cxs & 1 == 0 && sel.cys & 1 == 0;
+    if extrude {
+        let (old_face, new_face) = if dc == 1 {
+            (max[d], max[d].saturating_sub(step))
+        } else {
+            (min[d], min[d].saturating_add(step))
+        };
+        min[d] = old_face.min(new_face);
+        max[d] = old_face.max(new_face);
+    } else if dc == 1 {
+        min[d] = max[d].saturating_sub(sel.grid);
+    } else {
+        max[d] = min[d].saturating_add(sel.grid);
+    }
+    (min, max)
 }

@@ -71,7 +71,9 @@ pub fn geometry_edit(ctx: &Context, bounds: Box3, mut apply: impl FnMut(&mut Map
         return;
     }
     let map = state.map.as_mut().unwrap();
-    map.apply_block(&super::vault::sel(pos, s, grid), payload.nodes, false);
+    if let Some(sel) = super::vault::sel(map, pos, s, grid) {
+        map.apply_block(&sel, payload.nodes, false);
+    }
     drop(state);
     let msg = format!(
         "\x0C3[ERROR]\x0C7 Edit reverted: the trap would be {} KB, over the {} KB limit.",
@@ -345,39 +347,6 @@ pub fn box_edges(min: [i32; 3], max: [i32; 3], eye: Option<Eye>) -> Vec<(i32, i3
         }
     }
     out
-}
-
-/// Bounds touched by an `N_EDITF` (extruding reaches past the selection).
-pub fn edit_face_bounds(packet: &channel1::EditFace) -> Box3 {
-    let sel = &packet.sel;
-    let mut min = [sel.o.x, sel.o.y, sel.o.z];
-    let mut max = [
-        min[0] + sel.s.x * sel.grid,
-        min[1] + sel.s.y * sel.grid,
-        min[2] + sel.s.z * sel.grid,
-    ];
-    let d = (sel.orient as usize) >> 1;
-    let dc = (sel.orient as usize) & 1;
-    let (dir, grid) = (packet.dir, sel.grid);
-    let extrude = packet.mode as i32 == 1
-        && sel.cx <= 0
-        && sel.cy <= 0
-        && sel.cxs & 1 == 0
-        && sel.cys & 1 == 0;
-    if extrude {
-        let (old_face, new_face) = if dc == 1 {
-            (max[d], max[d] - dir * grid)
-        } else {
-            (min[d], min[d] + dir * grid)
-        };
-        min[d] = old_face.min(new_face);
-        max[d] = old_face.max(new_face);
-    } else if dc == 1 {
-        min[d] = max[d] - grid;
-    } else {
-        max[d] = min[d] + grid;
-    }
-    (min, max)
 }
 
 #[cfg(test)]

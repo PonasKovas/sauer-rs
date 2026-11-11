@@ -90,6 +90,19 @@ pub struct TrapGeom {
 }
 
 impl TrapGeom {
+    /// Pastes the trap's geometry over its clip box.
+    pub fn paste_into(&self, map: &mut sauer_map::Map) {
+        let mut sel = self.payload.sel.clone();
+        sel.o = sauer_proto::data::Vec3 {
+            x: self.clip_pos[0],
+            y: self.clip_pos[1],
+            z: self.clip_pos[2],
+        };
+        if let Some(sel) = sel.validate(map.size) {
+            map.apply_block(&sel, self.payload.nodes.clone(), false);
+        }
+    }
+
     pub fn extent(&self) -> [i32; 3] {
         self.clip_s.map(|s| s * self.clip_grid)
     }

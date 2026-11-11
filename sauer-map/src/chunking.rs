@@ -26,22 +26,8 @@ fn do_chunk(
     max_bytes: usize,
     out: &mut Vec<ClipboardPayload>,
 ) {
-    let mut grid = 1i32;
-    let spans = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-    let max_span = spans.iter().copied().max().unwrap_or(1).max(1);
-    while (max_span + grid - 1) / grid > 8 {
-        grid <<= 1;
-    }
+    let (padded_min, [sx, sy, sz], grid) = crate::clipboard::region_layout(map, min, max);
     let shaped = crate::octree::max_shaped_leaf(&map.root, [0; 3], map.size, min, max);
-    grid = grid.max(shaped);
-
-    let padded_min: [i32; 3] = std::array::from_fn(|i| min[i].div_euclid(grid) * grid);
-    let padded_max: [i32; 3] =
-        std::array::from_fn(|i| (((max[i] + grid - 1).div_euclid(grid)) * grid).min(map.size));
-
-    let sx = (padded_max[0] - padded_min[0]) / grid;
-    let sy = (padded_max[1] - padded_min[1]) / grid;
-    let sz = (padded_max[2] - padded_min[2]) / grid;
 
     // Check if it's 1x1x1 and cannot be split further
     // Going smaller than `shaped` would split a shaped leaf.
