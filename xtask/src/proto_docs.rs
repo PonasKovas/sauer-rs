@@ -1,12 +1,5 @@
-#!/usr/bin/env rust-script
-//! ```cargo
-//! [dependencies]
-//! regex = "1"
-//! ```
-//!
-//! Generates a concise Markdown reference for the sauer-proto packet protocol.
-//! Usage: ./gen-proto-docs.rs [path/to/sauer-proto/src]
-//! Defaults to ./sauer-proto/src relative to CWD.
+//! Writes `sauer-proto-ref.md`, a short Markdown reference for the sauer-proto
+//! packet protocol.
 
 use regex::Regex;
 use std::collections::HashMap;
@@ -36,7 +29,6 @@ struct EnumDef {
 
 #[derive(Debug, Clone)]
 struct PacketEntry {
-    tag: String,
     name: String,
     client_wrapped: bool,
     reliable: bool,
@@ -65,7 +57,9 @@ fn extract_macro_bodies(src: &str, kw: &str) -> Vec<String> {
     let pat = format!("{kw}(");
     let mut pos = 0;
     while pos < src.len() {
-        let Some(rel) = src[pos..].find(&pat) else { break };
+        let Some(rel) = src[pos..].find(&pat) else {
+            break;
+        };
         let start = pos + rel + pat.len();
         let mut depth = 1i32;
         let mut i = start;
@@ -132,7 +126,6 @@ fn parse_packet_enums(src: &str) -> Vec<PacketEnum> {
             let mut entries = Vec::new();
             for cap in entry_re.captures_iter(body) {
                 entries.push(PacketEntry {
-                    tag: cap[1].to_string(),
                     name: cap[3].to_string(),
                     client_wrapped: cap.get(4).is_some(),
                     reliable: cap.get(2).is_none(),
@@ -152,7 +145,8 @@ fn parse_make_structs(src: &str) -> Vec<StructDef> {
     let tag_re = Regex::new(r"^\[(\w+)\]\s+(\w+)\s*\{([\s\S]*)\}").unwrap();
     let notag_re = Regex::new(r"^(\w+)\s*\{([\s\S]*)\}").unwrap();
     // Field: word: type (stopping at => or , or end of content)
-    let field_re = Regex::new(r"(?m)^\s+(\w+):\s*([\w\[\]<>, :;*&']+?)(?:\s*=>|\s*,|\s*$)").unwrap();
+    let field_re =
+        Regex::new(r"(?m)^\s+(\w+):\s*([\w\[\]<>, :;*&']+?)(?:\s*=>|\s*,|\s*$)").unwrap();
 
     bodies
         .iter()
@@ -161,11 +155,14 @@ fn parse_make_structs(src: &str) -> Vec<StructDef> {
             let rest = rest.trim().to_string();
 
             let (tag, name, fields_str) = if let Some(cap) = tag_re.captures(&rest) {
-                (Some(cap[1].to_string()), cap[2].to_string(), cap[3].to_string())
-            } else if let Some(cap) = notag_re.captures(&rest) {
-                (None, cap[1].to_string(), cap[2].to_string())
+                (
+                    Some(cap[1].to_string()),
+                    cap[2].to_string(),
+                    cap[3].to_string(),
+                )
             } else {
-                return None;
+                let cap = notag_re.captures(&rest)?;
+                (None, cap[1].to_string(), cap[2].to_string())
             };
 
             let mut fields = Vec::new();
@@ -177,7 +174,12 @@ fn parse_make_structs(src: &str) -> Vec<StructDef> {
                 }
             }
 
-            Some(StructDef { name, tag, doc, fields })
+            Some(StructDef {
+                name,
+                tag,
+                doc,
+                fields,
+            })
         })
         .collect()
 }
@@ -222,7 +224,12 @@ fn parse_make_enums(src: &str) -> Vec<EnumDef> {
                 }
             }
 
-            Some(EnumDef { name, doc, repr, variants })
+            Some(EnumDef {
+                name,
+                doc,
+                repr,
+                variants,
+            })
         })
         .collect()
 }
@@ -250,21 +257,19 @@ fn parse_manual_structs(src: &str) -> Vec<StructDef> {
         let doc = extract_block_doc(prefix);
 
         let mut fields = Vec::new();
-        let mut pending_doc = String::new();
         for line in body.lines() {
-            let t = line.trim();
-            if t.starts_with("///") {
-                pending_doc = t.trim_start_matches("///").trim().to_string();
-            } else if let Some(fc) = field_re.captures(line) {
-                let ftype = fc[2].trim().trim_end_matches(|c: char| c == ',' || c == ';').trim().to_string();
+            if let Some(fc) = field_re.captures(line) {
+                let ftype = fc[2].trim().trim_end_matches([',', ';']).trim().to_string();
                 fields.push((fc[1].to_string(), ftype));
-                pending_doc = String::new();
-            } else if !t.is_empty() {
-                pending_doc = String::new();
             }
         }
 
-        results.push(StructDef { name, tag: None, doc, fields });
+        results.push(StructDef {
+            name,
+            tag: None,
+            doc,
+            fields,
+        });
     }
     results
 }
@@ -273,7 +278,7 @@ fn parse_manual_enums(src: &str) -> Vec<EnumDef> {
     let block_re = Regex::new(r"(?m)^pub enum (\w+)\s*\{([^}]*)\}").unwrap();
     let tuple_variant_re = Regex::new(r"^(\w+)\(([^)]+)\)").unwrap();
     let value_variant_re = Regex::new(r"^(\w+)\s*=\s*(-?\d+)").unwrap();
-    let unit_variant_re  = Regex::new(r"^(\w+)\s*,?$").unwrap();
+    let unit_variant_re = Regex::new(r"^(\w+)\s*,?$").unwrap();
     // Extract repr type from attributes preceding the enum
     let repr_re = Regex::new(r"#\[repr\((\w+)\)\]").unwrap();
 
@@ -288,7 +293,8 @@ fn parse_manual_enums(src: &str) -> Vec<EnumDef> {
 
         // Grab repr from the ~5 lines before the enum
         let pre_lines: Vec<&str> = prefix.lines().rev().take(8).collect();
-        let repr = pre_lines.iter()
+        let repr = pre_lines
+            .iter()
             .find_map(|l| repr_re.captures(l).map(|c| c[1].to_string()))
             .unwrap_or_default();
 
@@ -298,8 +304,10 @@ fn parse_manual_enums(src: &str) -> Vec<EnumDef> {
             // Strip #[...] attribute prefixes
             let t = line.trim();
             let t = if t.starts_with("#[") {
-                t.splitn(2, ']').nth(1).unwrap_or("").trim()
-            } else { t };
+                t.split_once(']').map_or("", |(_, r)| r).trim()
+            } else {
+                t
+            };
             if t.starts_with("///") {
                 pending_doc = t.trim_start_matches("///").trim().to_string();
             } else if let Some(vc) = tuple_variant_re.captures(t) {
@@ -319,7 +327,12 @@ fn parse_manual_enums(src: &str) -> Vec<EnumDef> {
             }
         }
 
-        results.push(EnumDef { name, doc, repr, variants });
+        results.push(EnumDef {
+            name,
+            doc,
+            repr,
+            variants,
+        });
     }
     results
 }
@@ -381,7 +394,11 @@ fn format_routes(impls: &[RouteImpl]) -> String {
 // ---------------------------------------------------------------------------
 
 fn write_struct(out: &mut String, s: &StructDef, routing: &HashMap<String, Vec<RouteImpl>>) {
-    let tag_str = s.tag.as_deref().map(|t| format!(" (`{t}`)")).unwrap_or_default();
+    let tag_str = s
+        .tag
+        .as_deref()
+        .map(|t| format!(" (`{t}`)"))
+        .unwrap_or_default();
     writeln!(out, "### `{}`{}", s.name, tag_str).unwrap();
     if !s.doc.is_empty() {
         writeln!(out, "{}", s.doc).unwrap();
@@ -431,23 +448,18 @@ fn write_enum(out: &mut String, e: &EnumDef) {
 // Main
 // ---------------------------------------------------------------------------
 
-fn main() {
-    let src_arg = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "sauer-proto/src".to_string());
-    let src = Path::new(&src_arg);
-
+/// Reads `src` (sauer-proto/src) and writes the reference to `dest`.
+pub fn run(src: &Path, dest: &Path) {
     macro_rules! read {
         ($p:expr) => {
-            fs::read_to_string(src.join($p))
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", $p))
+            fs::read_to_string(src.join($p)).unwrap_or_else(|e| panic!("cannot read {}: {e}", $p))
         };
     }
 
     let chan0 = read!("messages/channel0.rs");
     let chan1 = read!("messages/channel1.rs");
     let chan2 = read!("messages/channel2.rs");
-    let data  = read!("data.rs");
+    let data = read!("data.rs");
 
     // sub-module files are referenced in the hardcoded sections below; not parsed individually
     let _chan2_structs_unused = &chan2;
@@ -485,7 +497,11 @@ fn main() {
     let mut out = String::new();
 
     writeln!(out, "# sauer-proto Protocol Reference\n").unwrap();
-    writeln!(out, "> Auto-generated concise reference. Source: `sauer-proto/src/`.\n").unwrap();
+    writeln!(
+        out,
+        "> Auto-generated concise reference. Source: `sauer-proto/src/`.\n"
+    )
+    .unwrap();
 
     // ------------------------------------------------------------------
     // SECTION: Core API
@@ -493,19 +509,43 @@ fn main() {
     writeln!(out, "## Core API\n").unwrap();
 
     writeln!(out, "### `Encode<R>` trait").unwrap();
-    writeln!(out, "Serialize a packet onto a wire-format buffer for route `R`.  ").unwrap();
-    writeln!(out, "Do **not** call directly — use `Writer::push` instead.  ").unwrap();
-    writeln!(out, "Key methods: `encode(&self, out: &mut Vec<u8>)`, `is_reliable(&self) -> bool`,").unwrap();
+    writeln!(
+        out,
+        "Serialize a packet onto a wire-format buffer for route `R`.  "
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Do **not** call directly — use `Writer::push` instead.  "
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Key methods: `encode(&self, out: &mut Vec<u8>)`, `is_reliable(&self) -> bool`,"
+    )
+    .unwrap();
     writeln!(out, "`requires_client_wrapper(&self) -> Option<i32>` (returns `Some(cn)` if packet must be wrapped in `N_CLIENT`).\n").unwrap();
 
     writeln!(out, "### `Decode<R>` trait").unwrap();
-    writeln!(out, "Deserialize a packet from wire-format bytes for route `R`.  ").unwrap();
-    writeln!(out, "Do **not** call directly — use `Reader::next` instead.  ").unwrap();
+    writeln!(
+        out,
+        "Deserialize a packet from wire-format bytes for route `R`.  "
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Do **not** call directly — use `Reader::next` instead.  "
+    )
+    .unwrap();
     writeln!(out, "Key method: `decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut Session) -> Result<Self, ParseError>`.\n").unwrap();
 
     writeln!(out, "### `Reader<'a, R>`").unwrap();
     writeln!(out, "Stateful deserializer bound to protocol route `R`.  ").unwrap();
-    writeln!(out, "Transparently handles `N_CLIENT` envelope unwrapping.  ").unwrap();
+    writeln!(
+        out,
+        "Transparently handles `N_CLIENT` envelope unwrapping.  "
+    )
+    .unwrap();
     writeln!(out, "- `Reader::new(slice: &[u8], session: &mut Session) -> Self` — must use a consistent `Session` per connection.").unwrap();
     writeln!(out, "- `next<T: Decode<R>>(&mut self) -> Option<Result<T, ParseError>>` — decode next message; returns `None` at end-of-buffer.").unwrap();
     writeln!(out, "- `is_empty(&self) -> bool`\n").unwrap();
@@ -518,12 +558,24 @@ fn main() {
     writeln!(out, "- `consume(self) -> (Vec<u8>, SendMode)` — finalize, returns raw bytes and reliability mode.\n").unwrap();
 
     writeln!(out, "### `Session`").unwrap();
-    writeln!(out, "Per-connection parsing state. Keep one `Session` per connection for the entire lifetime.  ").unwrap();
+    writeln!(
+        out,
+        "Per-connection parsing state. Keep one `Session` per connection for the entire lifetime.  "
+    )
+    .unwrap();
     writeln!(out, "- `is_hold_mode: bool` — set automatically on `N_MAPCHANGE`; controls `N_INITFLAGS` parsing (M_HOLD gamemode includes extra hold-team data).\n").unwrap();
 
     writeln!(out, "### `SendMode`").unwrap();
-    writeln!(out, "Returned by `Writer::consume`. Variants: `Reliable`, `Unreliable` (sequenced).  ").unwrap();
-    writeln!(out, "If any packet pushed to a writer is reliable, the whole ENet packet is reliable.\n").unwrap();
+    writeln!(
+        out,
+        "Returned by `Writer::consume`. Variants: `Reliable`, `Unreliable` (sequenced).  "
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "If any packet pushed to a writer is reliable, the whole ENet packet is reliable.\n"
+    )
+    .unwrap();
 
     writeln!(out, "### `PacketSequence<R>` trait").unwrap();
     writeln!(out, "Lets slices, arrays, `Vec`, and tuples of packet structs be pushed to a `Writer<R>` via `push_to`.  ").unwrap();
@@ -543,16 +595,32 @@ fn main() {
     writeln!(out, "|-------|---------|-----------|").unwrap();
     writeln!(out, "| `S2C<Chan0>` | 0 — positions | Server → Client |").unwrap();
     writeln!(out, "| `C2S<Chan0>` | 0 — positions | Client → Server |").unwrap();
-    writeln!(out, "| `S2C<Chan1>` | 1 — game messages | Server → Client |").unwrap();
-    writeln!(out, "| `C2S<Chan1>` | 1 — game messages | Client → Server |").unwrap();
-    writeln!(out, "| `S2C<Chan2>` | 2 — file transfer | Server → Client |").unwrap();
+    writeln!(
+        out,
+        "| `S2C<Chan1>` | 1 — game messages | Server → Client |"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "| `C2S<Chan1>` | 1 — game messages | Client → Server |"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "| `S2C<Chan2>` | 2 — file transfer | Server → Client |"
+    )
+    .unwrap();
     writeln!(out, "\n`Chan0`, `Chan1`, `Chan2` are zero-sized channel markers. `S2C<C>` and `C2S<C>` are direction markers.\n").unwrap();
 
     // ------------------------------------------------------------------
     // SECTION: Data types
     // ------------------------------------------------------------------
     writeln!(out, "## Data Types (`sauer_proto::data`)\n").unwrap();
-    writeln!(out, "Helper types used as fields in packet structs. Not packets themselves.\n").unwrap();
+    writeln!(
+        out,
+        "Helper types used as fields in packet structs. Not packets themselves.\n"
+    )
+    .unwrap();
 
     writeln!(out, "### Enums\n").unwrap();
     for e in &data_enums {
@@ -576,12 +644,20 @@ fn main() {
 
     // Data sub-module types (hardcoded since they're manually-written structs/enums)
     writeln!(out, "### `data::Vec3<T>`").unwrap();
-    writeln!(out, "3D vector. Generic over element type (usually `f32` or `i32`).").unwrap();
+    writeln!(
+        out,
+        "3D vector. Generic over element type (usually `f32` or `i32`)."
+    )
+    .unwrap();
     writeln!(out, "- `x: T`, `y: T`, `z: T`").unwrap();
     writeln!(out, "  \nFloating-point positions on the wire are quantized: multiplied by `DMF` (1/16 world units) before encoding.\n").unwrap();
 
     writeln!(out, "### `data::Direction`").unwrap();
-    writeln!(out, "Packed yaw+pitch direction. Wire: 2 bytes, `yaw + biased_pitch * 360`.").unwrap();
+    writeln!(
+        out,
+        "Packed yaw+pitch direction. Wire: 2 bytes, `yaw + biased_pitch * 360`."
+    )
+    .unwrap();
     writeln!(out, "- `yaw: u16` — 0–359 degrees").unwrap();
     writeln!(out, "- `pitch: i8` — −90 to +90 degrees\n").unwrap();
 
@@ -592,7 +668,11 @@ fn main() {
     writeln!(out, "- `String(CubeString)` — discriminant 2\n").unwrap();
 
     writeln!(out, "### `data::BaseInfo`").unwrap();
-    writeln!(out, "State of a single capture base (used in `N_BASES` server packet).").unwrap();
+    writeln!(
+        out,
+        "State of a single capture base (used in `N_BASES` server packet)."
+    )
+    .unwrap();
     writeln!(out, "- `ammotype: Option<ItemType>` — `None` encodes as 0").unwrap();
     writeln!(out, "- `owner: CubeString`").unwrap();
     writeln!(out, "- `enemy: CubeString`").unwrap();
@@ -600,12 +680,20 @@ fn main() {
     writeln!(out, "- `ammo: i32`\n").unwrap();
 
     writeln!(out, "### `data::BaseSpawn`").unwrap();
-    writeln!(out, "Spawn position of a capture base (used in `N_BASES` client packet).").unwrap();
+    writeln!(
+        out,
+        "Spawn position of a capture base (used in `N_BASES` client packet)."
+    )
+    .unwrap();
     writeln!(out, "- `ammotype: Option<ItemType>`").unwrap();
     writeln!(out, "- `pos: Vec3<f32>`\n").unwrap();
 
     writeln!(out, "### `data::FlagState`").unwrap();
-    writeln!(out, "Full state of a CTF flag, used in `N_INITFLAGS`. Complex conditional encoding.").unwrap();
+    writeln!(
+        out,
+        "Full state of a CTF flag, used in `N_INITFLAGS`. Complex conditional encoding."
+    )
+    .unwrap();
     writeln!(out, "- `version: i32`").unwrap();
     writeln!(out, "- `spawn_index: i32`").unwrap();
     writeln!(out, "- `location: FlagLocation`").unwrap();
@@ -616,7 +704,11 @@ fn main() {
     writeln!(out, "Wire: `owner, invis`, then `dropped` only when `owner < 0`, then the position only when `dropped`.").unwrap();
     writeln!(out, "- `Home` — owner -1, dropped 0").unwrap();
     writeln!(out, "- `Carried {{ owner: i32 }}` — owner >= 0").unwrap();
-    writeln!(out, "- `Dropped {{ pos: Vec3<f32> }}` — owner -1, dropped 1, then `pos`\n").unwrap();
+    writeln!(
+        out,
+        "- `Dropped {{ pos: Vec3<f32> }}` — owner -1, dropped 1, then `pos`\n"
+    )
+    .unwrap();
 
     writeln!(out, "### `data::FlagStateHoldTeam`").unwrap();
     writeln!(out, "- `None` — encoded as team = -1").unwrap();
@@ -624,33 +716,65 @@ fn main() {
 
     writeln!(out, "### `data::VSlotProps`").unwrap();
     writeln!(out, "What a vslot changes on top of its texture slot (`sauer_core::VSlotProps`). Wire: the engine's `packvslot`, a type byte per set field, ended by `0xFF`.").unwrap();
-    writeln!(out, "- `params: Vec<VSlotParam>` — type 0 each: name string, 4 floats").unwrap();
+    writeln!(
+        out,
+        "- `params: Vec<VSlotParam>` — type 0 each: name string, 4 floats"
+    )
+    .unwrap();
     writeln!(out, "- `scale: Option<f32>` (1), `rotation: Option<i32>` (2), `offset: Option<(i32, i32)>` (3), `scroll: Option<(f32, f32)>` (4)").unwrap();
     writeln!(out, "- `layer: Option<i32>` (5, uint), `alpha: Option<(f32, f32)>` (6), `color: Option<(f32, f32, f32)>` (7)\n").unwrap();
 
     writeln!(out, "### `data::TexRef`").unwrap();
     writeln!(out, "A texture in `N_EDITT` and `N_REPLACE`. The packet ends with a u16 length prefixed block that holds the vslot of each `Variant`, in field order.").unwrap();
     writeln!(out, "- `Index(u16)` — the texture value itself").unwrap();
-    writeln!(out, "- `Variant {{ slot: u16, vslot: VSlotProps }}` — sent as `0x10000 + slot`\n").unwrap();
+    writeln!(
+        out,
+        "- `Variant {{ slot: u16, vslot: VSlotProps }}` — sent as `0x10000 + slot`\n"
+    )
+    .unwrap();
 
     writeln!(out, "### `data::ClipboardPayload`").unwrap();
     writeln!(out, "A copied block (`N_CLIPBOARD`). Wire: `unpacked_len, packed_len`, then zlib data holding the `block3` header (o, s, grid, orient as LE i32), the cubes, and `VSlotData` entries ended by 4 zero bytes. In `N_CLIPBOARD` it is `Option<ClipboardPayload>`: `None` (both lengths 0) clears the sender's clipboard.").unwrap();
-    writeln!(out, "- `sel: SelInfo` — only `o`, `s`, `grid`, `orient` are sent").unwrap();
+    writeln!(
+        out,
+        "- `sel: SelInfo` — only `o`, `s`, `grid`, `orient` are sent"
+    )
+    .unwrap();
     writeln!(out, "- `nodes: Vec<Node>`").unwrap();
-    writeln!(out, "- `vslots: Vec<VSlotData>` — `{{ index: u16, slot: u16, vslot: VSlotProps }}`\n").unwrap();
+    writeln!(
+        out,
+        "- `vslots: Vec<VSlotData>` — `{{ index: u16, slot: u16, vslot: VSlotProps }}`\n"
+    )
+    .unwrap();
 
     writeln!(out, "### `data::UndoPayload`").unwrap();
     writeln!(out, "The block of `N_UNDO`/`N_REDO`, zlib packed like `ClipboardPayload`. Starts with a u16 entity count; 0 means cubes.").unwrap();
-    writeln!(out, "- `Entities(Vec<UndoEntity>)` — `{{ index: u16, ent: Entity }}` each").unwrap();
-    writeln!(out, "- `Cubes {{ sel, nodes, gridmap: Vec<u8>, vslots }}` — one gridmap byte per node\n").unwrap();
+    writeln!(
+        out,
+        "- `Entities(Vec<UndoEntity>)` — `{{ index: u16, ent: Entity }}` each"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "- `Cubes {{ sel, nodes, gridmap: Vec<u8>, vslots }}` — one gridmap byte per node\n"
+    )
+    .unwrap();
 
     // ------------------------------------------------------------------
     // SECTION: Channel 0
     // ------------------------------------------------------------------
     writeln!(out, "---\n").unwrap();
     writeln!(out, "## Channel 0 Packets (`sauer_proto::channel0`)\n").unwrap();
-    writeln!(out, "High-frequency physics / movement updates. Most packets are *unreliable* (sequenced).  ").unwrap();
-    writeln!(out, "Enum types: `Chan0Server` for `S2C<Chan0>`, `Chan0Client` for `C2S<Chan0>`.\n").unwrap();
+    writeln!(
+        out,
+        "High-frequency physics / movement updates. Most packets are *unreliable* (sequenced).  "
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Enum types: `Chan0Server` for `S2C<Chan0>`, `Chan0Client` for `C2S<Chan0>`.\n"
+    )
+    .unwrap();
 
     // Merge make_struct + manual structs, deduplicate by name
     let mut seen = std::collections::HashSet::new();
@@ -669,8 +793,16 @@ fn main() {
     // ------------------------------------------------------------------
     writeln!(out, "---\n").unwrap();
     writeln!(out, "## Channel 1 Packets (`sauer_proto::channel1`)\n").unwrap();
-    writeln!(out, "Reliable game-state messages, chat, events (default reliable unless noted).  ").unwrap();
-    writeln!(out, "Enum types: `Chan1Server` for `S2C<Chan1>`, `Chan1Client` for `C2S<Chan1>`.  ").unwrap();
+    writeln!(
+        out,
+        "Reliable game-state messages, chat, events (default reliable unless noted).  "
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "Enum types: `Chan1Server` for `S2C<Chan1>`, `Chan1Client` for `C2S<Chan1>`.  "
+    )
+    .unwrap();
     writeln!(out, "Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the server→client direction — the `client_num` field identifies the originating player.\n").unwrap();
 
     let mut seen = std::collections::HashSet::new();
@@ -693,9 +825,17 @@ fn main() {
     // ------------------------------------------------------------------
     writeln!(out, "---\n").unwrap();
     writeln!(out, "## Channel 2 Packets (`sauer_proto::channel2`)\n").unwrap();
-    writeln!(out, "Bulk file transfers (demo downloads, map sends). Server → Client only.  ").unwrap();
+    writeln!(
+        out,
+        "Bulk file transfers (demo downloads, map sends). Server → Client only.  "
+    )
+    .unwrap();
     writeln!(out, "Enum type: `Chan2Server` for `S2C<Chan2>`.  ").unwrap();
-    writeln!(out, "Data field uses `read_all_remaining` — consumes all bytes to end of packet.\n").unwrap();
+    writeln!(
+        out,
+        "Data field uses `read_all_remaining` — consumes all bytes to end of packet.\n"
+    )
+    .unwrap();
 
     let chan2_all = parse_make_structs(&chan2);
     for s in &chan2_all {
@@ -706,11 +846,9 @@ fn main() {
     // SECTION: ExtInfo (brief mention)
     // ------------------------------------------------------------------
     writeln!(out, "---\n").unwrap();
-    writeln!(out, "## ExtInfo (`sauer_proto::extinfo`)\n").unwrap();
-    writeln!(out, "Out-of-band UDP protocol for server browser queries. Not covered in detail here — see `sauer_proto::extinfo` module directly.\n").unwrap();
+    writeln!(out, "## ExtInfo (`sauer_proto::server_query`)\n").unwrap();
+    writeln!(out, "Out-of-band UDP protocol for server browser queries. Not covered in detail here — see the `sauer_proto::server_query` module.\n").unwrap();
 
-    // Write to stdout or a file
-    let dest = std::env::args().nth(2).unwrap_or_else(|| "sauer-proto-ref.md".to_string());
-    fs::write(&dest, &out).unwrap_or_else(|e| panic!("cannot write {dest}: {e}"));
-    eprintln!("Written {} bytes to {dest}", out.len());
+    fs::write(dest, &out).unwrap_or_else(|e| panic!("cannot write {}: {e}", dest.display()));
+    eprintln!("Written {} bytes to {}", out.len(), dest.display());
 }

@@ -193,7 +193,7 @@ Edit face operation mode.
 ### `ClientResumeState`
 State for a client resuming a game (e.g., late join).
 
-- `client_num: i32`
+- `client_num: Cn`
 - `state: ClientState`
 - `frags: i32`
 - `flags: i32`
@@ -203,7 +203,7 @@ State for a client resuming a game (e.g., late join).
 
 ### `ClientTokenState`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `tokens: i32`
 
 ### `DroppedToken`
@@ -223,7 +223,7 @@ Information to represent a spawned item in the world.
 ### `MasterClient`
 Represents a master/admin client configuration broadcast to everyone.
 
-- `client_num: i32`
+- `client_num: Cn`
 - `privilege: Privilege`
 
 ### `PlayerAmmo`
@@ -250,7 +250,7 @@ Represents the game state of a player/client.
 ### `HitInfo`
 Contains ray/hit information from a weapon shot or explosion.
 
-- `target_cn: i32`
+- `target_cn: Cn`
 - `life_sequence: i32`
 - `dist: f32`
 - `rays: i32`
@@ -367,7 +367,7 @@ Enum types: `Chan0Server` for `S2C<Chan0>`, `Chan0Client` for `C2S<Chan0>`.
   
 *Encode+Decode:* `Teleport` on `S2C<Chan0>` · `Teleport` on `C2S<Chan0>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `tp: i32`
 - `td: i32`
 
@@ -376,7 +376,7 @@ Enum types: `Chan0Server` for `S2C<Chan0>`, `Chan0Client` for `C2S<Chan0>`.
   
 *Encode+Decode:* `JumpPad` on `S2C<Chan0>` · `JumpPad` on `C2S<Chan0>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `jp: i32`
 
 ### `DemoPacket` (`N_DEMOPACKET`)
@@ -391,7 +391,7 @@ Enum types: `Chan0Server` for `S2C<Chan0>`, `Chan0Client` for `C2S<Chan0>`.
   
 *Encode+Decode:* `Position` on `S2C<Chan0>` *(unreliable)* · `Position` on `C2S<Chan0>` *(unreliable)*
 
-- `client_num: u32`
+- `client_num: Cn`
 - `phys_state: PhysState`
 - `life_seq_parity: bool`
 - `move_dir: Movement`
@@ -562,7 +562,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ServInfo` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `protocol: i32`
 - `session_id: i32`
 - `has_password: bool`
@@ -582,7 +582,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `PauseGameServer` on `S2C<Chan1>`
 
 - `is_paused: bool`
-- `client_num: i32`
+- `client_num: Option<Cn>`
 
 ### `GameSpeedServer` (`N_GAMESPEED`)
 `N_GAMESPEED` Modifies the speed of the game.
@@ -590,14 +590,14 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `GameSpeedServer` on `S2C<Chan1>`
 
 - `speed: i32`
-- `client_num: i32`
+- `client_num: Option<Cn>`
 
 ### `SayTeamServer` (`N_SAYTEAM`)
 `N_SAYTEAM` Emits a team chat message.
   
 *Encode+Decode:* `SayTeamServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `text: CubeString`
 
 ### `MapChange` (`N_MAPCHANGE`)
@@ -614,14 +614,14 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ForceDeath` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 
 ### `InitClient` (`N_INITCLIENT`)
 `N_INITCLIENT` A new client has connected.
   
 *Encode+Decode:* `InitClient` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `name: CubeString`
 - `team: CubeString`
 - `player_model: PlayerModel`
@@ -631,14 +631,14 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ClientDisconnected` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 
 ### `SpawnState` (`N_SPAWNSTATE`)
 `N_SPAWNSTATE` Confirms the specific state (health, ammo, etc.) of a client who just spawned.
   
 *Encode+Decode:* `SpawnState` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `state: PlayerState`
 
 ### `ShotFx` (`N_SHOTFX`)
@@ -646,7 +646,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ShotFx` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `gun: Gun`
 - `id: i32`
 - `from: Vec3<f32>`
@@ -657,7 +657,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ExplodeFx` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `gun: Gun`
 - `id: i32`
 
@@ -666,8 +666,8 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `Damage` on `S2C<Chan1>`
 
-- `target_cn: i32`
-- `actor_cn: i32`
+- `target_cn: Cn`
+- `actor_cn: Cn`
 - `damage: i32`
 - `armour: i32`
 - `health: i32`
@@ -677,7 +677,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `HitPush` on `S2C<Chan1>`
 
-- `target_cn: i32`
+- `target_cn: Cn`
 - `gun: Gun`
 - `damage: i32`
 - `dir: Vec3<f32>`
@@ -687,8 +687,8 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `Died` on `S2C<Chan1>`
 
-- `victim_cn: i32`
-- `actor_cn: i32`
+- `victim_cn: Cn`
+- `actor_cn: Cn`
 - `actor_frags: i32`
 - `team_frags: i32`
 
@@ -719,14 +719,14 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `ItemAck` on `S2C<Chan1>`
 
 - `item_index: i32`
-- `client_num: i32`
+- `client_num: Option<Cn>`
 
 ### `ClipboardServer` (`N_CLIPBOARD`)
 `N_CLIPBOARD` Pushes a client's clipboard (for cooperative editing) to the others. `None` clears it.
   
 *Encode+Decode:* `ClipboardServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `payload: Option<ClipboardPayload>`
 
 ### `UndoServer` (`N_UNDO`)
@@ -734,7 +734,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `UndoServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `payload: UndoPayload`
 
 ### `RedoServer` (`N_REDO`)
@@ -742,7 +742,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `RedoServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `payload: UndoPayload`
 
 ### `Pong` (`N_PONG`)
@@ -779,7 +779,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `DemoPlayback` on `S2C<Chan1>`
 
 - `is_on: bool`
-- `client_num: i32`
+- `client_num: Option<Cn>`
 
 ### `CurrentMaster` (`N_CURRENTMASTER`)
 `N_CURRENTMASTER` Notifies clients of the current master mode and list of clients with privileges.
@@ -801,7 +801,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `SpectatorServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `is_spectator: bool`
 
 ### `SetTeamServer` (`N_SETTEAM`)
@@ -809,7 +809,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `SetTeamServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `team: CubeString`
 - `reason: SetTeamReason`
 
@@ -833,7 +833,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `AuthChal` on `S2C<Chan1>`
 
 - `desc: CubeString`
-- `id: u32`
+- `id: i32`
 - `challenge: CubeString`
 
 ### `InitAi` (`N_INITAI`)
@@ -841,8 +841,8 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `InitAi` on `S2C<Chan1>`
 
-- `bot_cn: i32`
-- `owner_cn: i32`
+- `bot_cn: Cn`
+- `owner_cn: Option<Cn>`
 - `ai_type: AiType`
 - `skill: i32`
 - `player_model: PlayerModel`
@@ -881,7 +881,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `RepAmmoServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `ammotype: ItemType`
 
 ### `BaseRegen` (`N_BASEREGEN`)
@@ -889,7 +889,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `BaseRegen` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `health: i32`
 - `armour: i32`
 - `ammotype: ItemType`
@@ -900,7 +900,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `DropFlag` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `flag: i32`
 - `version: i32`
 - `drop_loc: Vec3<f32>`
@@ -910,7 +910,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ScoreFlag` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `relay_flag: i32`
 - `relay_version: i32`
 - `goal_flag: i32`
@@ -925,7 +925,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `ReturnFlag` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `flag: i32`
 - `version: i32`
 
@@ -934,7 +934,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `TakeFlagServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `flag: i32`
 - `version: i32`
 
@@ -971,7 +971,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `TakeTokenServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `id: i32`
 - `total: i32`
 
@@ -987,7 +987,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `DropTokens` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `drop_loc: Vec3<f32>`
 - `tokens: Vec<DroppedToken>`
 
@@ -996,7 +996,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `StealTokens` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `team: i32`
 - `basenum: i32`
 - `enemy_team: i32`
@@ -1009,7 +1009,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `DepositTokensServer` on `S2C<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `base: i32`
 - `deposited: i32`
 - `team: i32`
@@ -1061,7 +1061,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `AuthAnswer` on `C2S<Chan1>`
 
 - `desc: CubeString`
-- `id: u32`
+- `id: i32`
 - `answer: CubeString`
 
 ### `Ping` (`N_PING`)
@@ -1076,7 +1076,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `FromAi` on `C2S<Chan1>`
 
-- `qcn: i32`
+- `qcn: Cn`
 
 ### `MapCrc` (`N_MAPCRC`)
 `N_MAPCRC` The client verifies the CRC of the map they currently have loaded.
@@ -1184,7 +1184,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `Kick` on `C2S<Chan1>`
 
-- `victim_cn: i32`
+- `victim_cn: Cn`
 - `reason: CubeString`
 
 ### `SpectatorClient` (`N_SPECTATOR`)
@@ -1192,7 +1192,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `SpectatorClient` on `C2S<Chan1>`
 
-- `spectator_cn: i32`
+- `spectator_cn: Cn`
 - `val: bool`
 
 ### `SetTeamClient` (`N_SETTEAM`)
@@ -1200,7 +1200,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `SetTeamClient` on `C2S<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `team: CubeString`
 
 ### `ForceIntermission` (`N_FORCEINTERMISSION`)
@@ -1258,7 +1258,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
   
 *Encode+Decode:* `SetMaster` on `C2S<Chan1>`
 
-- `client_num: i32`
+- `client_num: Cn`
 - `val: bool`
 - `hash: CubeString`
 
@@ -1305,7 +1305,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 
 - `desc: CubeString`
 - `name: CubeString`
-- `victim_cn: i32`
+- `victim_cn: Cn`
 - `reason: CubeString`
 
 ### `PauseGameClient` (`N_PAUSEGAME`)
@@ -1481,7 +1481,7 @@ Data field uses `read_all_remaining` — consumes all bytes to end of packet.
 
 ---
 
-## ExtInfo (`sauer_proto::extinfo`)
+## ExtInfo (`sauer_proto::server_query`)
 
-Out-of-band UDP protocol for server browser queries. Not covered in detail here — see `sauer_proto::extinfo` module directly.
+Out-of-band UDP protocol for server browser queries. Not covered in detail here — see the `sauer_proto::server_query` module.
 
