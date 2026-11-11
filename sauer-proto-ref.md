@@ -8,12 +8,12 @@
 Serialize a packet onto a wire-format buffer for route `R`.  
 Do **not** call directly — use `Writer::push` instead.  
 Key methods: `encode(&self, out: &mut Vec<u8>)`, `is_reliable(&self) -> bool`,
-`requires_client_wrapper(&self) -> Option<i32>` (returns `Some(cn)` if packet must be wrapped in `N_CLIENT`).
+`requires_client_wrapper(&self) -> Option<Cn>` (returns `Some(cn)` if packet must be wrapped in `N_CLIENT`).
 
 ### `Decode<R>` trait
 Deserialize a packet from wire-format bytes for route `R`.  
 Do **not** call directly — use `Reader::next` instead.  
-Key method: `decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut Session) -> Result<Self, ParseError>`.
+Key method: `decode(reader: &mut &[u8], client_number: Option<Cn>, session: &mut Session) -> Result<Self, ParseError>`.
 
 ### `Reader<'a, R>`
 Stateful deserializer bound to protocol route `R`.  
@@ -31,7 +31,7 @@ Transparently batches `N_CLIENT` envelopes.
 
 ### `Session`
 Per-connection parsing state. Keep one `Session` per connection for the entire lifetime.  
-- `is_hold_mode: bool` — set automatically on `N_MAPCHANGE`; controls `N_INITFLAGS` parsing (M_HOLD gamemode includes extra hold-team data).
+- `is_hold_mode: bool` — set automatically on `N_MAPCHANGE`; controls `N_INITFLAGS` parsing (hold modes, `GameMode::is_hold`, add a hold team to every flag).
 
 ### `SendMode`
 Returned by `Writer::consume`. Variants: `Reliable`, `Unreliable` (sequenced).  
@@ -43,7 +43,7 @@ Blanket-implemented for homogeneous collections and heterogeneous tuples up to 1
 
 ### `Client<T>`
 Wrapper produced when decoding server channel-1 packets that arrive inside an `N_CLIENT` envelope.  
-- `client_num: i32` — the originating client.
+- `client_num: Cn` — the originating client.
 - `packet: T` — the inner packet.
 
 ## Route Markers (`sauer_proto::route`)
@@ -292,6 +292,31 @@ Stores the number of frags a particular team has.
   
 Floating-point positions on the wire are quantized: multiplied by `DMF` (1/16 world units) before encoding.
 
+### `data::Cn`
+A client number (`Cn(pub u8)`), the engine's `clientnum`. An `int` on the wire; decoding fails outside 0 to 255 instead of wrapping.
+
+### `CubeString`
+From the `cube-string` crate: text in the engine's 8 bit character set. Wire: the engine's `sendstring`, one packed int per character, ended by 0.
+
+### `data::SelInfo`
+`sauer_core::Selection`, the engine's `selinfo`. Wire: every field in order.
+- `o: Vec3<i32>`, `s: Vec3<i32>`, `grid: i32`, `orient: Orient`
+- `cx: i32`, `cxs: i32`, `cy: i32`, `cys: i32`, `corner: i32`
+
+### `data::EntityType` / `data::ItemType`
+From `sauer-core`. `EntityType` is the engine's entity type (`Light` = 1 up to `Flag` = 30), with `GameSpecific(i32)` for any other value. `ItemType` is the pickup subset, `Shells` = 8 to `Quad` = 18.
+
+### `Node`
+From `sauer-core`: a cube tree in edit blocks.
+- `Branch(Box<[Node; 8]>)`
+- `Leaf(Cube)`: `{ edges: [u8; 12], textures: [u16; 6], material: Material }`
+
+### `data::VSlotParam`
+A shader param of a vslot: `{ name: CubeString, values: [f32; 4] }`.
+
+### `data::VSlotData`
+A changed vslot an edit block uses: `{ index: u16, slot: u16, vslot: VSlotProps }`. `index` is in the sender's numbering, `slot` is the texture it is a variant of.
+
 ### `data::Direction`
 Packed yaw+pitch direction. Wire: 2 bytes, `yaw + biased_pitch * 360`.
 - `yaw: u16` — 0–359 degrees
@@ -359,6 +384,19 @@ A copied block (`N_CLIPBOARD`). Wire: `unpacked_len, packed_len`, then zlib data
 The block of `N_UNDO`/`N_REDO`, zlib packed like `ClipboardPayload`. Starts with a u16 entity count; 0 means cubes.
 - `Entities(Vec<UndoEntity>)` — `{ index: u16, ent: Entity }` each
 - `Cubes { sel, nodes, gridmap: Vec<u8>, vslots }` — one gridmap byte per node
+
+---
+
+## Any Channel (`sauer_proto::messages`)
+
+Packets every channel can carry. Each channel module re-exports them.
+
+### `DemoPacket` (`N_DEMOPACKET`)
+`N_DEMOPACKET` Demo playback marker. Any channel can carry it.
+  
+*Encode+Decode:* `DemoPacket` on `S2C<Chan0>` · `DemoPacket` on `S2C<Chan1>` · `DemoPacket` on `S2C<Chan2>`
+  
+*(no fields)*
 
 ---
 

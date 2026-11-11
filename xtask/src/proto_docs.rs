@@ -460,9 +460,8 @@ pub fn run(src: &Path, dest: &Path) {
     let chan1 = read!("messages/channel1.rs");
     let chan2 = read!("messages/channel2.rs");
     let data = read!("data.rs");
-
-    // sub-module files are referenced in the hardcoded sections below; not parsed individually
-    let _chan2_structs_unused = &chan2;
+    // Packets any channel can carry.
+    let shared = read!("messages/mod.rs");
 
     // Build routing maps per channel
     let chan0_enums = parse_packet_enums(&chan0);
@@ -479,7 +478,6 @@ pub fn run(src: &Path, dest: &Path) {
     // Parse structs per channel
     let chan0_structs = parse_make_structs(&chan0);
     let chan1_structs = parse_make_structs(&chan1);
-    let _chan2_structs = parse_make_structs(&chan2);
 
     // Manual structs in channels
     let chan0_manual = parse_manual_structs(&chan0);
@@ -524,7 +522,7 @@ pub fn run(src: &Path, dest: &Path) {
         "Key methods: `encode(&self, out: &mut Vec<u8>)`, `is_reliable(&self) -> bool`,"
     )
     .unwrap();
-    writeln!(out, "`requires_client_wrapper(&self) -> Option<i32>` (returns `Some(cn)` if packet must be wrapped in `N_CLIENT`).\n").unwrap();
+    writeln!(out, "`requires_client_wrapper(&self) -> Option<Cn>` (returns `Some(cn)` if packet must be wrapped in `N_CLIENT`).\n").unwrap();
 
     writeln!(out, "### `Decode<R>` trait").unwrap();
     writeln!(
@@ -537,7 +535,7 @@ pub fn run(src: &Path, dest: &Path) {
         "Do **not** call directly — use `Reader::next` instead.  "
     )
     .unwrap();
-    writeln!(out, "Key method: `decode(reader: &mut &[u8], client_number: Option<i32>, session: &mut Session) -> Result<Self, ParseError>`.\n").unwrap();
+    writeln!(out, "Key method: `decode(reader: &mut &[u8], client_number: Option<Cn>, session: &mut Session) -> Result<Self, ParseError>`.\n").unwrap();
 
     writeln!(out, "### `Reader<'a, R>`").unwrap();
     writeln!(out, "Stateful deserializer bound to protocol route `R`.  ").unwrap();
@@ -563,7 +561,7 @@ pub fn run(src: &Path, dest: &Path) {
         "Per-connection parsing state. Keep one `Session` per connection for the entire lifetime.  "
     )
     .unwrap();
-    writeln!(out, "- `is_hold_mode: bool` — set automatically on `N_MAPCHANGE`; controls `N_INITFLAGS` parsing (M_HOLD gamemode includes extra hold-team data).\n").unwrap();
+    writeln!(out, "- `is_hold_mode: bool` — set automatically on `N_MAPCHANGE`; controls `N_INITFLAGS` parsing (hold modes, `GameMode::is_hold`, add a hold team to every flag).\n").unwrap();
 
     writeln!(out, "### `SendMode`").unwrap();
     writeln!(
@@ -583,7 +581,7 @@ pub fn run(src: &Path, dest: &Path) {
 
     writeln!(out, "### `Client<T>`").unwrap();
     writeln!(out, "Wrapper produced when decoding server channel-1 packets that arrive inside an `N_CLIENT` envelope.  ").unwrap();
-    writeln!(out, "- `client_num: i32` — the originating client.").unwrap();
+    writeln!(out, "- `client_num: Cn` — the originating client.").unwrap();
     writeln!(out, "- `packet: T` — the inner packet.\n").unwrap();
 
     // ------------------------------------------------------------------
@@ -651,6 +649,31 @@ pub fn run(src: &Path, dest: &Path) {
     .unwrap();
     writeln!(out, "- `x: T`, `y: T`, `z: T`").unwrap();
     writeln!(out, "  \nFloating-point positions on the wire are quantized: multiplied by `DMF` (1/16 world units) before encoding.\n").unwrap();
+
+    writeln!(out, "### `data::Cn`").unwrap();
+    writeln!(out, "A client number (`Cn(pub u8)`), the engine's `clientnum`. An `int` on the wire; decoding fails outside 0 to 255 instead of wrapping.\n").unwrap();
+
+    writeln!(out, "### `CubeString`").unwrap();
+    writeln!(out, "From the `cube-string` crate: text in the engine's 8 bit character set. Wire: the engine's `sendstring`, one packed int per character, ended by 0.\n").unwrap();
+
+    writeln!(out, "### `data::SelInfo`").unwrap();
+    writeln!(out, "`sauer_core::Selection`, the engine's `selinfo`. Wire: every field in order.").unwrap();
+    writeln!(out, "- `o: Vec3<i32>`, `s: Vec3<i32>`, `grid: i32`, `orient: Orient`").unwrap();
+    writeln!(out, "- `cx: i32`, `cxs: i32`, `cy: i32`, `cys: i32`, `corner: i32`\n").unwrap();
+
+    writeln!(out, "### `data::EntityType` / `data::ItemType`").unwrap();
+    writeln!(out, "From `sauer-core`. `EntityType` is the engine's entity type (`Light` = 1 up to `Flag` = 30), with `GameSpecific(i32)` for any other value. `ItemType` is the pickup subset, `Shells` = 8 to `Quad` = 18.\n").unwrap();
+
+    writeln!(out, "### `Node`").unwrap();
+    writeln!(out, "From `sauer-core`: a cube tree in edit blocks.").unwrap();
+    writeln!(out, "- `Branch(Box<[Node; 8]>)`").unwrap();
+    writeln!(out, "- `Leaf(Cube)`: `{{ edges: [u8; 12], textures: [u16; 6], material: Material }}`\n").unwrap();
+
+    writeln!(out, "### `data::VSlotParam`").unwrap();
+    writeln!(out, "A shader param of a vslot: `{{ name: CubeString, values: [f32; 4] }}`.\n").unwrap();
+
+    writeln!(out, "### `data::VSlotData`").unwrap();
+    writeln!(out, "A changed vslot an edit block uses: `{{ index: u16, slot: u16, vslot: VSlotProps }}`. `index` is in the sender's numbering, `slot` is the texture it is a variant of.\n").unwrap();
 
     writeln!(out, "### `data::Direction`").unwrap();
     writeln!(
@@ -769,6 +792,20 @@ pub fn run(src: &Path, dest: &Path) {
         "- `Cubes {{ sel, nodes, gridmap: Vec<u8>, vslots }}` — one gridmap byte per node\n"
     )
     .unwrap();
+
+    // ------------------------------------------------------------------
+    // SECTION: Shared packets
+    // ------------------------------------------------------------------
+    writeln!(out, "---\n").unwrap();
+    writeln!(out, "## Any Channel (`sauer_proto::messages`)\n").unwrap();
+    writeln!(
+        out,
+        "Packets every channel can carry. Each channel module re-exports them.\n"
+    )
+    .unwrap();
+    for s in &parse_make_structs(&shared) {
+        write_struct(&mut out, s, &routing);
+    }
 
     // ------------------------------------------------------------------
     // SECTION: Channel 0
