@@ -181,7 +181,7 @@ impl Server {
         pkt: impl PacketSequence<S2C<C>> + PacketDescriptor + Debug,
     ) {
         packet_log::trace_out_broadcast(&pkt);
-        for entry in self.clients.iter() {
+        for entry in self.clients.iter().filter(|e| e.value().joined()) {
             entry.value().try_send(&pkt);
         }
     }
@@ -192,7 +192,7 @@ impl Server {
         pkt: impl PacketSequence<S2C<C>> + PacketDescriptor + Debug,
     ) {
         packet_log::trace_out_broadcast_except(except, &pkt);
-        for entry in self.clients.iter() {
+        for entry in self.clients.iter().filter(|e| e.value().joined()) {
             if *entry.key() != except {
                 entry.value().try_send(&pkt);
             }
@@ -231,8 +231,18 @@ impl Server {
         self.clients.get(&id).map(|p| p.addr())
     }
 
+    /// Every connected peer, joined or still in the handshake.
     pub fn client_ids(&self) -> Vec<u64> {
         self.clients.iter().map(|e| *e.key()).collect()
+    }
+
+    /// The clients that finished joining (see [`Server::welcome`]).
+    pub fn joined_ids(&self) -> Vec<u64> {
+        self.clients
+            .iter()
+            .filter(|e| e.value().joined())
+            .map(|e| *e.key())
+            .collect()
     }
 
     pub fn client_count(&self) -> usize {

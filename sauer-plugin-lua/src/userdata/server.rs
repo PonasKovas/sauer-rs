@@ -87,8 +87,8 @@ impl UserData for LuaServer {
         /// The peer ID of the client using a cn, or nil.
         methods.add_method("get_id", |_lua, this, cn: Cn| Ok(this.inner.get_id(cn)));
 
-        /// Peer IDs of every connected client.
-        methods.add_method("client_ids", |_lua, this, ()| Ok(this.inner.client_ids()));
+        /// Peer IDs of the clients that finished joining.
+        methods.add_method("client_ids", |_lua, this, ()| Ok(this.inner.joined_ids()));
 
         /// A table about a player (`name`, `team`, `model`, `privilege`, `state`,
         /// `frags`, `deaths`, `flags`, `ping`), or nil.

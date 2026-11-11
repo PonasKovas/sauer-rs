@@ -13,6 +13,10 @@ impl Server {
     pub fn welcome(&self, id: u64) {
         self.set_initial_team(id);
         self.set_initial_state(id);
+        // From here on, broadcasts reach this client too.
+        if let Some(peer) = self.clients.get(&id) {
+            peer.set_joined();
+        }
 
         self.send(id, &Welcome {});
 
@@ -52,7 +56,7 @@ impl Server {
 
         // Send the new player a resume snapshot of all existing players.
         let clients = self
-            .client_ids()
+            .joined_ids()
             .into_iter()
             .filter(|&other| other != id)
             .filter_map(|other| {
@@ -93,7 +97,7 @@ impl Server {
         }
 
         // Introduce all existing players to the new player and send their clipboards.
-        for other_id in self.client_ids().into_iter().filter(|&other| other != id) {
+        for other_id in self.joined_ids().into_iter().filter(|&other| other != id) {
             let Some(other_cn) = self.get_cn(other_id) else {
                 continue;
             };

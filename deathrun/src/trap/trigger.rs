@@ -157,7 +157,7 @@ async fn run_trap(
     let bar_pos = progress_bar_pos(pos, size, orient);
     // In play only the terrorist triggers traps, so only they see the bar.
     let targets = if server.game.read().mode == GameMode::CoopEdit {
-        server.client_ids()
+        server.joined_ids()
     } else {
         let maps = server
             .extra

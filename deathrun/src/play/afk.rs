@@ -58,7 +58,7 @@ pub(super) fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, time
         if lock.round_state != RoundState::Playing {
             return;
         }
-        let ids = server.client_ids();
+        let ids = server.joined_ids();
         if ids.len() <= 1 {
             return;
         }

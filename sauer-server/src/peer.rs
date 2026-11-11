@@ -7,14 +7,29 @@ use sauer_proto::{
     route::{Channel, S2C},
 };
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct Peer {
     raw: ConnectionSender,
+    /// Set by `Server::welcome`. Like the engine's `ci->connected`, only
+    /// joined clients get broadcasts.
+    joined: AtomicBool,
 }
 
 impl Peer {
     pub(crate) fn new(peer: ConnectionSender) -> Self {
-        Self { raw: peer }
+        Self {
+            raw: peer,
+            joined: AtomicBool::new(false),
+        }
+    }
+
+    pub fn joined(&self) -> bool {
+        self.joined.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_joined(&self) {
+        self.joined.store(true, Ordering::Release);
     }
 
     pub fn try_send<C: Channel>(&self, pkt: impl PacketSequence<S2C<C>>) {

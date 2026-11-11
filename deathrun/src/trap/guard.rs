@@ -112,7 +112,7 @@ pub fn entity_edit(ctx: &Context, ids: &[usize], boxes: &[Aabb], mut apply: impl
         .collect();
     if !virt.is_empty() {
         let cn = crate::SERVER_BOT_CN;
-        for client in server.client_ids() {
+        for client in server.joined_ids() {
             let fixes: Vec<_> = virt
                 .iter()
                 .filter_map(|&i| state.virt.view(client, i))

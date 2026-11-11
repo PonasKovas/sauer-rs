@@ -48,7 +48,7 @@ pub(super) fn check_finish(
         time.as_secs_f32()
     );
     ui::broadcast(server, ui::body(&text));
-    for client_id in server.client_ids() {
+    for client_id in server.joined_ids() {
         if let Some(client_cn) = server.get_cn(client_id) {
             server.send(
                 client_id,

@@ -289,7 +289,7 @@ impl<P: Plugin> Plugin for Base<P> {
                                     return Flow::Continue;
                                 }
                             },
-                            None => server.client_ids(),
+                            None => server.joined_ids(),
                         };
                         let stats: Vec<PlayerStats> = ids
                             .into_iter()

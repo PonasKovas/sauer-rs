@@ -60,7 +60,7 @@ pub(super) fn start_round_sequence(
         };
         let map = new_state.map.clone();
         *get_server_state(&server).write() = new_state;
-        (map, epoch, server.client_ids())
+        (map, epoch, server.joined_ids())
     };
 
     // Spawned and stored under the same lock, so a round started meanwhile
@@ -177,7 +177,7 @@ pub(super) fn check_win_conditions(
         return;
     }
 
-    let mut ids = server.client_ids();
+    let mut ids = server.joined_ids();
     if let Some(d_id) = disconnecting_id {
         ids.retain(|&id| id != d_id);
     }
@@ -329,7 +329,7 @@ fn declare_win(
     let epoch = lock.round_epoch;
     ui::broadcast_round_over(server, winner_text, top_times);
 
-    for id in server.client_ids() {
+    for id in server.joined_ids() {
         if let Some(cn) = server.get_cn(id) {
             server.send(
                 id,

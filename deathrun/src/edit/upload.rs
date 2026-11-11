@@ -169,7 +169,7 @@ pub(super) fn vote(server: &Server, id: u64, packet: &channel1::MapVote) -> Flow
         let mut state = get_server_state(server).write();
         state.awaiting_upload = Some(packet.map_name.clone());
     }
-    for client_id in server.client_ids() {
+    for client_id in server.joined_ids() {
         server.set_spectator(client_id, true);
     }
     server.send(

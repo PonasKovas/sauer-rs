@@ -251,7 +251,7 @@ fn frames(state: &DeathrunState, target: Target) -> Vec<FakeEnt> {
 
 fn send_frames(server: &Server, state: &mut DeathrunState, target: Target) {
     let ents = frames(state, target);
-    for id in server.client_ids() {
+    for id in server.joined_ids() {
         let up = state.show_virt(id, FRAMES, ents.clone());
         up.send(server, id, crate::SERVER_BOT_CN);
     }
