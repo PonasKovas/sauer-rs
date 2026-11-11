@@ -207,9 +207,10 @@ const _: () = {
     impl FromLua for EntityType {
         fn from_lua(value: Value, lua: &mlua::Lua) -> mlua::Result<Self> {
             if let Value::Integer(i) = value {
-                // `from` maps known numbers to their named variant.
-                let i = i32::try_from(i).map_err(mlua::Error::external)?;
-                return Ok(EntityType::from(i));
+                // The engine keeps the type in a byte. `from` maps known numbers
+                // to their named variant.
+                let i = u8::try_from(i).map_err(mlua::Error::external)?;
+                return Ok(EntityType::from(i32::from(i)));
             }
             let s = String::from_lua(value, lua)?;
             match s.as_str() {

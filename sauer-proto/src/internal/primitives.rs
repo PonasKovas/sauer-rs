@@ -132,7 +132,8 @@ pub(crate) fn write_extra_block(out: &mut Vec<u8>, write: impl FnOnce(&mut Vec<u
     let start = out.len();
     out.extend_from_slice(&[0, 0]);
     write(out);
-    let len = (out.len() - start - 2) as u16;
+    // A wrapped length would make the client misread the rest of the stream.
+    let len = u16::try_from(out.len() - start - 2).expect("extra block over 64 KiB");
     out[start..start + 2].copy_from_slice(&len.to_le_bytes());
 }
 

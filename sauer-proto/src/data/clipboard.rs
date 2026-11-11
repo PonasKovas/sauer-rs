@@ -133,7 +133,8 @@ impl SauerWrite for UndoPayload {
         let mut data = Vec::new();
         match self {
             UndoPayload::Entities(ents) => {
-                data.extend_from_slice(&(ents.len() as u16).to_le_bytes());
+                let count = u16::try_from(ents.len()).expect("undo of over 65535 entities");
+                data.extend_from_slice(&count.to_le_bytes());
                 for ue in ents {
                     data.extend_from_slice(&ue.index.to_le_bytes());
                     write_entity(&ue.ent, &mut data);
@@ -371,7 +372,8 @@ fn write_entity(ent: &Entity, out: &mut Vec<u8>) {
     for attr in ent.attrs {
         out.extend_from_slice(&attr.to_le_bytes());
     }
-    out.push(i32::from(ent.ent_type) as u8);
+    // The engine stores the type in a byte.
+    out.push(u8::try_from(i32::from(ent.ent_type)).expect("entity type over 255"));
     out.push(0); // reserved
 }
 
