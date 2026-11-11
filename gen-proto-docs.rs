@@ -608,17 +608,41 @@ fn main() {
     writeln!(out, "Full state of a CTF flag, used in `N_INITFLAGS`. Complex conditional encoding.").unwrap();
     writeln!(out, "- `version: i32`").unwrap();
     writeln!(out, "- `spawn_index: i32`").unwrap();
-    writeln!(out, "- `owner: FlagStateOwner`").unwrap();
+    writeln!(out, "- `location: FlagLocation`").unwrap();
     writeln!(out, "- `invis: bool`").unwrap();
     writeln!(out, "- `hold: Option<FlagStateHoldTeam>` — **must be `Some` only when `Session::is_hold_mode` is true**; stream corrupts otherwise.\n").unwrap();
 
-    writeln!(out, "### `data::FlagStateOwner`").unwrap();
-    writeln!(out, "- `Owned {{ owner: i32 }}` — encoded as `owner_id >= 0`").unwrap();
-    writeln!(out, "- `Dropped {{ dropped: bool, drop_loc: Vec3<f32> }}` — encoded as `owner_id = -1`; `drop_loc` only present when `dropped = true`\n").unwrap();
+    writeln!(out, "### `data::FlagLocation`").unwrap();
+    writeln!(out, "Wire: `owner, invis`, then `dropped` only when `owner < 0`, then the position only when `dropped`.").unwrap();
+    writeln!(out, "- `Home` — owner -1, dropped 0").unwrap();
+    writeln!(out, "- `Carried {{ owner: i32 }}` — owner >= 0").unwrap();
+    writeln!(out, "- `Dropped {{ pos: Vec3<f32> }}` — owner -1, dropped 1, then `pos`\n").unwrap();
 
     writeln!(out, "### `data::FlagStateHoldTeam`").unwrap();
     writeln!(out, "- `None` — encoded as team = -1").unwrap();
     writeln!(out, "- `Team {{ team: i32, hold_time: i32 }}`\n").unwrap();
+
+    writeln!(out, "### `data::VSlotProps`").unwrap();
+    writeln!(out, "What a vslot changes on top of its texture slot (`sauer_core::VSlotProps`). Wire: the engine's `packvslot`, a type byte per set field, ended by `0xFF`.").unwrap();
+    writeln!(out, "- `params: Vec<VSlotParam>` — type 0 each: name string, 4 floats").unwrap();
+    writeln!(out, "- `scale: Option<f32>` (1), `rotation: Option<i32>` (2), `offset: Option<(i32, i32)>` (3), `scroll: Option<(f32, f32)>` (4)").unwrap();
+    writeln!(out, "- `layer: Option<i32>` (5, uint), `alpha: Option<(f32, f32)>` (6), `color: Option<(f32, f32, f32)>` (7)\n").unwrap();
+
+    writeln!(out, "### `data::TexRef`").unwrap();
+    writeln!(out, "A texture in `N_EDITT` and `N_REPLACE`. The packet ends with a u16 length prefixed block that holds the vslot of each `Variant`, in field order.").unwrap();
+    writeln!(out, "- `Index(u16)` — the texture value itself").unwrap();
+    writeln!(out, "- `Variant {{ slot: u16, vslot: VSlotProps }}` — sent as `0x10000 + slot`\n").unwrap();
+
+    writeln!(out, "### `data::ClipboardPayload`").unwrap();
+    writeln!(out, "A copied block (`N_CLIPBOARD`). Wire: `unpacked_len, packed_len`, then zlib data holding the `block3` header (o, s, grid, orient as LE i32), the cubes, and `VSlotData` entries ended by 4 zero bytes. In `N_CLIPBOARD` it is `Option<ClipboardPayload>`: `None` (both lengths 0) clears the sender's clipboard.").unwrap();
+    writeln!(out, "- `sel: SelInfo` — only `o`, `s`, `grid`, `orient` are sent").unwrap();
+    writeln!(out, "- `nodes: Vec<Node>`").unwrap();
+    writeln!(out, "- `vslots: Vec<VSlotData>` — `{{ index: u16, slot: u16, vslot: VSlotProps }}`\n").unwrap();
+
+    writeln!(out, "### `data::UndoPayload`").unwrap();
+    writeln!(out, "The block of `N_UNDO`/`N_REDO`, zlib packed like `ClipboardPayload`. Starts with a u16 entity count; 0 means cubes.").unwrap();
+    writeln!(out, "- `Entities(Vec<UndoEntity>)` — `{{ index: u16, ent: Entity }}` each").unwrap();
+    writeln!(out, "- `Cubes {{ sel, nodes, gridmap: Vec<u8>, vslots }}` — one gridmap byte per node\n").unwrap();
 
     // ------------------------------------------------------------------
     // SECTION: Channel 0

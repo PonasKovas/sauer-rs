@@ -172,8 +172,8 @@ Edit face operation mode.
 ### `Privilege` (repr `i32`)
 
 - `None` = `0`
-- `Auth` = `1`
-- `Master` = `2`
+- `Master` = `1`
+- `Auth` = `2`
 - `Admin` = `3`
 
 ### `Movement` (repr `i8`)
@@ -319,17 +319,41 @@ Spawn position of a capture base (used in `N_BASES` client packet).
 Full state of a CTF flag, used in `N_INITFLAGS`. Complex conditional encoding.
 - `version: i32`
 - `spawn_index: i32`
-- `owner: FlagStateOwner`
+- `location: FlagLocation`
 - `invis: bool`
 - `hold: Option<FlagStateHoldTeam>` — **must be `Some` only when `Session::is_hold_mode` is true**; stream corrupts otherwise.
 
-### `data::FlagStateOwner`
-- `Owned { owner: i32 }` — encoded as `owner_id >= 0`
-- `Dropped { dropped: bool, drop_loc: Vec3<f32> }` — encoded as `owner_id = -1`; `drop_loc` only present when `dropped = true`
+### `data::FlagLocation`
+Wire: `owner, invis`, then `dropped` only when `owner < 0`, then the position only when `dropped`.
+- `Home` — owner -1, dropped 0
+- `Carried { owner: i32 }` — owner >= 0
+- `Dropped { pos: Vec3<f32> }` — owner -1, dropped 1, then `pos`
 
 ### `data::FlagStateHoldTeam`
 - `None` — encoded as team = -1
 - `Team { team: i32, hold_time: i32 }`
+
+### `data::VSlotProps`
+What a vslot changes on top of its texture slot (`sauer_core::VSlotProps`). Wire: the engine's `packvslot`, a type byte per set field, ended by `0xFF`.
+- `params: Vec<VSlotParam>` — type 0 each: name string, 4 floats
+- `scale: Option<f32>` (1), `rotation: Option<i32>` (2), `offset: Option<(i32, i32)>` (3), `scroll: Option<(f32, f32)>` (4)
+- `layer: Option<i32>` (5, uint), `alpha: Option<(f32, f32)>` (6), `color: Option<(f32, f32, f32)>` (7)
+
+### `data::TexRef`
+A texture in `N_EDITT` and `N_REPLACE`. The packet ends with a u16 length prefixed block that holds the vslot of each `Variant`, in field order.
+- `Index(u16)` — the texture value itself
+- `Variant { slot: u16, vslot: VSlotProps }` — sent as `0x10000 + slot`
+
+### `data::ClipboardPayload`
+A copied block (`N_CLIPBOARD`). Wire: `unpacked_len, packed_len`, then zlib data holding the `block3` header (o, s, grid, orient as LE i32), the cubes, and `VSlotData` entries ended by 4 zero bytes. In `N_CLIPBOARD` it is `Option<ClipboardPayload>`: `None` (both lengths 0) clears the sender's clipboard.
+- `sel: SelInfo` — only `o`, `s`, `grid`, `orient` are sent
+- `nodes: Vec<Node>`
+- `vslots: Vec<VSlotData>` — `{ index: u16, slot: u16, vslot: VSlotProps }`
+
+### `data::UndoPayload`
+The block of `N_UNDO`/`N_REDO`, zlib packed like `ClipboardPayload`. Starts with a u16 entity count; 0 means cubes.
+- `Entities(Vec<UndoEntity>)` — `{ index: u16, ent: Entity }` each
+- `Cubes { sel, nodes, gridmap: Vec<u8>, vslots }` — one gridmap byte per node
 
 ---
 
@@ -440,16 +464,6 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 - `dir: i32`
 - `mode: EditFaceMode`
 
-### `EditTex` (`N_EDITT`)
-`N_EDITT` Coop Edit: Texture Modification.
-  
-*Encode+Decode:* `Client<EditTex>` on `S2C<Chan1>` · `EditTex` on `C2S<Chan1>`
-
-- `sel: SelInfo`
-- `tex: i32`
-- `all_faces: bool`
-- `extra_data: Vec<u8>`
-
 ### `EditMat` (`N_EDITM`)
 `N_EDITM` Coop Edit: Material Modification.
   
@@ -474,17 +488,6 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 - `sel: SelInfo`
 - `dir: i32`
 
-### `Replace` (`N_REPLACE`)
-`N_REPLACE` Coop Edit: Replace texture.
-  
-*Encode+Decode:* `Client<Replace>` on `S2C<Chan1>` · `Replace` on `C2S<Chan1>`
-
-- `sel: SelInfo`
-- `old_tex: i32`
-- `new_tex: i32`
-- `in_sel: i32`
-- `extra_data: Vec<u8>`
-
 ### `DelCube` (`N_DELCUBE`)
 `N_DELCUBE` Coop Edit: Delete a cube.
   
@@ -498,9 +501,9 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `Client<EditVSlot>` on `S2C<Chan1>` · `EditVSlot` on `C2S<Chan1>`
 
 - `sel: SelInfo`
-- `delta: i32`
+- `delta: bool`
 - `all_faces: bool`
-- `extra_data: Vec<u8>`
+- `vslot: VSlotProps`
 
 ### `Remip` (`N_REMIP`)
 `N_REMIP` Coop Edit: Lighting/mips recalculation.
@@ -719,13 +722,12 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 - `client_num: i32`
 
 ### `ClipboardServer` (`N_CLIPBOARD`)
-`N_CLIPBOARD` Pushes map clipboard data (for cooperative editing) to the client.
+`N_CLIPBOARD` Pushes a client's clipboard (for cooperative editing) to the others. `None` clears it.
   
 *Encode+Decode:* `ClipboardServer` on `S2C<Chan1>`
 
 - `client_num: i32`
-- `unpack_len: i32`
-- `data: Vec<u8>`
+- `payload: Option<ClipboardPayload>`
 
 ### `UndoServer` (`N_UNDO`)
 `N_UNDO` Sends geometry undo data to the client.
@@ -733,8 +735,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `UndoServer` on `S2C<Chan1>`
 
 - `client_num: i32`
-- `unpack_len: i32`
-- `data: Vec<u8>`
+- `payload: UndoPayload`
 
 ### `RedoServer` (`N_REDO`)
 `N_REDO` Sends geometry redo data to the client.
@@ -742,8 +743,7 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 *Encode+Decode:* `RedoServer` on `S2C<Chan1>`
 
 - `client_num: i32`
-- `unpack_len: i32`
-- `data: Vec<u8>`
+- `payload: UndoPayload`
 
 ### `Pong` (`N_PONG`)
 `N_PONG` Basic ping packet sent to measure round-trip time.
@@ -1337,28 +1337,25 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 - `sel: SelInfo`
 
 ### `ClipboardClient` (`N_CLIPBOARD`)
-`N_CLIPBOARD` Coop Edit: Uploads raw clipboard geometry data.
+`N_CLIPBOARD` Coop Edit: Uploads the clipboard. `None` when the copy was too big to pack, which clears it.
   
 *Encode+Decode:* `ClipboardClient` on `C2S<Chan1>`
 
-- `unpack_len: i32`
-- `data: Vec<u8>`
+- `payload: Option<ClipboardPayload>`
 
 ### `UndoClient` (`N_UNDO`)
 `N_UNDO` Coop Edit: Undo event.
   
 *Encode+Decode:* `UndoClient` on `C2S<Chan1>`
 
-- `unpack_len: i32`
-- `data: Vec<u8>`
+- `payload: UndoPayload`
 
 ### `RedoClient` (`N_REDO`)
 `N_REDO` Coop Edit: Redo event.
   
 *Encode+Decode:* `RedoClient` on `C2S<Chan1>`
 
-- `unpack_len: i32`
-- `data: Vec<u8>`
+- `payload: UndoPayload`
 
 ### `RepAmmoClient` (`N_REPAMMO`)
 `N_REPAMMO` Requests ammo replenishment (Regen Capture).
@@ -1417,6 +1414,25 @@ Packets with `Client<T>` routing arrive inside an `N_CLIENT` envelope on the ser
 
 - `name: CubeString`
 - `val: EditVarValue`
+
+### `EditTex`
+`N_EDITT` Coop Edit: Texture Modification.
+  
+*Encode+Decode:* `Client<EditTex>` on `S2C<Chan1>` · `EditTex` on `C2S<Chan1>`
+
+- `sel: SelInfo`
+- `tex: TexRef`
+- `all_faces: bool`
+
+### `Replace`
+`N_REPLACE` Coop Edit: Replace texture.
+  
+*Encode+Decode:* `Client<Replace>` on `S2C<Chan1>` · `Replace` on `C2S<Chan1>`
+
+- `sel: SelInfo`
+- `old_tex: TexRef`
+- `new_tex: TexRef`
+- `in_sel: bool`
 
 ### `InitFlagsServer`
 `N_INITFLAGS` Sends initial flag states to joining clients (CTF modes).
