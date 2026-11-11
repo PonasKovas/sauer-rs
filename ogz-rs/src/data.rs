@@ -35,7 +35,7 @@ pub struct CubeInfo {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Surfaces {
     None,
-    Legacy(LegacySurfaceData),
+    Legacy(Box<LegacySurfaceData>),
     Modern(ModernSurfaceData),
 }
 
@@ -51,23 +51,43 @@ impl Surfaces {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct LegacySurfaceData {
-    pub mask: u8,
     pub material: Option<Material>,
-    pub surfaces: Vec<LegacySurface>,
-    pub merges: Option<LegacyMerge>,
+    /// Per face, in today's face order.
+    pub faces: [Option<LegacyFace>; 6],
+    /// Which faces are merged (bits 0-5), from v20.
+    pub merged: Option<u8>,
+    /// The merged rectangle of each face that has one.
+    pub merges: [Option<LegacyMerge>; 6],
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct LegacyFace {
+    pub surface: LegacySurface,
+    /// One per corner, each axis as 0-255 for -1 to 1.
+    pub normals: Option<[[u8; 3]; 4]>,
+    /// The second layer, when `surface.layer` has the blend bit (2).
+    pub blend: Option<LegacySurface>,
+}
+
+/// The engine's `surfacecompat`: where a face is in its lightmap.
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct LegacySurface {
-    pub compat: [u8; 16],
-    pub normals: Option<[u8; 12]>,
+    pub texcoords: [u8; 8],
+    pub w: u8,
+    pub h: u8,
+    pub x: u16,
+    pub y: u16,
+    pub lmid: u8,
+    pub layer: u8,
 }
 
+/// The engine's `mergecompat`.
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct LegacyMerge {
-    pub merged: u8,
-    pub merge_mask: u8,
-    pub compat: Vec<[u16; 4]>,
+    pub u1: u16,
+    pub u2: u16,
+    pub v1: u16,
+    pub v2: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]

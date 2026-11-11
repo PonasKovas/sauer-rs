@@ -80,7 +80,9 @@ fn read_node<R: Read>(r: &mut R, depth: usize) -> Result<Box<[ViewCell; 8]>, Ogz
         });
     }
     Ok(Box::new(
-        children.try_into().expect("8 elements pushed to 8-element array"),
+        children
+            .try_into()
+            .expect("8 elements pushed to 8-element array"),
     ))
 }
 

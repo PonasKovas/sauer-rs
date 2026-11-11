@@ -4,9 +4,10 @@
 
 pub mod blendmap;
 pub mod data;
-pub mod pvs;
 mod de;
 mod error;
+mod legacy;
+pub mod pvs;
 mod ser;
 
 pub use error::OgzError;

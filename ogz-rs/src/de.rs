@@ -484,7 +484,11 @@ fn read_cube(
                 cursor.read_exact(&mut [0; 3])?; // skip 3 legacy lightmap bytes, no surface data
                 Surfaces::None
             } else if version <= 31 {
-                Surfaces::Legacy(read_legacy_surfaces(cursor, version, octsav)?)
+                let edges = (ty == 3).then_some(&mut edges);
+                crate::legacy::fix_cube(version, edges, &mut textures);
+                Surfaces::Legacy(Box::new(crate::legacy::read_surfaces(
+                    cursor, version, octsav,
+                )?))
             } else {
                 Surfaces::Modern(read_modern_surfaces(cursor, version, octsav)?)
             };
@@ -504,79 +508,6 @@ fn read_cube(
         }
         _ => Err(OgzError::InvalidOctreeType(ty)),
     }
-}
-
-fn read_legacy_surfaces(
-    cursor: &mut Cursor<&Vec<u8>>,
-    version: i32,
-    octsav: u8,
-) -> Result<LegacySurfaceData, OgzError> {
-    let mask = cursor.read_u8()?;
-    let material = if (mask & 0x80) != 0 {
-        Some(old_material(cursor.read_u8()?, version))
-    } else {
-        None
-    };
-
-    let mut surfaces = Vec::new();
-    if (mask & 0x3F) != 0 {
-        let mut numsurfs = 6;
-        let mut i = 0;
-        while i < numsurfs {
-            if i >= 6 || (mask & (1 << i)) != 0 {
-                let mut compat = [0u8; 16];
-                cursor.read_exact(&mut compat)?;
-                let normals = if i < 6 && (mask & 0x40) != 0 {
-                    let mut n = [0u8; 12];
-                    cursor.read_exact(&mut n)?;
-                    Some(n)
-                } else {
-                    None
-                };
-
-                if (compat[15] & 2) != 0 {
-                    numsurfs += 1;
-                    if numsurfs > 12 {
-                        return Err(OgzError::LimitExceeded("numsurfs"));
-                    }
-                }
-                surfaces.push(LegacySurface { compat, normals });
-            }
-            i += 1;
-        }
-    }
-
-    let merges = if version >= 20 && (octsav & 0x80) != 0 {
-        let merged = cursor.read_u8()?;
-        let mut merge_mask = 0;
-        let mut compat = Vec::new();
-        if (merged & 0x80) != 0 {
-            merge_mask = cursor.read_u8()?;
-            for i in 0..6 {
-                if (merge_mask & (1 << i)) != 0 {
-                    let mut arr = [0u16; 4];
-                    for val in &mut arr {
-                        *val = cursor.read_u16::<LittleEndian>()?;
-                    }
-                    compat.push(arr);
-                }
-            }
-        }
-        Some(LegacyMerge {
-            merged,
-            merge_mask,
-            compat,
-        })
-    } else {
-        None
-    };
-
-    Ok(LegacySurfaceData {
-        mask,
-        material,
-        surfaces,
-        merges,
-    })
 }
 
 fn read_modern_surfaces(
@@ -611,6 +542,21 @@ fn read_modern_surfaces(
                 let vertmask = cursor.read_u8()?;
                 let numverts = cursor.read_u8()?;
                 let layerverts = numverts & 0x0F;
+                // The engine reads nothing more for a face with no verts.
+                if layerverts == 0 {
+                    faces.push(ModernFace {
+                        lmid,
+                        vertmask,
+                        numverts,
+                        xyz: None,
+                        uv: None,
+                        dup_uv: None,
+                        norm: None,
+                        verts: Vec::new(),
+                        dup_verts: Vec::new(),
+                    });
+                    continue;
+                }
 
                 let mut hasxyz = (vertmask & 0x04) != 0;
                 let mut hasuv = (vertmask & 0x40) != 0;
@@ -734,7 +680,7 @@ fn read_modern_surfaces(
 
 /// A material from before v33, when it was one byte: the engine's
 /// `convertoldmaterial`, or before v27 its `matconv` table.
-fn old_material(mat: u8, version: i32) -> Material {
+pub(crate) fn old_material(mat: u8, version: i32) -> Material {
     const WATER: u16 = 1 << 2;
     const LAVA: u16 = 2 << 2;
     const GLASS: u16 = 3 << 2;
