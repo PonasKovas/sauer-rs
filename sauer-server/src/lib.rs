@@ -55,6 +55,8 @@ pub struct Server {
     pub(crate) help_lines: RwLock<Vec<CubeString>>,
     /// IPs kicked with `/kick`, and when each ban runs out.
     bans: RwLock<Vec<(std::net::IpAddr, std::time::Instant)>>,
+    /// Added in `init` with `add_fake_player`, so no lock.
+    fake_players: Vec<(Cn, FakePlayer)>,
 }
 
 impl Server {
@@ -75,6 +77,7 @@ impl Server {
             }]),
             help_lines: RwLock::new(Vec::new()),
             bans: RwLock::new(Vec::new()),
+            fake_players: Vec::new(),
         }
     }
 
@@ -140,16 +143,17 @@ impl Server {
         }
     }
 
-    /// Takes `cn` for a fake player that has no connection. Returns false if
-    /// it's already taken.
+    /// Adds a player with no connection at `cn`, like a plugin's bot that
+    /// speaks for the server. It's a spectator every client is told about when
+    /// it joins. Returns false if `cn` is taken.
     #[must_use]
-    pub fn reserve_cn(&self, cn: Cn) -> bool {
-        let mut cns = self.cns.write();
-        let slot = &mut cns[cn.index()];
+    pub fn add_fake_player(&mut self, cn: Cn, player: FakePlayer) -> bool {
+        let slot = &mut self.cns.get_mut()[cn.index()];
         if *slot != CnSlot::Free {
             return false;
         }
         *slot = CnSlot::Reserved;
+        self.fake_players.push((cn, player));
         true
     }
 
@@ -231,12 +235,20 @@ impl Server {
     }
 }
 
+/// A player with no connection, see [`Server::add_fake_player`].
+#[derive(Clone, Debug)]
+pub struct FakePlayer {
+    pub name: CubeString,
+    pub model: sauer_proto::data::PlayerModel,
+    pub team: CubeString,
+}
+
 /// Who holds a client number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CnSlot {
     Free,
     Client(u64),
-    /// Taken with [`Server::reserve_cn`] for a fake player.
+    /// A fake player's, see [`Server::add_fake_player`].
     Reserved,
 }
 

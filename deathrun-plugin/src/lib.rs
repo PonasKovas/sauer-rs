@@ -11,6 +11,20 @@ pub use play::DeathrunPlay;
 
 pub const SERVER_BOT_CN: sauer_proto::data::Cn = sauer_proto::data::Cn(0);
 
+/// Adds the bot that pastes geometry and speaks for the server.
+fn add_server_bot(server: &mut sauer_server::Server) {
+    use cube_string::IntoCubeStringLossy;
+    let bot = sauer_server::FakePlayer {
+        name: "Server".lossy_cubestring(),
+        model: sauer_proto::data::PlayerModel::MrFixit,
+        team: Default::default(),
+    };
+    assert!(
+        server.add_fake_player(SERVER_BOT_CN, bot),
+        "the server bot cn is already taken"
+    );
+}
+
 /// Lines the host adds to every welcome wall and to the end of `#help`, such
 /// as where to send new maps. Set with `with_notes` on either plugin; none by
 /// default. Sauer color codes (`\f0`-`\f8`) work in them.

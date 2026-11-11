@@ -74,6 +74,24 @@ impl Server {
             .collect();
         self.send(id, &Resume { clients });
 
+        for (cn, fake) in &self.fake_players {
+            self.send(
+                id,
+                (
+                    InitClient {
+                        client_num: *cn,
+                        name: fake.name.clone(),
+                        player_model: fake.model,
+                        team: fake.team.clone(),
+                    },
+                    sauer_proto::channel1::SpectatorServer {
+                        client_num: *cn,
+                        is_spectator: true,
+                    },
+                ),
+            );
+        }
+
         // Introduce all existing players to the new player and send their clipboards.
         for other_id in self.client_ids().into_iter().filter(|&other| other != id) {
             let Some(other_cn) = self.get_cn(other_id) else {

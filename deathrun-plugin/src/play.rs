@@ -775,10 +775,7 @@ impl Plugin for DeathrunPlay {
         server.extra.insert(crate::recreate::KnownVars::default());
         // Rounds set the master mode, so it must not snap back to open.
         server.config.write().reopen_when_masterless = false;
-        assert!(
-            server.reserve_cn(crate::SERVER_BOT_CN),
-            "the server bot cn is already taken"
-        );
+        crate::add_server_bot(server);
 
         let (_, state) = self.maps.read().make_active_state();
         server.extra.insert(RwLock::new(state));
@@ -804,23 +801,6 @@ impl Plugin for DeathrunPlay {
         let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
-
-        server.send(
-            id,
-            &sauer_proto::channel1::InitClient {
-                client_num: crate::SERVER_BOT_CN,
-                name: "Server".lossy_cubestring(),
-                player_model: sauer_proto::data::PlayerModel::MrFixit,
-                team: "".lossy_cubestring(),
-            },
-        );
-        server.send(
-            id,
-            &sauer_proto::channel1::SpectatorServer {
-                client_num: crate::SERVER_BOT_CN,
-                is_spectator: true,
-            },
-        );
 
         let (is_first, is_solo_round, is_waiting) = {
             let lock = maps.read();

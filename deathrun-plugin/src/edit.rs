@@ -89,10 +89,7 @@ impl Plugin for DeathrunEdit {
         self.notes.install(server);
         server.game.write().map_name = "".lossy_cubestring();
         server.game.write().mode = GameMode::CoopEdit;
-        assert!(
-            server.reserve_cn(crate::SERVER_BOT_CN),
-            "the server bot cn is already taken"
-        );
+        crate::add_server_bot(server);
         let state = DeathrunState {
             map: Some(Map::default_empty()),
             ..Default::default()
@@ -825,23 +822,6 @@ impl Plugin for DeathrunEdit {
             server.set_privilege(id, Privilege::Master);
             server.set_master_mode(MasterMode::Locked);
         }
-
-        server.send(
-            id,
-            &sauer_proto::channel1::InitClient {
-                client_num: crate::SERVER_BOT_CN,
-                name: "Server".lossy_cubestring(),
-                player_model: sauer_proto::data::PlayerModel::MrFixit,
-                team: "".lossy_cubestring(),
-            },
-        );
-        server.send(
-            id,
-            &sauer_proto::channel1::SpectatorServer {
-                client_num: crate::SERVER_BOT_CN,
-                is_spectator: true,
-            },
-        );
 
         if is_waiting_for_map(server) {
             server.set_spectator(id, true);

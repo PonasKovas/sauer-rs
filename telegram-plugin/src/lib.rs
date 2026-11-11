@@ -38,37 +38,16 @@ impl TelegramBridge {
 impl Plugin for TelegramBridge {
     async fn init(&self, server: &mut Server) {
         if self.enabled {
+            let bot = sauer_server::FakePlayer {
+                name: "TG".lossy_cubestring(),
+                model: sauer_proto::data::PlayerModel::MrFixit,
+                team: Default::default(),
+            };
             assert!(
-                server.reserve_cn(self.bot_cn),
+                server.add_fake_player(self.bot_cn, bot),
                 "the telegram bot cn is already taken"
             );
         }
-    }
-
-    async fn on_client_welcomed(&self, ctx: &mut Context) {
-        if !self.enabled {
-            return;
-        }
-
-        use sauer_proto::channel1::{InitClient, SpectatorServer};
-        use sauer_proto::data::PlayerModel;
-
-        ctx.server().send(
-            ctx.id(),
-            &InitClient {
-                client_num: self.bot_cn,
-                name: "TG".lossy_cubestring(),
-                player_model: PlayerModel::MrFixit,
-                team: "".lossy_cubestring(),
-            },
-        );
-        ctx.server().send(
-            ctx.id(),
-            &SpectatorServer {
-                client_num: self.bot_cn,
-                is_spectator: true,
-            },
-        );
     }
 
     async fn start(&self, server: &Arc<Server>) {
