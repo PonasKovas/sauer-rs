@@ -1,5 +1,5 @@
 [workspace]
-members = ["cube-string", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "sauer-plugin-lua", "example-server", "deathrun", "sauer-core", "telegram-plugin", "sauer-kit"]
+members = ["cube-string", "sauer-proto", "ogz-rs", "sauer-map", "sauer-server", "sauer-plugin-lua", "example-server", "deathrun", "sauer-core", "telegram-plugin", "sauer-kit", "xtask"]
 resolver = "3"
 
 [workspace.dependencies]

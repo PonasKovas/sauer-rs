@@ -1,0 +1,9 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Repo chores: `cargo xtask lua-docs` writes the Lua API docs to lua-api/"
+
+[dependencies]
+regex = "1"

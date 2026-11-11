@@ -1,12 +1,5 @@
-#!/usr/bin/env rust-script
-//! ```cargo
-//! [dependencies]
-//! regex = "1"
-//! ```
-//!
-//! Generates HTML API docs and EmmyLua LSP stubs for the sauer Lua plugin API.
-//! Usage: ./gen-lua-docs.rs [path/to/sauer-plugin-lua/src]
-//! Outputs: lua-api/index.html  and  lua-api/sauer.lua
+//! Writes HTML API docs and EmmyLua LSP stubs for the sauer Lua plugin API:
+//! `lua-api/index.html` and `lua-api/sauer.lua`.
 
 use regex::Regex;
 use std::fmt::Write as _;
@@ -19,11 +12,11 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 enum EntryKind {
-    Function,  // global function
-    Const,     // global constant
-    Method,    // :method() on a type
-    Field,     // .field on a type  (read/write)
-    Callback,  // plugin callback handler
+    Function, // global function
+    Const,    // global constant
+    Method,   // :method() on a type
+    Field,    // .field on a type  (read/write)
+    Callback, // plugin callback handler
 }
 
 #[derive(Debug, Clone)]
@@ -111,9 +104,9 @@ fn parse_globals(src: &str) -> Vec<Entry> {
 
 fn parse_server_methods(src: &str) -> Vec<Entry> {
     let method_re = Regex::new(r#"methods\.add_method(?:_mut)?\(\s*"([^"]+)""#).unwrap();
-    let field_re  = Regex::new(r#"fields\.add_field_method_get\(\s*"([^"]+)""#).unwrap();
-    let send_re   = Regex::new(r#"add_send!\("([^"]+)",\s*([\w:<>]+)"#).unwrap();
-    let bcast_re  = Regex::new(r#"add_broadcast!\("([^"]+)",\s*([\w:<>]+)"#).unwrap();
+    let field_re = Regex::new(r#"fields\.add_field_method_get\(\s*"([^"]+)""#).unwrap();
+    let send_re = Regex::new(r#"add_send!\("([^"]+)",\s*([\w:<>]+)"#).unwrap();
+    let bcast_re = Regex::new(r#"add_broadcast!\("([^"]+)",\s*([\w:<>]+)"#).unwrap();
 
     let mut entries = Vec::new();
     let mut pending_doc: Vec<String> = Vec::new();
@@ -132,7 +125,13 @@ fn parse_server_methods(src: &str) -> Vec<Entry> {
             let name = caps[1].to_string();
             let sig = hand_written_sig(&name);
             let tags = hand_written_tags(&name);
-            entries.push(Entry { name, kind: EntryKind::Method, doc, sig, tags });
+            entries.push(Entry {
+                name,
+                kind: EntryKind::Method,
+                doc,
+                sig,
+                tags,
+            });
             pending_doc.clear();
         } else if let Some(caps) = field_re.captures(trimmed) {
             let name = caps[1].to_string();
@@ -159,7 +158,10 @@ fn parse_server_methods(src: &str) -> Vec<Entry> {
         } else if let Some(caps) = bcast_re.captures(trimmed) {
             let name = caps[1].to_string();
             let type_name = packet_display_name(&caps[2]);
-            let auto_doc = format!("Broadcast a `{}` packet to all connected clients.", type_name);
+            let auto_doc = format!(
+                "Broadcast a `{}` packet to all connected clients.",
+                type_name
+            );
             entries.push(Entry {
                 sig: format!("server:{}(packet: table)", name),
                 kind: EntryKind::Method,
@@ -175,7 +177,8 @@ fn parse_server_methods(src: &str) -> Vec<Entry> {
     entries
 }
 
-fn parse_spawn_state_fields(src: &str) -> Vec<Entry> {
+/// Fields of a userdata type. `field_type` gives each field's Lua type.
+fn parse_fields(src: &str, prefix: &str, field_type: fn(&str) -> &'static str) -> Vec<Entry> {
     let get_re = Regex::new(r#"fields\.add_field_method_get\(\s*"([^"]+)""#).unwrap();
     let set_re = Regex::new(r#"fields\.add_field_method_set\(\s*"([^"]+)""#).unwrap();
     let mut entries = Vec::new();
@@ -196,7 +199,7 @@ fn parse_spawn_state_fields(src: &str) -> Vec<Entry> {
             let name = caps[1].to_string();
             if seen_setters.insert(name.clone()) {
                 entries.push(Entry {
-                    sig: format!("spawn_state.{}: number", name),
+                    sig: format!("{prefix}.{name}: {}", field_type(&name)),
                     kind: EntryKind::Field,
                     doc: pending_doc.join(" "),
                     tags: vec![],
@@ -240,7 +243,9 @@ fn parse_simple_methods(src: &str, type_sig_prefix: &str) -> Vec<Entry> {
 }
 
 // ---------------------------------------------------------------------------
-// Hardcoded callback table (signatures come from plugin.rs)
+// Callbacks: hand-written for the special hooks (signatures come from
+// sauer-plugin-lua/src/plugin.rs), parsed from `for_each_packet_hook!` for
+// the packet ones.
 // ---------------------------------------------------------------------------
 
 struct CallbackDef {
@@ -250,103 +255,116 @@ struct CallbackDef {
     cancellable: bool,
 }
 
-fn callbacks() -> Vec<Entry> {
-    const DEFS: &[CallbackDef] = &[
-        CallbackDef { name: "start",              sig: "start()",                                          doc: "Called once when the server starts and the `server` global is ready.",                         cancellable: false },
-        CallbackDef { name: "connected",          sig: "connected(id: number, event: Event)",              doc: "Called when a new peer connects (before authentication).",                                    cancellable: true  },
-        CallbackDef { name: "disconnected",       sig: "disconnected(id: number, event: Event)",           doc: "Called when a peer disconnects.",                                                            cancellable: true  },
-        CallbackDef { name: "on_client_welcomed", sig: "on_client_welcomed(id: number, event: Event)",     doc: "Called after a client completes the welcome handshake and is fully joined.",                  cancellable: true  },
-        CallbackDef { name: "map_changed",        sig: "map_changed(id: number, map_name: string, mode: number, event: Event)", doc: "Called when a client requests a map change.",                          cancellable: true  },
-        CallbackDef { name: "on_spawn",           sig: "on_spawn(id: number, state: SpawnState, event: Event)", doc: "Called when a player spawns. Modify `state` fields to override spawn attributes.",    cancellable: true  },
-        CallbackDef { name: "on_chat",            sig: "on_chat(id: number, text: string, event: Event)",  doc: "Called for each chat message. Cancel to suppress it.",                                       cancellable: true  },
-        CallbackDef { name: "on_command",         sig: "on_command(id: number, args: table, event: Event)", doc: "Called when a client sends a registered server command (see `register_command`). `args[1]` is the command name.", cancellable: true  },
-        CallbackDef { name: "map",                sig: "map(id: number, data: string, event: Event)",      doc: "Called when a client uploads map data (binary string).",                                     cancellable: true  },
-        CallbackDef { name: "server_query",       sig: "server_query(addr: string, request: table, event: Event)", doc: "Called for each ExtInfo/server-browser UDP query. `request.type` identifies the query kind.", cancellable: true },
-        // Channel 0
-        CallbackDef { name: "pos",           sig: "pos(id: number, packet: Position, event: Event)",      doc: "Client position update.",                         cancellable: true },
-        CallbackDef { name: "teleport",      sig: "teleport(id: number, packet: Teleport, event: Event)", doc: "Client teleport.",                                cancellable: true },
-        CallbackDef { name: "jumppad",       sig: "jumppad(id: number, packet: JumpPad, event: Event)",   doc: "Client jumppad use.",                             cancellable: true },
-        // Channel 1
-        CallbackDef { name: "connect",           sig: "connect(id, packet, event)",          doc: "Initial connection packet from client.",            cancellable: true },
-        CallbackDef { name: "auth_answer",       sig: "auth_answer(id, packet, event)",      doc: "Client authentication answer.",                    cancellable: true },
-        CallbackDef { name: "ping",              sig: "ping(id, packet, event)",             doc: "Client ping packet.",                              cancellable: true },
-        CallbackDef { name: "from_ai",           sig: "from_ai(id, packet, event)",          doc: "Packet forwarded from a bot.",                     cancellable: true },
-        CallbackDef { name: "sound",             sig: "sound(id, packet, event)",            doc: "Client plays a sound.",                            cancellable: true },
-        CallbackDef { name: "edit_mode",         sig: "edit_mode(id, packet, event)",        doc: "Client toggles edit mode.",                        cancellable: true },
-        CallbackDef { name: "map_crc",           sig: "map_crc(id, packet, event)",          doc: "Client sends map CRC.",                            cancellable: true },
-        CallbackDef { name: "check_maps",        sig: "check_maps(id, packet, event)",       doc: "Client requests map check.",                       cancellable: true },
-        CallbackDef { name: "try_spawn",         sig: "try_spawn(id, packet, event)",        doc: "Client requests to spawn.",                        cancellable: true },
-        CallbackDef { name: "gun_select",        sig: "gun_select(id, packet, event)",       doc: "Client switches weapon.",                          cancellable: true },
-        CallbackDef { name: "spawn_client",      sig: "spawn_client(id, packet, event)",     doc: "Client confirms spawn.",                           cancellable: true },
-        CallbackDef { name: "suicide",           sig: "suicide(id, packet, event)",          doc: "Client commits suicide.",                          cancellable: true },
-        CallbackDef { name: "shoot",             sig: "shoot(id, packet, event)",            doc: "Client fires a shot.",                             cancellable: true },
-        CallbackDef { name: "explode",           sig: "explode(id, packet, event)",          doc: "Client detonates an explosive.",                   cancellable: true },
-        CallbackDef { name: "item_pickup",       sig: "item_pickup(id, packet, event)",      doc: "Client picks up an item.",                         cancellable: true },
-        CallbackDef { name: "text",              sig: "text(id, packet, event)",             doc: "Client sends global chat text.",                   cancellable: true },
-        CallbackDef { name: "say_team",          sig: "say_team(id, packet, event)",         doc: "Client sends team chat.",                          cancellable: true },
-        CallbackDef { name: "switch_name",       sig: "switch_name(id, packet, event)",      doc: "Client changes their name.",                       cancellable: true },
-        CallbackDef { name: "switch_model",      sig: "switch_model(id, packet, event)",     doc: "Client changes their player model.",               cancellable: true },
-        CallbackDef { name: "switch_team",       sig: "switch_team(id, packet, event)",      doc: "Client requests a team change.",                   cancellable: true },
-        CallbackDef { name: "map_vote",          sig: "map_vote(id, packet, event)",         doc: "Client votes for a map.",                          cancellable: true },
-        CallbackDef { name: "item_list",         sig: "item_list(id, packet, event)",        doc: "Client sends item list.",                          cancellable: true },
-        CallbackDef { name: "edit_ent",          sig: "edit_ent(id, packet, event)",         doc: "Client edits an entity.",                          cancellable: true },
-        CallbackDef { name: "edit_var",          sig: "edit_var(id, packet, event)",         doc: "Client edits a map variable.",                     cancellable: true },
-        CallbackDef { name: "client_ping",       sig: "client_ping(id, packet, event)",      doc: "Client ping acknowledgement.",                     cancellable: true },
-        CallbackDef { name: "master_mode",       sig: "master_mode(id, packet, event)",      doc: "Client requests master mode change.",              cancellable: true },
-        CallbackDef { name: "clear_bans",        sig: "clear_bans(id, packet, event)",       doc: "Client requests ban list clear.",                  cancellable: true },
-        CallbackDef { name: "kick",              sig: "kick(id, packet, event)",             doc: "Client requests to kick another player.",          cancellable: true },
-        CallbackDef { name: "spectator",         sig: "spectator(id, packet, event)",        doc: "Client requests spectator mode.",                  cancellable: true },
-        CallbackDef { name: "set_team",          sig: "set_team(id, packet, event)",         doc: "Client requests to set another player's team.",    cancellable: true },
-        CallbackDef { name: "force_intermission",sig: "force_intermission(id, packet, event)", doc: "Client forces intermission.",                    cancellable: true },
-        CallbackDef { name: "record_demo",       sig: "record_demo(id, packet, event)",      doc: "Client requests demo recording.",                  cancellable: true },
-        CallbackDef { name: "stop_demo",         sig: "stop_demo(id, packet, event)",        doc: "Client stops demo recording.",                     cancellable: true },
-        CallbackDef { name: "clear_demos",       sig: "clear_demos(id, packet, event)",      doc: "Client clears demo list.",                         cancellable: true },
-        CallbackDef { name: "list_demos",        sig: "list_demos(id, packet, event)",       doc: "Client requests demo list.",                       cancellable: true },
-        CallbackDef { name: "get_demo",          sig: "get_demo(id, packet, event)",         doc: "Client requests a demo download.",                 cancellable: true },
-        CallbackDef { name: "get_map",           sig: "get_map(id, packet, event)",          doc: "Client requests the current map.",                 cancellable: true },
-        CallbackDef { name: "new_map",           sig: "new_map(id, packet, event)",          doc: "Client creates a new map.",                        cancellable: true },
-        CallbackDef { name: "set_master",        sig: "set_master(id, packet, event)",       doc: "Client requests master status for another.",       cancellable: true },
-        CallbackDef { name: "add_bot",           sig: "add_bot(id, packet, event)",          doc: "Client requests adding a bot.",                    cancellable: true },
-        CallbackDef { name: "del_bot",           sig: "del_bot(id, packet, event)",          doc: "Client requests removing a bot.",                  cancellable: true },
-        CallbackDef { name: "bot_limit",         sig: "bot_limit(id, packet, event)",        doc: "Client sets the bot limit.",                       cancellable: true },
-        CallbackDef { name: "bot_balance",       sig: "bot_balance(id, packet, event)",      doc: "Client toggles bot balance.",                      cancellable: true },
-        CallbackDef { name: "auth_try",          sig: "auth_try(id, packet, event)",         doc: "Client initiates authentication.",                 cancellable: true },
-        CallbackDef { name: "auth_kick",         sig: "auth_kick(id, packet, event)",        doc: "Client requests an auth-kick.",                    cancellable: true },
-        CallbackDef { name: "pause_game",        sig: "pause_game(id, packet, event)",       doc: "Client requests game pause.",                      cancellable: true },
-        CallbackDef { name: "game_speed",        sig: "game_speed(id, packet, event)",       doc: "Client requests game speed change.",               cancellable: true },
-        CallbackDef { name: "copy",              sig: "copy(id, packet, event)",             doc: "Client copies geometry selection.",                cancellable: true },
-        CallbackDef { name: "paste",             sig: "paste(id, packet, event)",            doc: "Client pastes geometry.",                          cancellable: true },
-        CallbackDef { name: "clipboard",         sig: "clipboard(id, packet, event)",        doc: "Client sends clipboard data.",                     cancellable: true },
-        CallbackDef { name: "undo",              sig: "undo(id, packet, event)",             doc: "Client undoes an edit.",                           cancellable: true },
-        CallbackDef { name: "redo",              sig: "redo(id, packet, event)",             doc: "Client redoes an edit.",                           cancellable: true },
-        CallbackDef { name: "edit_face",         sig: "edit_face(id, packet, event)",        doc: "Client edits a cube face.",                        cancellable: true },
-        CallbackDef { name: "edit_tex",          sig: "edit_tex(id, packet, event)",         doc: "Client edits a texture.",                          cancellable: true },
-        CallbackDef { name: "edit_mat",          sig: "edit_mat(id, packet, event)",         doc: "Client edits a material.",                         cancellable: true },
-        CallbackDef { name: "flip",              sig: "flip(id, packet, event)",             doc: "Client flips geometry.",                           cancellable: true },
-        CallbackDef { name: "rotate",            sig: "rotate(id, packet, event)",           doc: "Client rotates geometry.",                         cancellable: true },
-        CallbackDef { name: "replace",           sig: "replace(id, packet, event)",          doc: "Client replaces textures.",                        cancellable: true },
-        CallbackDef { name: "del_cube",          sig: "del_cube(id, packet, event)",         doc: "Client deletes cubes.",                            cancellable: true },
-        CallbackDef { name: "edit_v_slot",       sig: "edit_v_slot(id, packet, event)",      doc: "Client edits a vslot.",                            cancellable: true },
-        CallbackDef { name: "remip",             sig: "remip(id, packet, event)",            doc: "Client remips geometry.",                          cancellable: true },
-        CallbackDef { name: "serv_cmd",          sig: "serv_cmd(id, packet, event)",         doc: "Client sends a server command string.",            cancellable: true },
-        CallbackDef { name: "bases",             sig: "bases(id, packet, event)",            doc: "Client sends base data (Capture mode).",           cancellable: true },
-        CallbackDef { name: "rep_ammo",          sig: "rep_ammo(id, packet, event)",         doc: "Client requests ammo replenishment.",              cancellable: true },
-        CallbackDef { name: "try_drop_flag",     sig: "try_drop_flag(id, packet, event)",    doc: "Client attempts to drop the flag.",                cancellable: true },
-        CallbackDef { name: "take_flag",         sig: "take_flag(id, packet, event)",        doc: "Client takes a flag.",                             cancellable: true },
-        CallbackDef { name: "init_flags",        sig: "init_flags(id, packet, event)",       doc: "Client initialises flag state.",                   cancellable: true },
-        CallbackDef { name: "init_tokens",       sig: "init_tokens(id, packet, event)",      doc: "Client initialises token state (Collect mode).",  cancellable: true },
-        CallbackDef { name: "take_token",        sig: "take_token(id, packet, event)",       doc: "Client takes a token.",                            cancellable: true },
-        CallbackDef { name: "deposit_tokens",    sig: "deposit_tokens(id, packet, event)",   doc: "Client deposits tokens.",                          cancellable: true },
-        CallbackDef { name: "taunt",             sig: "taunt(id, packet, event)",            doc: "Client taunts.",                                   cancellable: true },
-    ];
+const SPECIAL_CALLBACKS: &[CallbackDef] = &[
+    CallbackDef {
+        name: "start",
+        sig: "start()",
+        doc: "Called once when the server starts and the `server` global is ready.",
+        cancellable: false,
+    },
+    CallbackDef {
+        name: "connected",
+        sig: "connected(id: number, event: Event)",
+        doc: "Called when a new peer connects (before it sends N_CONNECT). Cancel to drop it.",
+        cancellable: true,
+    },
+    CallbackDef {
+        name: "disconnected",
+        sig: "disconnected(id: number)",
+        doc: "Called when a peer disconnects.",
+        cancellable: false,
+    },
+    CallbackDef {
+        name: "on_client_welcomed",
+        sig: "on_client_welcomed(id: number)",
+        doc: "Called after a client completes the welcome handshake and is fully joined.",
+        cancellable: false,
+    },
+    CallbackDef {
+        name: "map_changed",
+        sig: "map_changed(id: number, map_name: string, mode: string)",
+        doc: "Called after the map changes. `id` is the client who caused it.",
+        cancellable: false,
+    },
+    CallbackDef {
+        name: "on_spawn",
+        sig: "on_spawn(id: number, state: SpawnState, event: Event)",
+        doc: "Called when a player spawns. Change `state` fields to change what they spawn with.",
+        cancellable: true,
+    },
+    CallbackDef {
+        name: "on_chat",
+        sig: "on_chat(id: number, chat: Chat, event: Event)",
+        doc: "Called for each chat message. Change `chat.text` to rewrite it, cancel to drop it.",
+        cancellable: true,
+    },
+    CallbackDef {
+        name: "on_damage",
+        sig: "on_damage(target_id: number, actor_id: number, damage: Damage, event: Event)",
+        doc: "Called before damage is dealt. Change `damage.amount` to change it, cancel to prevent it.",
+        cancellable: true,
+    },
+    CallbackDef {
+        name: "on_player_died",
+        sig: "on_player_died(victim_id: number, actor_id: number)",
+        doc: "Called after a player dies. `actor_id` is the victim on a suicide.",
+        cancellable: false,
+    },
+    CallbackDef {
+        name: "on_command",
+        sig: "on_command(id: number, args: table, event: Event)",
+        doc: "Called when a client sends a registered server command (see `register_command`). `args[1]` is the command name.",
+        cancellable: true,
+    },
+    CallbackDef {
+        name: "map",
+        sig: "map(id: number, data: string, event: Event)",
+        doc: "Called when a client uploads map data (binary string).",
+        cancellable: true,
+    },
+    CallbackDef {
+        name: "server_query",
+        sig: "server_query(addr: string, request: table, event: Event)",
+        doc: "Called for each ExtInfo/server-browser UDP query. `request.type` identifies the query kind.",
+        cancellable: true,
+    },
+];
 
-    DEFS.iter().map(|d| Entry {
-        name: d.name.to_string(),
-        kind: EntryKind::Callback,
-        doc: d.doc.to_string(),
-        sig: d.sig.to_string(),
-        tags: if d.cancellable { vec!["cancellable"] } else { vec![] },
-    }).collect()
+/// `plugin_src` is sauer-server/src/plugin.rs, which holds `for_each_packet_hook!`.
+fn callbacks(plugin_src: &str) -> Vec<Entry> {
+    let mut entries: Vec<Entry> = SPECIAL_CALLBACKS
+        .iter()
+        .map(|d| Entry {
+            name: d.name.to_string(),
+            kind: EntryKind::Callback,
+            doc: d.doc.to_string(),
+            sig: d.sig.to_string(),
+            tags: if d.cancellable {
+                vec!["cancellable"]
+            } else {
+                vec![]
+            },
+        })
+        .collect();
+
+    let hook_re =
+        Regex::new(r"\[(N_\w+)\]\s+(\w+)\(\$crate::sauer_proto::(channel\d)::(\w+)\)").unwrap();
+    let packet_hooks: Vec<Entry> = hook_re
+        .captures_iter(plugin_src)
+        .map(|c| Entry {
+            name: c[2].to_string(),
+            kind: EntryKind::Callback,
+            doc: format!("Called when a client sends `{}` ({}).", &c[1], &c[3]),
+            sig: format!("{}(id: number, packet: {}, event: Event)", &c[2], &c[4]),
+            tags: vec!["cancellable", "packet"],
+        })
+        .collect();
+    assert!(
+        !packet_hooks.is_empty(),
+        "no packet hooks found; did for_each_packet_hook! change shape?"
+    );
+    entries.extend(packet_hooks);
+    entries
 }
 
 // ---------------------------------------------------------------------------
@@ -356,22 +374,43 @@ fn callbacks() -> Vec<Entry> {
 fn packet_display_name(rust_type: &str) -> String {
     // e.g. "channel1::Client::<channel1::Sound>" → "Client<Sound>"
     // e.g. "channel1::ServMsg" → "ServMsg"
-    let s = rust_type.replace("channel1::", "").replace("channel0::", "");
+    let s = rust_type
+        .replace("channel1::", "")
+        .replace("channel0::", "");
     // strip turbofish style "::<" → "<"
     s.replace("::<", "<")
 }
 
 fn hand_written_sig(name: &str) -> String {
     match name {
-        "disconnect"       => "server:disconnect(id: number)".into(),
-        "peer_address"     => "server:peer_address(id: number): string".into(),
-        "get_cn"           => "server:get_cn(id: number): number|nil".into(),
-        "get_session_id"   => "server:get_session_id(id: number): number|nil".into(),
-        "register_command" => "server:register_command(name: string, desc: string, usage?: string)".into(),
-        "send_server_query"=> "server:send_server_query(addr: string, response: table)".into(),
-        "set_interval"     => "server:set_interval(interval_ms: number, func: function): TaskHandle".into(),
-        "set_timeout"      => "server:set_timeout(timeout_ms: number, func: function): TaskHandle".into(),
-        _                  => format!("server:{}(...)", name),
+        "disconnect" => "server:disconnect(id: number, reason?: number)".into(),
+        "get_id" => "server:get_id(cn: number): number|nil".into(),
+        "client_ids" => "server:client_ids(): number[]".into(),
+        "player" => "server:player(id: number): table|nil".into(),
+        "map_name" => "server:map_name(): string".into(),
+        "game_mode" => "server:game_mode(): string".into(),
+        "master_mode" => "server:master_mode(): string".into(),
+        "set_master_mode" => "server:set_master_mode(mode: string)".into(),
+        "set_name" => "server:set_name(id: number, name: string)".into(),
+        "set_team" => "server:set_team(id: number, team: string)".into(),
+        "set_spectator" => "server:set_spectator(id: number, spectate: boolean)".into(),
+        "set_privilege" => "server:set_privilege(id: number, privilege: string)".into(),
+        "kill" => "server:kill(id: number): boolean".into(),
+        "ban" => "server:ban(id: number)".into(),
+        "peer_address" => "server:peer_address(id: number): string".into(),
+        "get_cn" => "server:get_cn(id: number): number|nil".into(),
+        "get_session_id" => "server:get_session_id(id: number): number|nil".into(),
+        "register_command" => {
+            "server:register_command(name: string, desc: string, usage?: string)".into()
+        }
+        "send_server_query" => "server:send_server_query(addr: string, response: table)".into(),
+        "set_interval" => {
+            "server:set_interval(interval_ms: number, func: function): TaskHandle".into()
+        }
+        "set_timeout" => {
+            "server:set_timeout(timeout_ms: number, func: function): TaskHandle".into()
+        }
+        _ => format!("server:{}(...)", name),
     }
 }
 
@@ -386,22 +425,21 @@ fn hand_written_tags(name: &str) -> Vec<&'static str> {
 // HTML rendering
 // ---------------------------------------------------------------------------
 
-const HIGHLIGHT_CDN: &str =
-    "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0";
+const HIGHLIGHT_CDN: &str = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0";
 
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
-     .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn render_tag(tag: &str) -> String {
     let (cls, label) = match tag {
-        "cancellable" => ("tag-cancel",  "cancellable"),
-        "packet"      => ("tag-packet",  "packet"),
-        "async"       => ("tag-async",   "async"),
-        _             => ("tag-default", tag),
+        "cancellable" => ("tag-cancel", "cancellable"),
+        "packet" => ("tag-packet", "packet"),
+        "async" => ("tag-async", "async"),
+        _ => ("tag-default", tag),
     };
     format!(r#"<span class="tag {cls}">{label}</span>"#)
 }
@@ -409,16 +447,16 @@ fn render_tag(tag: &str) -> String {
 fn render_entry_html(e: &Entry) -> String {
     let kind_cls = match e.kind {
         EntryKind::Function => "kind-fn",
-        EntryKind::Const    => "kind-const",
-        EntryKind::Method   => "kind-method",
-        EntryKind::Field    => "kind-field",
+        EntryKind::Const => "kind-const",
+        EntryKind::Method => "kind-method",
+        EntryKind::Field => "kind-field",
         EntryKind::Callback => "kind-callback",
     };
     let kind_label = match e.kind {
         EntryKind::Function => "fn",
-        EntryKind::Const    => "const",
-        EntryKind::Method   => "method",
-        EntryKind::Field    => "field",
+        EntryKind::Const => "const",
+        EntryKind::Method => "method",
+        EntryKind::Field => "field",
         EntryKind::Callback => "callback",
     };
     let tags_html: String = e.tags.iter().map(|t| render_tag(t)).collect();
@@ -427,7 +465,8 @@ fn render_entry_html(e: &Entry) -> String {
     } else {
         // Inline `backtick` → <code>
         let escaped = html_escape(&e.doc);
-        let linked = Regex::new(r"`([^`]+)`").unwrap()
+        let linked = Regex::new(r"`([^`]+)`")
+            .unwrap()
             .replace_all(&escaped, r#"<code>$1</code>"#)
             .into_owned();
         format!(r#"<p class="entry-doc">{}</p>"#, linked)
@@ -442,19 +481,24 @@ fn render_entry_html(e: &Entry) -> String {
   </div>
   {doc_html}
 </div>"#,
-        id  = html_escape(&e.name.replace('.', "-")),
+        id = html_escape(&e.name.replace('.', "-")),
         sig = html_escape(&e.sig),
     )
 }
 
 fn render_section_nav(s: &Section) -> String {
-    let items: String = s.entries.iter().map(|e| {
-        let id  = html_escape(&e.name.replace('.', "-"));
-        let lbl = html_escape(&e.name);
-        format!("<a class=\"nav-item\" href=\"#entry-{id}\">{lbl}</a>")
-    }).collect::<Vec<_>>().join("\n");
+    let items: String = s
+        .entries
+        .iter()
+        .map(|e| {
+            let id = html_escape(&e.name.replace('.', "-"));
+            let lbl = html_escape(&e.name);
+            format!("<a class=\"nav-item\" href=\"#entry-{id}\">{lbl}</a>")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    let id    = s.id;
+    let id = s.id;
     let title = s.title;
     format!(
         "<details class=\"nav-section\" open>\n\
@@ -465,24 +509,38 @@ fn render_section_nav(s: &Section) -> String {
 }
 
 fn render_section_html(s: &Section) -> String {
-    let entries_html: String = s.entries.iter().map(|e| render_entry_html(e)).collect::<Vec<_>>().join("\n");
+    let entries_html: String = s
+        .entries
+        .iter()
+        .map(render_entry_html)
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         r#"<section id="{id}">
   <h2>{title}</h2>
   <p class="section-desc">{desc}</p>
   <div class="entries">{entries_html}</div>
 </section>"#,
-        id    = s.id,
+        id = s.id,
         title = s.title,
-        desc  = s.desc,
+        desc = s.desc,
     )
 }
 
 fn render_html(sections: &[Section]) -> String {
-    let nav: String  = sections.iter().map(render_section_nav).collect::<Vec<_>>().join("\n");
-    let body: String = sections.iter().map(render_section_html).collect::<Vec<_>>().join("\n");
+    let nav: String = sections
+        .iter()
+        .map(render_section_nav)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body: String = sections
+        .iter()
+        .map(render_section_html)
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    format!(r#"<!DOCTYPE html>
+    format!(
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -811,8 +869,8 @@ search.addEventListener('input', () => {{
 </body>
 </html>
 "#,
-        cdn  = HIGHLIGHT_CDN,
-        nav  = nav,
+        cdn = HIGHLIGHT_CDN,
+        nav = nav,
         body = body,
     )
 }
@@ -824,14 +882,26 @@ search.addEventListener('input', () => {{
 fn render_stubs(sections: &[Section]) -> String {
     let mut out = String::new();
     writeln!(out, "---@meta").unwrap();
-    writeln!(out, "-- Auto-generated EmmyLua stubs for the sauer Lua plugin API.").unwrap();
-    writeln!(out, "-- Drop this file into your project root and point lua-language-server at it.").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(
+        out,
+        "-- Auto-generated EmmyLua stubs for the sauer Lua plugin API."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "-- Drop this file into your project root and point lua-language-server at it."
+    )
+    .unwrap();
+    writeln!(out).unwrap();
 
     // Globals
     if let Some(g) = sections.iter().find(|s| s.id == "globals") {
-        writeln!(out, "-- ── Globals ─────────────────────────────────────────────────────────────────").unwrap();
-        writeln!(out, "").unwrap();
+        writeln!(
+            out,
+            "-- ── Globals ─────────────────────────────────────────────────────────────────"
+        )
+        .unwrap();
+        writeln!(out).unwrap();
         for e in &g.entries {
             if !e.doc.is_empty() {
                 writeln!(out, "--- {}", e.doc).unwrap();
@@ -851,24 +921,34 @@ fn render_stubs(sections: &[Section]) -> String {
                 }
                 _ => {}
             }
-            writeln!(out, "").unwrap();
+            writeln!(out).unwrap();
         }
     }
 
     // Server class
     if let Some(s) = sections.iter().find(|s| s.id == "server") {
-        writeln!(out, "-- ── Server ──────────────────────────────────────────────────────────────────").unwrap();
-        writeln!(out, "").unwrap();
+        writeln!(
+            out,
+            "-- ── Server ──────────────────────────────────────────────────────────────────"
+        )
+        .unwrap();
+        writeln!(out).unwrap();
         writeln!(out, "---@class Server").unwrap();
-        writeln!(out, "---@field extra table Plugin-local key/value storage shared across the server.").unwrap();
+        writeln!(
+            out,
+            "---@field extra table Plugin-local key/value storage shared across the server."
+        )
+        .unwrap();
         writeln!(out, "local Server = {{}}").unwrap();
-        writeln!(out, "").unwrap();
+        writeln!(out).unwrap();
         writeln!(out, "---@type Server").unwrap();
         writeln!(out, "server = {{}}").unwrap();
-        writeln!(out, "").unwrap();
+        writeln!(out).unwrap();
 
         for e in &s.entries {
-            if e.kind != EntryKind::Method { continue; }
+            if e.kind != EntryKind::Method {
+                continue;
+            }
             if !e.doc.is_empty() {
                 writeln!(out, "--- {}", e.doc).unwrap();
             }
@@ -881,57 +961,89 @@ fn render_stubs(sections: &[Section]) -> String {
                 writeln!(out, "---@return {}", r).unwrap();
             }
             let param_names: Vec<&str> = params.iter().map(|(n, _)| n.as_str()).collect();
-            writeln!(out, "function Server:{}({}) end", e.name, param_names.join(", ")).unwrap();
-            writeln!(out, "").unwrap();
+            writeln!(
+                out,
+                "function Server:{}({}) end",
+                e.name,
+                param_names.join(", ")
+            )
+            .unwrap();
+            writeln!(out).unwrap();
         }
     }
 
-    // SpawnState class
-    if let Some(s) = sections.iter().find(|s| s.id == "spawn-state") {
-        writeln!(out, "-- ── SpawnState ──────────────────────────────────────────────────────────────").unwrap();
-        writeln!(out, "").unwrap();
-        writeln!(out, "---@class SpawnState").unwrap();
-        for e in &s.entries {
-            if e.kind != EntryKind::Field { continue; }
-            let t = if e.name == "armour_type" || e.name == "gun_select" { "string" } else { "number" };
-            let doc = if e.doc.is_empty() { String::new() } else { format!(" {}", e.doc) };
+    // Field-only classes; each field's type is after the `:` in its sig.
+    for s in sections
+        .iter()
+        .filter(|s| matches!(s.id, "spawn-state" | "chat" | "damage"))
+    {
+        writeln!(out, "-- ── {} ──", s.title).unwrap();
+        writeln!(out).unwrap();
+        writeln!(out, "---@class {}", s.title).unwrap();
+        for e in s.entries.iter().filter(|e| e.kind == EntryKind::Field) {
+            let t = e.sig.rsplit_once(": ").map_or("any", |(_, t)| t);
+            let doc = if e.doc.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", e.doc)
+            };
             writeln!(out, "---@field {} {}{}", e.name, t, doc).unwrap();
         }
-        writeln!(out, "local SpawnState = {{}}").unwrap();
-        writeln!(out, "").unwrap();
+        writeln!(out, "local {} = {{}}", s.title).unwrap();
+        writeln!(out).unwrap();
     }
 
     // Event class
-    writeln!(out, "-- ── Event ───────────────────────────────────────────────────────────────────").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(
+        out,
+        "-- ── Event ───────────────────────────────────────────────────────────────────"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
     writeln!(out, "---@class Event").unwrap();
     writeln!(out, "local Event = {{}}").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(out).unwrap();
     writeln!(out, "--- Cancel this event, preventing default server processing and stopping further plugin handlers.").unwrap();
     writeln!(out, "function Event:cancel() end").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(out).unwrap();
 
     // TaskHandle class
-    writeln!(out, "-- ── TaskHandle ──────────────────────────────────────────────────────────────").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(
+        out,
+        "-- ── TaskHandle ──────────────────────────────────────────────────────────────"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
     writeln!(out, "---@class TaskHandle").unwrap();
     writeln!(out, "local TaskHandle = {{}}").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(out).unwrap();
     writeln!(out, "--- Abort the background task immediately.").unwrap();
     writeln!(out, "function TaskHandle:cancel() end").unwrap();
-    writeln!(out, "").unwrap();
+    writeln!(out).unwrap();
 
     // Callbacks
     if let Some(s) = sections.iter().find(|s| s.id == "callbacks") {
-        writeln!(out, "-- ── Callbacks ───────────────────────────────────────────────────────────────").unwrap();
-        writeln!(out, "-- Define these as globals in your plugin file to receive events.").unwrap();
-        writeln!(out, "").unwrap();
+        writeln!(
+            out,
+            "-- ── Callbacks ───────────────────────────────────────────────────────────────"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "-- Define these as globals in your plugin file to receive events."
+        )
+        .unwrap();
+        writeln!(out).unwrap();
         for e in &s.entries {
             if !e.doc.is_empty() {
                 writeln!(out, "--- {}", e.doc).unwrap();
             }
             if e.tags.contains(&"cancellable") {
-                writeln!(out, "--- Call `event:cancel()` to prevent default processing.").unwrap();
+                writeln!(
+                    out,
+                    "--- Call `event:cancel()` to prevent default processing."
+                )
+                .unwrap();
             }
             let params = stub_params(&e.sig);
             for (n, t) in &params {
@@ -939,7 +1051,7 @@ fn render_stubs(sections: &[Section]) -> String {
             }
             let param_names: Vec<&str> = params.iter().map(|(n, _)| n.as_str()).collect();
             writeln!(out, "function {}({}) end", e.name, param_names.join(", ")).unwrap();
-            writeln!(out, "").unwrap();
+            writeln!(out).unwrap();
         }
     }
 
@@ -948,27 +1060,44 @@ fn render_stubs(sections: &[Section]) -> String {
 
 // Very naive param extractor: `foo(a: T, b: U): R` → vec![("a","T"),("b","U")]
 fn stub_params(sig: &str) -> Vec<(String, String)> {
-    let inner = sig.split('(').nth(1).and_then(|s| s.split(')').next()).unwrap_or("");
-    inner.split(',').filter_map(|part| {
-        let part = part.trim();
-        if part.is_empty() { return None; }
-        if let Some((n, t)) = part.split_once(':') {
-            let name = n.trim().trim_start_matches('?').to_string();
-            let t    = t.trim().to_string();
-            if name.is_empty() || name == "self" { return None; }
-            Some((name, t))
-        } else {
-            let name = part.trim_end_matches('?').to_string();
-            if name.is_empty() || name == "self" { return None; }
-            Some((name, "any".to_string()))
-        }
-    }).collect()
+    let inner = sig
+        .split('(')
+        .nth(1)
+        .and_then(|s| s.split(')').next())
+        .unwrap_or("");
+    inner
+        .split(',')
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            if let Some((n, t)) = part.split_once(':') {
+                let name = n.trim().trim_start_matches('?').to_string();
+                let t = t.trim().to_string();
+                if name.is_empty() || name == "self" {
+                    return None;
+                }
+                Some((name, t))
+            } else {
+                let name = part.trim_end_matches('?').to_string();
+                if name.is_empty() || name == "self" {
+                    return None;
+                }
+                Some((name, "any".to_string()))
+            }
+        })
+        .collect()
 }
 
 fn stub_return(sig: &str) -> Option<String> {
     sig.split(')').nth(1).and_then(|s| {
         let r = s.trim().trim_start_matches(':').trim();
-        if r.is_empty() { None } else { Some(r.to_string()) }
+        if r.is_empty() {
+            None
+        } else {
+            Some(r.to_string())
+        }
     })
 }
 
@@ -976,24 +1105,22 @@ fn stub_return(sig: &str) -> Option<String> {
 // Main
 // ---------------------------------------------------------------------------
 
-fn main() {
-    let src_arg = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "sauer-plugin-lua/src".to_string());
-    let src = Path::new(&src_arg);
+/// Reads the sources under the workspace `root` and writes the docs to `out_dir`.
+pub fn run(root: &Path, out_dir: &Path) {
+    let read = |p: &str| {
+        fs::read_to_string(root.join(p)).unwrap_or_else(|e| panic!("cannot read {p}: {e}"))
+    };
 
-    macro_rules! read {
-        ($p:expr) => {
-            fs::read_to_string(src.join($p))
-                .unwrap_or_else(|e| panic!("cannot read {}: {e}", $p))
-        };
-    }
-
-    let globals_src     = read!("setup_globals.rs");
-    let server_src      = read!("userdata/server.rs");
-    let spawn_src       = read!("userdata/spawn_state.rs");
-    let event_src       = read!("userdata/event.rs");
-    let taskhandle_src  = read!("userdata/task_handle.rs");
+    let globals_src = read("sauer-plugin-lua/src/setup_globals.rs");
+    let server_src = read("sauer-plugin-lua/src/userdata/server.rs");
+    let spawn_src = read("sauer-plugin-lua/src/userdata/spawn_state.rs");
+    let hook_value_src = read("sauer-plugin-lua/src/userdata/hook_value.rs");
+    let event_src = read("sauer-plugin-lua/src/userdata/event.rs");
+    let taskhandle_src = read("sauer-plugin-lua/src/userdata/task_handle.rs");
+    let plugin_src = read("sauer-server/src/plugin.rs");
+    let (damage_src, chat_src) = hook_value_src
+        .split_once("pub struct ChatUD")
+        .expect("hook_value.rs: ChatUD not found");
 
     // Split server methods into logical sub-groups for the sidebar
     let all_server = parse_server_methods(&server_src);
@@ -1041,7 +1168,22 @@ fn main() {
             id: "spawn-state",
             title: "SpawnState",
             desc: "Passed to `on_spawn`. Modify fields before returning to override the player's spawn attributes.",
-            entries: parse_spawn_state_fields(&spawn_src),
+            entries: parse_fields(&spawn_src, "spawn_state", |name| match name {
+                "armour_type" | "gun_select" => "string",
+                _ => "number",
+            }),
+        },
+        Section {
+            id: "chat",
+            title: "Chat",
+            desc: "Passed to `on_chat`. Change `text` to change what everyone sees.",
+            entries: parse_fields(chat_src, "chat", |_| "string"),
+        },
+        Section {
+            id: "damage",
+            title: "Damage",
+            desc: "Passed to `on_damage`. Change `amount` to change the damage dealt.",
+            entries: parse_fields(damage_src, "damage", |_| "number"),
         },
         Section {
             id: "event",
@@ -1059,22 +1201,19 @@ fn main() {
             id: "callbacks",
             title: "Callbacks",
             desc: "Define these as global functions in your plugin file. The server calls them on the matching event.",
-            entries: callbacks(),
+            entries: callbacks(&plugin_src),
         },
     ];
 
-    // Output
-    let out_dir = std::env::args().nth(2).unwrap_or_else(|| "lua-api".to_string());
-    fs::create_dir_all(&out_dir).unwrap_or_else(|e| panic!("cannot create {out_dir}: {e}"));
-
-    let html_path = format!("{out_dir}/index.html");
-    let stub_path = format!("{out_dir}/sauer.lua");
-
-    let html = render_html(&sections);
-    fs::write(&html_path, &html).unwrap_or_else(|e| panic!("cannot write {html_path}: {e}"));
-    eprintln!("Written {} bytes → {html_path}", html.len());
-
-    let stubs = render_stubs(&sections);
-    fs::write(&stub_path, &stubs).unwrap_or_else(|e| panic!("cannot write {stub_path}: {e}"));
-    eprintln!("Written {} bytes → {stub_path}", stubs.len());
+    fs::create_dir_all(out_dir)
+        .unwrap_or_else(|e| panic!("cannot create {}: {e}", out_dir.display()));
+    for (name, contents) in [
+        ("index.html", render_html(&sections)),
+        ("sauer.lua", render_stubs(&sections)),
+    ] {
+        let path = out_dir.join(name);
+        fs::write(&path, &contents)
+            .unwrap_or_else(|e| panic!("cannot write {}: {e}", path.display()));
+        eprintln!("Written {} bytes → {}", contents.len(), path.display());
+    }
 }
