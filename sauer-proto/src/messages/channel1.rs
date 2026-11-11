@@ -879,21 +879,18 @@ impl SauerWrite for InitFlagsServer {
             f.version.sauer_write(out);
             f.spawn_index.sauer_write(out);
 
-            // 1. Write Owner ID (or -1 if dropped/at base)
-            match &f.owner {
-                FlagStateOwner::Owned { owner } => owner.sauer_write(out),
-                FlagStateOwner::Dropped { .. } => (-1i32).sauer_write(out),
+            // Owner (-1 if not carried), invis, then whether and where it lies dropped
+            match &f.location {
+                FlagLocation::Carried { owner } => owner.sauer_write(out),
+                _ => (-1i32).sauer_write(out),
             }
-
-            // 2. Write Invis
-            (if f.invis { 1i32 } else { 0i32 }).sauer_write(out);
-
-            // 3. Write Drop State (Only if owner is < 0)
-            if let FlagStateOwner::Dropped { dropped, drop_loc } = &f.owner {
-                (if *dropped { 1i32 } else { 0i32 }).sauer_write(out);
-
-                if *dropped {
-                    crate::data::vec3::write_quantized::<DMF>(drop_loc, out);
+            f.invis.sauer_write(out);
+            match &f.location {
+                FlagLocation::Carried { .. } => {}
+                FlagLocation::Home => false.sauer_write(out),
+                FlagLocation::Dropped { pos } => {
+                    true.sauer_write(out);
+                    crate::data::vec3::write_quantized::<DMF>(pos, out);
                 }
             }
 
@@ -930,23 +927,16 @@ impl SauerReadStateful for InitFlagsServer {
             for _ in 0..num_flags {
                 let version = i32::sauer_read(reader)?;
                 let spawn_index = i32::sauer_read(reader)?;
-                let owner_id = i32::sauer_read(reader)?;
-                let invis = i32::sauer_read(reader)? != 0;
-                let owner = if owner_id < 0 {
-                    let dropped = i32::sauer_read(reader)? != 0;
-                    let drop_loc = if dropped {
-                        crate::data::vec3::read_quantized::<DMF>(reader)?
-                    } else {
-                        // C++ defaults to (0, 0, 0) for droploc initially before using spawnloc.
-                        Vec3 {
-                            x: 0.0,
-                            y: 0.0,
-                            z: 0.0,
-                        }
-                    };
-                    FlagStateOwner::Dropped { dropped, drop_loc }
+                let owner = i32::sauer_read(reader)?;
+                let invis = bool::sauer_read(reader)?;
+                let location = if owner >= 0 {
+                    FlagLocation::Carried { owner }
+                } else if bool::sauer_read(reader)? {
+                    FlagLocation::Dropped {
+                        pos: crate::data::vec3::read_quantized::<DMF>(reader)?,
+                    }
                 } else {
-                    FlagStateOwner::Owned { owner: owner_id }
+                    FlagLocation::Home
                 };
 
                 // Read Hold State (Strictly bound to Session gamemode!)
@@ -965,7 +955,7 @@ impl SauerReadStateful for InitFlagsServer {
                 flags.push(FlagState {
                     version,
                     spawn_index,
-                    owner,
+                    location,
                     invis,
                     hold,
                 });
@@ -980,16 +970,21 @@ impl SauerReadStateful for InitFlagsServer {
 
 #[cfg(feature = "lua")]
 const _: () = {
-    use mlua::{FromLua, Value};
+    use mlua::{FromLua, UserData, UserDataFields};
+
+    impl UserData for InitFlagsServer {
+        fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+            fields.add_field_method_get("scores", |_lua, this| Ok(this.scores));
+            fields.add_field_method_get("flags", |_lua, this| Ok(this.flags.clone()));
+        }
+    }
 
     impl FromLua for InitFlagsServer {
-        fn from_lua(_value: Value, _lua: &mlua::Lua) -> mlua::Result<Self> {
-            Err(mlua::Error::FromLuaConversionError {
-                from: "Value",
-                to: "InitFlagsServer".to_owned(),
-                message: Some(
-                    "not yet supported from Lua (FlagState is not yet constructable)".to_owned(),
-                ),
+        fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+            let table = mlua::Table::from_lua(value, lua)?;
+            Ok(Self {
+                scores: table.get("scores")?,
+                flags: table.get("flags")?,
             })
         }
     }

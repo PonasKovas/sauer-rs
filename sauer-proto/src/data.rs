@@ -21,7 +21,7 @@ pub use base_spawn::BaseSpawn;
 pub use clipboard::{ClipboardPayload, MAX_CLIENT_UNPACK_LEN, UndoEntity, UndoPayload, VSlotData};
 pub use direction::Direction;
 pub use edit_var_value::EditVarValue;
-pub use flag_state::{FlagState, FlagStateHoldTeam, FlagStateOwner};
+pub use flag_state::{FlagLocation, FlagState, FlagStateHoldTeam};
 pub use tex_ref::TexRef;
 
 pub use sauer_core::{
