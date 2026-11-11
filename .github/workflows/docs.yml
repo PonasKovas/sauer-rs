@@ -34,10 +34,8 @@ jobs:
         run: cargo clean --doc
       - name: Build docs
         run: cargo doc --no-deps
-      - name: Install rust-script
-        run: cargo install rust-script --locked
       - name: Build Lua docs
-        run: ./gen-lua-docs.rs sauer-plugin-lua/src target/doc/lua-api
+        run: cargo xtask lua-docs target/doc/lua-api
       - name: Add index page
         run: |
           {
