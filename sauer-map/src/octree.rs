@@ -1,5 +1,5 @@
 use crate::{Cube, Node};
-use ogz_rs::data::{CubeInfo, ModernSurfaceData, ModernSurfaces, OctreeNode, Surfaces};
+use ogz_rs::data::{CubeInfo, ModernSurfaceData, OctreeNode, Surfaces};
 
 pub fn extract_node_at(
     node: &Node,
@@ -188,55 +188,30 @@ pub fn node_to_ogz(node: &Node) -> OctreeNode {
             let converted = std::array::from_fn(|i| node_to_ogz(&children[i]));
             OctreeNode::Children(Box::new(converted))
         }
-        Node::Leaf(cube) => leaf_to_ogz(cube, None, None),
-    }
-}
-
-/// [`node_to_ogz`], also writing the merge data still valid for each leaf.
-pub fn node_to_ogz_with(
-    node: &Node,
-    pos: [i32; 3],
-    size: i32,
-    kept: &crate::merges::Kept,
-) -> OctreeNode {
-    match node {
-        Node::Branch(children) => {
-            let half = size / 2;
-            let converted = std::array::from_fn(|i| {
-                let child_pos = std::array::from_fn(|k| pos[k] + ((i >> k) & 1) as i32 * half);
-                node_to_ogz_with(&children[i], child_pos, half, kept)
-            });
-            OctreeNode::Children(Box::new(converted))
-        }
         Node::Leaf(cube) => {
-            let (merged, surfaces) = kept.get(pos, size).unwrap_or((None, None));
-            leaf_to_ogz(cube, merged, surfaces)
-        }
-    }
-}
-
-fn leaf_to_ogz(cube: &Cube, merged: Option<u8>, surfaces: Option<ModernSurfaces>) -> OctreeNode {
-    let surfaces = Surfaces::Modern(ModernSurfaceData {
-        material: if cube.material != Default::default() {
-            Some(cube.material)
-        } else {
-            None
-        },
-        merged,
-        surfaces,
-    });
-    let info = CubeInfo {
-        textures: cube.textures,
-        surfaces,
-    };
-    if cube.edges == [0x00; 12] {
-        OctreeNode::Empty(info)
-    } else if cube.edges == [0x80; 12] {
-        OctreeNode::Solid(info)
-    } else {
-        OctreeNode::Normal {
-            info,
-            edges: cube.edges,
+            let surfaces = Surfaces::Modern(ModernSurfaceData {
+                material: if cube.material != Default::default() {
+                    Some(cube.material)
+                } else {
+                    None
+                },
+                merged: None,
+                surfaces: None,
+            });
+            let info = CubeInfo {
+                textures: cube.textures,
+                surfaces,
+            };
+            if cube.edges == [0x00; 12] {
+                OctreeNode::Empty(info)
+            } else if cube.edges == [0x80; 12] {
+                OctreeNode::Solid(info)
+            } else {
+                OctreeNode::Normal {
+                    info,
+                    edges: cube.edges,
+                }
+            }
         }
     }
 }
