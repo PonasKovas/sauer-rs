@@ -670,9 +670,16 @@ impl<P: Plugin> Plugin for Base<P> {
         {
             return Flow::Continue;
         }
+        let mut text = packet.text.filter_text(true, usize::MAX);
+        if let Some(plugin) = self.plugin.upgrade()
+            && plugin.on_team_chat(ctx, &mut text).await == Flow::Cancel
+        {
+            return Flow::Continue;
+        }
+        let server = ctx.server();
         let packet = channel1::SayTeamServer {
             client_num: cn,
-            text: packet.text.filter_text(true, usize::MAX),
+            text,
         };
         info!("[TEAM {team}] {}: {}", server.player_name(id), packet.text);
         for to in server.players.filter_map(|other, p| {

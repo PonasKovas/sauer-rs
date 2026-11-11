@@ -299,6 +299,12 @@ const SPECIAL_CALLBACKS: &[CallbackDef] = &[
         cancellable: true,
     },
     CallbackDef {
+        name: "on_team_chat",
+        sig: "on_team_chat(id: number, chat: Chat, event: Event)",
+        doc: "Called for each team chat message that will reach teammates. Change `chat.text` to rewrite it, cancel to drop it.",
+        cancellable: true,
+    },
+    CallbackDef {
         name: "on_damage",
         sig: "on_damage(target_id: number, actor_id: number, damage: Damage, event: Event)",
         doc: "Called before damage is dealt. Change `damage.amount` to change it, cancel to prevent it.",
@@ -1176,7 +1182,7 @@ pub fn run(root: &Path, out_dir: &Path) {
         Section {
             id: "chat",
             title: "Chat",
-            desc: "Passed to `on_chat`. Change `text` to change what everyone sees.",
+            desc: "Passed to `on_chat` and `on_team_chat`. Change `text` to change what is sent.",
             entries: parse_fields(chat_src, "chat", |_| "string"),
         },
         Section {

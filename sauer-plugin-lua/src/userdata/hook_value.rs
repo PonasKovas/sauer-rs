@@ -17,7 +17,8 @@ impl UserData for DamageUD {
     }
 }
 
-/// A chat message about to be relayed, in `on_chat`. Change `text` to change it.
+/// A chat message about to be relayed, in `on_chat` and `on_team_chat`.
+/// Change `text` to change it.
 pub struct ChatUD {
     pub text: CubeString,
 }

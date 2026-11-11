@@ -44,6 +44,7 @@ sauer_server::for_each_packet_hook!(
     map_changed,
     on_spawn,
     on_chat,
+    on_team_chat,
     on_command,
     on_damage,
     on_player_died,

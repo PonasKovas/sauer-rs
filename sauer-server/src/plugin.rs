@@ -253,6 +253,17 @@ pub trait Plugin: Send + Sync + 'static {
         async { Flow::Continue }
     }
 
+    /// Fired when a player sends a team chat message that will reach their
+    /// teammates. `text` may be modified in-place before it is sent.
+    /// Cancel to drop it.
+    fn on_team_chat(
+        &self,
+        ctx: &mut Context,
+        text: &mut CubeString,
+    ) -> impl Future<Output = Flow> + Send {
+        async { Flow::Continue }
+    }
+
     /// Fired when a player sends a `#`-prefixed command.
     /// `args[0]` is the command name; remaining elements are the arguments.
     /// Quoted arguments have their outer `"` stripped.
@@ -360,6 +371,10 @@ impl<P1: Plugin, P2: Plugin> Plugin for (P1, P2) {
         chain!(self.on_chat(ctx, text))
     }
 
+    async fn on_team_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
+        chain!(self.on_team_chat(ctx, text))
+    }
+
     async fn on_command(&self, ctx: &mut Context, args: &[CubeString]) -> Flow {
         chain!(self.on_command(ctx, args))
     }
@@ -460,6 +475,12 @@ impl<P: Plugin> Plugin for Option<P> {
     async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
         match self {
             Some(p) => p.on_chat(ctx, text).await,
+            None => Flow::Continue,
+        }
+    }
+    async fn on_team_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
+        match self {
+            Some(p) => p.on_team_chat(ctx, text).await,
             None => Flow::Continue,
         }
     }

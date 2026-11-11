@@ -43,6 +43,25 @@ impl LuaPlugin {
         Flow::Continue
     }
 
+    /// Dispatches a chat hook with a `Chat` the callbacks can rewrite.
+    fn dispatch_chat(
+        &self,
+        callbacks: &[LuaCallback],
+        ctx: &Context,
+        text: &mut CubeString,
+    ) -> Flow {
+        let Ok(ud) = self.lua.create_userdata(ChatUD { text: text.clone() }) else {
+            return Flow::Continue;
+        };
+        let flow = self.dispatch(callbacks, |_| {
+            (ctx.id(), ud.clone()).into_lua_multi(&self.lua)
+        });
+        if let Ok(changed) = ud.borrow::<ChatUD>() {
+            *text = changed.text.clone();
+        }
+        flow
+    }
+
     /// Calls each callback with what `args` builds. For hooks that can't be
     /// cancelled, so there's no `Event`.
     fn notify(&self, callbacks: &[LuaCallback], args: impl Fn() -> mlua::Result<MultiValue>) {
@@ -137,16 +156,11 @@ impl Plugin for LuaPlugin {
     }
 
     async fn on_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
-        let Ok(ud) = self.lua.create_userdata(ChatUD { text: text.clone() }) else {
-            return Flow::Continue;
-        };
-        let flow = self.dispatch(&self.callbacks.on_chat, |_| {
-            (ctx.id(), ud.clone()).into_lua_multi(&self.lua)
-        });
-        if let Ok(changed) = ud.borrow::<ChatUD>() {
-            *text = changed.text.clone();
-        }
-        flow
+        self.dispatch_chat(&self.callbacks.on_chat, ctx, text)
+    }
+
+    async fn on_team_chat(&self, ctx: &mut Context, text: &mut CubeString) -> Flow {
+        self.dispatch_chat(&self.callbacks.on_team_chat, ctx, text)
     }
 
     async fn on_damage(
