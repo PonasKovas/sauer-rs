@@ -1,3 +1,4 @@
+pub use super::DemoPacket;
 use crate::error::EnumConvertResultExt;
 use crate::internal::macros::{make_packet_enum, make_struct};
 use crate::internal::{SauerRead, SauerWrite, check_tag, constants::*};
@@ -62,11 +63,6 @@ make_struct!(
     client_num: Cn,
     jp: i32,
 });
-
-make_struct!(
-/// `N_DEMOPACKET` Demo playback marker (server only).
-[N_DEMOPACKET] DemoPacket {}
-);
 
 impl SauerWrite for Position {
     fn sauer_write(&self, out: &mut Vec<u8>) {

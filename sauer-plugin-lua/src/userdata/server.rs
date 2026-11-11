@@ -357,8 +357,6 @@ impl UserData for LuaServer {
         }
 
         // ── Non-client-wrapped S2C packets ───────────────────────────────────
-
-        add_send!("send_demo_packet", channel1::DemoPacket);
         add_send!("send_serv_info", channel1::ServInfo);
         add_send!("send_welcome", channel1::Welcome);
         add_send!("send_pause_game", channel1::PauseGameServer);
@@ -447,8 +445,6 @@ impl UserData for LuaServer {
         add_send!("send_new_map_client", channel1::Client::<channel1::NewMap>);
 
         // ── Broadcast variants ───────────────────────────────────────────────
-
-        add_broadcast!("broadcast_demo_packet", channel1::DemoPacket);
         add_broadcast!("broadcast_serv_info", channel1::ServInfo);
         add_broadcast!("broadcast_welcome", channel1::Welcome);
         add_broadcast!("broadcast_pause_game", channel1::PauseGameServer);

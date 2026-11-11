@@ -1,3 +1,4 @@
+pub use super::DemoPacket;
 use crate::ParseError;
 use crate::Session;
 use crate::data;
@@ -551,11 +552,6 @@ make_struct!(
 // =====================================================================
 // SERVER-SPECIFIC STRUCTS
 // =====================================================================
-
-make_struct!(
-/// `N_DEMOPACKET` Demo playback marker.
-[N_DEMOPACKET] DemoPacket {}
-);
 
 make_struct!(
 /// `N_SERVINFO` Initial server information sent when a client starts connecting.

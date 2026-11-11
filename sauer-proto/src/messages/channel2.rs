@@ -1,3 +1,4 @@
+pub use super::DemoPacket;
 use crate::internal::macros::{make_packet_enum, make_struct};
 use crate::internal::{
     constants::*,
@@ -15,11 +16,6 @@ make_packet_enum!(
     /// `N_SENDMAP` Stream a cooperative edit map file to the client.
     [N_SENDMAP] SendMap,
 });
-
-make_struct!(
-/// `N_DEMOPACKET` Demo playback marker.
-[N_DEMOPACKET] DemoPacket {}
-);
 
 make_struct!(
 /// `N_SENDDEMO` Sent over Channel 2 to stream a recorded demo file to the client.
