@@ -229,7 +229,7 @@ pub fn read_shelf(map: &Map, vault: &Vault, geom: &TrapGeom) -> Option<Clipboard
         return None;
     }
     let mut payload =
-        sauer_map::clipboard::generate_clipboard_for_region(map, min, geom.clip_s, geom.clip_grid);
+        sauer_map::block::generate_clipboard_for_region(map, min, geom.clip_s, geom.clip_grid);
     payload.sel.o = Vec3 {
         x: geom.clip_pos[0],
         y: geom.clip_pos[1],
@@ -328,7 +328,7 @@ mod tests {
         let mut src = Map::new_empty(2048);
         src.fill(&sel(&src, [100, 100, 600], [1; 3], 4).unwrap(), true);
         let payload =
-            sauer_map::clipboard::generate_clipboard_for_region(&src, [96, 96, 600], [2; 3], 8);
+            sauer_map::block::generate_clipboard_for_region(&src, [96, 96, 600], [2; 3], 8);
         let shelf = pack(
             vault.size,
             &[],
@@ -348,7 +348,7 @@ mod tests {
         let mut trap = Trap::new([0; 3], 8, 0);
         trap.geom = Some(geom.clone());
 
-        let record = sauer_map::param_blob::encode("t", 1, b"hello");
+        let record = crate::trap::param_blob::encode("t", 1, b"hello");
         build(&mut map, &vault, &[trap], &record);
         assert!(!is_free(&map, vault.bounds(), None));
         assert!(is_free(&map, vault.bounds(), Some(vault.bounds())));
@@ -357,7 +357,7 @@ mod tests {
             payload.nodes
         );
         assert_eq!(
-            sauer_map::param_blob::find_latest(&map, "t"),
+            crate::trap::param_blob::find_latest(&map, "t"),
             Some((1, b"hello".to_vec()))
         );
 

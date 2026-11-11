@@ -11,8 +11,8 @@
 //! several copies (an old anchor pasted somewhere), the newest complete
 //! generation wins.
 
-use crate::Map;
 use cube_string::CubeString;
+use sauer_map::Map;
 use sauer_proto::data::{VSlotParam, VSlotProps};
 use std::collections::BTreeMap;
 

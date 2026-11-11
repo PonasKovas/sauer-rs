@@ -78,7 +78,7 @@ fn record(vault: &Vault, traps: &[Trap], generation: u32) -> VSlotProps {
             })
             .collect(),
     };
-    sauer_map::param_blob::encode(TAG, generation, &rec.to_bytes())
+    super::param_blob::encode(TAG, generation, &rec.to_bytes())
 }
 
 /// Enlarges every server copy of the map. Clients run the engine's enlarge,
@@ -388,7 +388,7 @@ pub fn load(map: &Map) -> Loaded {
         generation: 0,
         warnings: Vec::new(),
     };
-    let Some((generation, bytes)) = sauer_map::param_blob::find_latest(map, TAG) else {
+    let Some((generation, bytes)) = super::param_blob::find_latest(map, TAG) else {
         // Chunks of the pre-vault store had names starting with byte 1.
         let old_store = map.vslots.iter().flatten().any(|vs| {
             vs.props

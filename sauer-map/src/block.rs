@@ -1,3 +1,6 @@
+//! Copying a box of the map out as a block of cubes (the clipboard format
+//! clients paste), with the vslots its faces use.
+
 use crate::{Map, Node};
 use ogz_rs::data::{VSlot, VSlotProps};
 use sauer_proto::data::ClipboardPayload;

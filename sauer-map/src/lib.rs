@@ -3,10 +3,9 @@ mod geom;
 pub mod map;
 pub mod octree;
 
-pub mod clipboard;
+pub mod block;
 pub mod facemerge;
 pub mod map_vars;
-pub mod param_blob;
 pub mod raycast;
 pub mod vslot;
 

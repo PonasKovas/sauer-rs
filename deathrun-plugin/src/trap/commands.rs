@@ -61,7 +61,7 @@ pub fn geometry_bounds(original: &Map, current: &Map, old: Option<&TrapGeom>) ->
 /// Copies the active-state geometry inside `bounds` out of `current`.
 pub fn capture_geometry(current: &Map, bounds: Aabb) -> TrapGeom {
     let (clip_pos, clip_s, clip_grid, payload) =
-        sauer_map::clipboard::generate_region_clipboard(current, bounds);
+        sauer_map::block::generate_region_clipboard(current, bounds);
     TrapGeom {
         clip_pos,
         clip_s,

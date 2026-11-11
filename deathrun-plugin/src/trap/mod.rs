@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod ents;
 pub mod guard;
+pub mod param_blob;
 pub mod persist;
 pub mod place;
 pub mod placement;

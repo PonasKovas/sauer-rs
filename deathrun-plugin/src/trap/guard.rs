@@ -64,7 +64,7 @@ pub fn geometry_edit(ctx: &Context, bounds: Aabb, mut apply: impl FnMut(&mut Map
         return;
     }
     let snapshot = match (state.mode.editing(), &state.map) {
-        (Some(_), Some(map)) => Some(sauer_map::clipboard::generate_region_clipboard(map, bounds)),
+        (Some(_), Some(map)) => Some(sauer_map::block::generate_region_clipboard(map, bounds)),
         _ => None,
     };
 

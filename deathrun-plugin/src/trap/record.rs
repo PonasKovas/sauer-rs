@@ -7,7 +7,7 @@ use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-/// Param-name tag of the trap database (see `sauer_map::param_blob`).
+/// Param-name tag of the trap database (see `param_blob`).
 pub const TAG: &str = "drv";
 const FORMAT: u8 = 1;
 const MAX_RAW: u64 = 16 * 1024 * 1024;

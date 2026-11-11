@@ -410,7 +410,7 @@ impl Map {
             }
         });
 
-        let vslots = crate::clipboard::extract_vslots(&extracted_nodes, &self.vslots);
+        let vslots = crate::block::extract_vslots(&extracted_nodes, &self.vslots);
 
         sauer_proto::data::ClipboardPayload {
             sel: (**sel).clone(),

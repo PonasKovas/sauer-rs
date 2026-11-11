@@ -99,7 +99,7 @@ fn do_chunk(
     max_bytes: usize,
     out: &mut Vec<ClipboardPayload>,
 ) {
-    let (padded_min, [sx, sy, sz], grid) = sauer_map::clipboard::region_layout(map, min, max);
+    let (padded_min, [sx, sy, sz], grid) = sauer_map::block::region_layout(map, min, max);
     let shaped = sauer_map::octree::max_shaped_leaf(&map.root, [0; 3], map.size, min, max);
 
     // Check if it's 1x1x1 and cannot be split further
@@ -107,7 +107,7 @@ fn do_chunk(
     let cannot_split = sx <= 1 && sy <= 1 && sz <= 1 && grid <= shaped.max(1);
 
     let payload =
-        sauer_map::clipboard::generate_clipboard_for_region(map, padded_min, [sx, sy, sz], grid);
+        sauer_map::block::generate_clipboard_for_region(map, padded_min, [sx, sy, sz], grid);
 
     let fits = payload.uncompressed().len() <= MAX_CLIENT_UNPACK_LEN
         && (max_bytes == usize::MAX || {

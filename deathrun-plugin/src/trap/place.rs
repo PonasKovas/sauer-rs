@@ -225,7 +225,7 @@ fn ghost(map: &mut Map, target: Target) -> Vec<ClipboardPayload> {
     };
     let (pos, size, orient) = key;
     let cell = cell_box(key);
-    let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, cell);
+    let (o, s, grid, saved) = sauer_map::block::generate_region_clipboard(map, cell);
     build_button(map, pos, size, orient, verdict.color(), true);
     let out = sauer_kit::paste::restore_payloads(map, cell);
     if let Some(sel) = super::vault::sel(map, o, s, grid) {
@@ -628,7 +628,7 @@ fn rerecord(
     // Everything changed below gets put back from this.
     let cells = old.iter().chain(new.iter()).map(|&k| cell_box(k));
     let region = cells.fold(clip, |r, c| r.union(&c));
-    let (o, s, grid, saved) = sauer_map::clipboard::generate_region_clipboard(map, region);
+    let (o, s, grid, saved) = sauer_map::block::generate_region_clipboard(map, region);
 
     g.paste_into(map);
     if let Some((pos, size, _)) = old {
