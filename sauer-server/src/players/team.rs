@@ -6,7 +6,7 @@ impl Server {
     /// Assigns the initial team for a newly welcomed player. Only call from `welcome()`.
     pub(crate) fn set_initial_team(&self, id: u64) {
         let team = {
-            let mode = *self.game_mode.read().unwrap();
+            let mode = *self.game_mode.read();
             if mode.has_teams() {
                 let good = "good".lossy_cubestring();
                 let evil = "evil".lossy_cubestring();

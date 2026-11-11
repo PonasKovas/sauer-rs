@@ -36,18 +36,18 @@ impl Server {
     }
 
     pub fn ban_ip(&self, ip: IpAddr) {
-        self.bans.write().unwrap().push((ip, Instant::now() + KICK_BAN));
+        self.bans.write().push((ip, Instant::now() + KICK_BAN));
     }
 
     pub fn is_banned(&self, ip: IpAddr) -> bool {
-        let mut bans = self.bans.write().unwrap();
+        let mut bans = self.bans.write();
         let now = Instant::now();
         bans.retain(|(_, until)| *until > now);
         bans.iter().any(|(b, _)| *b == ip)
     }
 
     pub fn clear_bans(&self) {
-        self.bans.write().unwrap().clear();
+        self.bans.write().clear();
     }
 
     /// Whether `password` hashed for this client matches the admin password.
@@ -55,7 +55,7 @@ impl Server {
         if hash.is_empty() {
             return false;
         }
-        let pass = self.admin_pass.read().unwrap();
+        let pass = self.admin_pass.read();
         let (Some(cn), Some(p)) = (self.get_cn(id), self.players.try_get(id)) else {
             return false;
         };

@@ -1,12 +1,12 @@
+use parking_lot::RwLock;
 use sauer_proto::channel2;
 use sauer_server::plugin::Context;
 use sauer_server::{Server, ServerItem, delay_spawn, spawntime};
-use std::sync::RwLock;
 use tracing::error;
 
 pub fn update_server_items(map: &sauer_map::Map, server: &Server) {
     let num_players = server.client_count();
-    let mut items = server.items.write().unwrap();
+    let mut items = server.items.write();
     items.reset();
 
     for (i, ent) in map.entities.iter().enumerate() {
@@ -74,14 +74,14 @@ pub(crate) fn get_server_state(server: &Server) -> &RwLock<DeathrunState> {
 }
 
 pub(crate) fn is_waiting_for_map(server: &Server) -> bool {
-    get_server_state(server).read().unwrap().waiting_for_map
+    get_server_state(server).read().waiting_for_map
 }
 
 pub(crate) fn with_map_state_mut<F>(ctx: &Context, mut f: F)
 where
     F: FnMut(&mut sauer_map::Map),
 {
-    let mut state = get_server_state(ctx.server()).write().unwrap();
+    let mut state = get_server_state(ctx.server()).write();
     if let Some(base) = state.base_map.as_mut() {
         f(base);
     }
@@ -94,7 +94,7 @@ pub(crate) fn send_map_to_async(server: &std::sync::Arc<Server>, id: u64) {
     let server_clone = std::sync::Arc::clone(server);
     tokio::spawn(async move {
         let state_opt = {
-            let lock = get_server_state(&server_clone).read().unwrap();
+            let lock = get_server_state(&server_clone).read();
             lock.map.clone()
         };
 

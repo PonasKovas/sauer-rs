@@ -4,6 +4,7 @@ use deathrun_plugin::{
     DeathrunEdit, DeathrunPlay,
     play::{PlayConfig, PlayMaps},
 };
+use parking_lot::RwLock;
 use sauer_plugin_lua::{LuaPlugin, LuaPluginOptions};
 use sauer_proto::data::MasterMode;
 use sauer_server::{Server, ServerBuilder, plugin::Plugin};
@@ -12,7 +13,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
     path::PathBuf,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 use telegram_plugin::TelegramBridge;
 use tokio::fs;
@@ -122,15 +123,15 @@ impl Default for BaseConfig {
 
 impl Plugin for BaseConfig {
     async fn init(&self, server: &mut Server) {
-        *server.server_desc.write().unwrap() = self.server_desc.as_str().lossy_cubestring();
-        *server.server_auth.write().unwrap() = self.server_auth.as_str().lossy_cubestring();
-        *server.has_password.write().unwrap() = self.has_password;
-        *server.admin_pass.write().unwrap() = self.admin_pass.clone();
+        *server.server_desc.write() = self.server_desc.as_str().lossy_cubestring();
+        *server.server_auth.write() = self.server_auth.as_str().lossy_cubestring();
+        *server.has_password.write() = self.has_password;
+        *server.admin_pass.write() = self.admin_pass.clone();
         if self.admin_pass.is_empty() {
             tracing::info!("admin password not set, /setmaster PASSWORD is off");
         }
-        *server.master_mode.write().unwrap() = self.master_mode;
-        *server.update_master.write().unwrap() = self.updatemaster;
+        *server.master_mode.write() = self.master_mode;
+        *server.update_master.write() = self.updatemaster;
     }
 }
 
@@ -232,17 +233,15 @@ async fn sync_map_dir(
 
                         if needs_update {
                             match fs::read(&path).await {
-                                Ok(data) => {
-                                    match maps.write().unwrap().add_map(name_str.clone(), &data) {
-                                        Ok(()) => {
-                                            info!("Map dir: loaded/updated '{name_str}'");
-                                            known_files.insert(name_str, modified);
-                                        }
-                                        Err(e) => {
-                                            error!("Map dir: failed to load '{name_str}': {e}")
-                                        }
+                                Ok(data) => match maps.write().add_map(name_str.clone(), &data) {
+                                    Ok(()) => {
+                                        info!("Map dir: loaded/updated '{name_str}'");
+                                        known_files.insert(name_str, modified);
                                     }
-                                }
+                                    Err(e) => {
+                                        error!("Map dir: failed to load '{name_str}': {e}")
+                                    }
+                                },
                                 Err(e) => error!("Map dir: failed to read '{name_str}': {e}"),
                             }
                         }
@@ -259,7 +258,7 @@ async fn sync_map_dir(
             .collect();
 
         for name in removed {
-            maps.write().unwrap().remove_map(&name);
+            maps.write().remove_map(&name);
             known_files.remove(&name);
             info!("Map dir: removed '{name}'");
         }

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+parking_lot.workspace = true
 lenet.workspace = true
 lenet-tokio.workspace = true
 sauer-proto.workspace = true

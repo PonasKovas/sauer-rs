@@ -165,7 +165,7 @@ fn busy(server: &Server, state: &DeathrunState) -> Option<String> {
 pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
 
     if let Some(msg) = busy(server, &state) {
         crate::ui::send_warn(server, id, &msg);
@@ -203,7 +203,7 @@ pub fn cmd_deltrap(ctx: &Context, hit_pt: [f32; 3]) {
 pub fn cmd_cleartrap(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
 
     if let Some(msg) = busy(server, &state) {
         crate::ui::send_warn(server, id, &msg);
@@ -250,7 +250,7 @@ pub fn cmd_cleartrap(ctx: &Context, hit_pt: [f32; 3]) {
 fn set_trap_value(ctx: &Context, hit_pt: [f32; 3], f: impl FnOnce(&mut Trap) -> String) {
     let id = ctx.id();
     let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     let Some(trap_idx) = find_trap(&state, hit_pt) else {
         not_looking(server, id);
         return;
@@ -294,7 +294,7 @@ pub fn cmd_traptimeout(ctx: &Context, hit_pt: [f32; 3], timeout: u32) {
 }
 
 pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
-    let state = get_server_state(ctx.server()).read().unwrap();
+    let state = get_server_state(ctx.server()).read();
     match find_trap(&state, hit_pt) {
         Some(i) => say(
             ctx.server(),
@@ -306,7 +306,7 @@ pub fn cmd_traptime_print(ctx: &Context, hit_pt: [f32; 3]) {
 }
 
 pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
-    let state = get_server_state(ctx.server()).read().unwrap();
+    let state = get_server_state(ctx.server()).read();
     match find_trap(&state, hit_pt) {
         Some(i) => say(
             ctx.server(),
@@ -320,7 +320,7 @@ pub fn cmd_traptimeout_print(ctx: &Context, hit_pt: [f32; 3]) {
 pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
     let id = ctx.id();
     let server = ctx.server();
-    let state = get_server_state(server).read().unwrap();
+    let state = get_server_state(server).read();
     let Some(trap_idx) = find_trap(&state, hit_pt) else {
         not_looking(server, id);
         return;
@@ -361,7 +361,7 @@ pub fn cmd_trapinfo(ctx: &Context, hit_pt: [f32; 3]) {
 pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
     let id = ctx.id();
     let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     let aimed = hit_pt.and_then(|p| find_trap(&state, p));
 
     if let Some(edit) = state.mode.editing() {
@@ -417,7 +417,7 @@ pub fn cmd_edittrap(ctx: &Context, hit_pt: Option<[f32; 3]>) {
 fn end_edit(
     server: &Arc<Server>,
     id: u64,
-    mut state: std::sync::RwLockWriteGuard<'_, DeathrunState>,
+    mut state: parking_lot::RwLockWriteGuard<'_, DeathrunState>,
 ) {
     let TrapMode::Editing(edit_state) = std::mem::take(&mut state.mode) else {
         return;

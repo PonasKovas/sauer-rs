@@ -129,7 +129,11 @@ pub(crate) async fn handle_client<P: Plugin>(
 
 fn log_bad_packet(channel: u8, data: &[u8], err: &impl std::fmt::Display) {
     const SHOWN: usize = 256;
-    let hex: String = data.iter().take(SHOWN).map(|b| format!("{b:02x}")).collect();
+    let hex: String = data
+        .iter()
+        .take(SHOWN)
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let more = if data.len() > SHOWN { "..." } else { "" };
     tracing::warn!(
         "dropped rest of a packet on channel {channel} ({} bytes): {err}; data: {hex}{more}",

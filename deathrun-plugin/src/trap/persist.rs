@@ -361,7 +361,7 @@ pub fn send(server: &Arc<Server>, (enlarges, payloads): (u32, Vec<ClipboardPaylo
 
 /// Saves under the lock and sends the result. Errors are reported to `report_to`.
 pub fn save_and_send(server: &Arc<Server>, report_to: Option<u64>) {
-    let mut state = crate::map_state::get_server_state(server).write().unwrap();
+    let mut state = crate::map_state::get_server_state(server).write();
     let mut sync = Sync::default();
     let result = save(&mut state, &mut sync);
     let out = packets(&state, sync);

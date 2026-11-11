@@ -25,7 +25,7 @@ pub fn apply_active_state(
 }
 
 pub fn recompose_traps(server: &std::sync::Arc<Server>) {
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
 
     let base_map = match state.base_map.as_ref() {
         Some(b) => b.clone(),
@@ -158,7 +158,7 @@ pub fn trap_triggerable(state: &crate::map_state::DeathrunState, trap_idx: usize
 }
 
 pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: u64) {
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     if !trap_triggerable(&state, trap_idx) {
         return;
     }
@@ -183,7 +183,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
     let trap_time = state.traps[trap_idx].time;
     let trap_timeout = state.traps[trap_idx].timeout;
 
-    let is_edit_mode = *server.game_mode.read().unwrap() == sauer_proto::data::GameMode::CoopEdit;
+    let is_edit_mode = *server.game_mode.read() == sauer_proto::data::GameMode::CoopEdit;
     let effective_timeout = if is_edit_mode || trap_timeout == 0 {
         trap_time
     } else {
@@ -220,13 +220,13 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
         let target_ids = {
             let is_play_mode =
-                *server_clone.game_mode.read().unwrap() != sauer_proto::data::GameMode::CoopEdit;
+                *server_clone.game_mode.read() != sauer_proto::data::GameMode::CoopEdit;
             if is_play_mode {
                 let maps = server_clone
                     .extra
-                    .get::<std::sync::Arc<std::sync::RwLock<crate::play::PlayMaps>>>()
+                    .get::<std::sync::Arc<parking_lot::RwLock<crate::play::PlayMaps>>>()
                     .unwrap();
-                let lock = maps.read().unwrap();
+                let lock = maps.read();
                 lock.evil_id.into_iter().collect::<Vec<_>>()
             } else {
                 server_clone.client_ids()
@@ -241,7 +241,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             attrs: [5, 100, color as i32, 1337, 7331],
         };
         {
-            let mut state = get_server_state(&server_clone).write().unwrap();
+            let mut state = get_server_state(&server_clone).write();
             if let Some(map) = state.map.as_mut() {
                 let mut glob = Vec::new();
                 let mut pers = std::collections::HashMap::new();
@@ -307,7 +307,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         loop {
             // Check if map was reloaded or round reset logic deleted the trap.
             let is_valid = {
-                let state = get_server_state(&server_clone).read().unwrap();
+                let state = get_server_state(&server_clone).read();
                 if let Some(t) = state.traps.get(trap_idx) {
                     t.is_active // Retains is_active == true during cooldown phase
                 } else {
@@ -325,7 +325,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
             if !reverted && elapsed >= revert_dur {
                 {
-                    let mut state = get_server_state(&server_clone).write().unwrap();
+                    let mut state = get_server_state(&server_clone).write();
                     // We intentionally keep `is_active = true` to enforce the timeout cooldown
                     state.active_trap_stack.retain(|&id| id != trap_idx);
                 }
@@ -333,7 +333,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 recompose_traps(&server_clone);
 
                 {
-                    let mut state = get_server_state(&server_clone).write().unwrap();
+                    let mut state = get_server_state(&server_clone).write();
                     if state.active_trap_stack.is_empty() {
                         state.base_map = None;
                     }
@@ -372,7 +372,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
                 let mut glob = Vec::new();
                 let mut pers = std::collections::HashMap::new();
                 {
-                    let mut state = get_server_state(&server_clone).write().unwrap();
+                    let mut state = get_server_state(&server_clone).write();
                     if let Some(map) = state.map.as_mut() {
                         for &target_id in &target_ids {
                             let mut up = map.update_virt_ents(
@@ -414,7 +414,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
 
         if !reverted {
             {
-                let mut state = get_server_state(&server_clone).write().unwrap();
+                let mut state = get_server_state(&server_clone).write();
                 if state.traps[trap_idx].is_active {
                     state.traps[trap_idx].is_active = false;
                     state.active_trap_stack.retain(|&id| id != trap_idx);
@@ -424,14 +424,14 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
             recompose_traps(&server_clone);
 
             {
-                let mut state = get_server_state(&server_clone).write().unwrap();
+                let mut state = get_server_state(&server_clone).write();
                 if state.active_trap_stack.is_empty() {
                     state.base_map = None;
                 }
             }
         } else {
             // End of the timeout cooldown
-            let mut state = get_server_state(&server_clone).write().unwrap();
+            let mut state = get_server_state(&server_clone).write();
             if state.traps.get(trap_idx).map_or(false, |t| t.is_active) {
                 state.traps[trap_idx].is_active = false;
             }
@@ -440,7 +440,7 @@ pub fn trigger_trap(server: &std::sync::Arc<Server>, trap_idx: usize, actor_id: 
         {
             let mut glob = Vec::new();
             let mut pers = std::collections::HashMap::new();
-            let mut state = get_server_state(&server_clone).write().unwrap();
+            let mut state = get_server_state(&server_clone).write();
             if let Some(map) = state.map.as_mut() {
                 for &target_id in &target_ids {
                     let mut up = map.clear_virt_ents(target_id, &namespace);
@@ -494,7 +494,7 @@ pub fn set_button_color(
     color: [f32; 3],
 ) {
     let actor_cn = crate::SERVER_BOT_CN as i32;
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
 
     for packet in crate::trap::placement::get_outer_faces_vslot_packets(pos, size, orient, color) {
         if let Some(map) = state.map.as_mut() {

@@ -300,7 +300,7 @@ fn show(server: &Server, state: &mut DeathrunState, old: Target, new: Target) {
 
 /// Draws the preview again, after map geometry was pasted over it.
 pub fn repaint(server: &Server) {
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     let Some(target) = state.mode.placing().map(|p| p.target) else {
         return;
     };
@@ -314,7 +314,7 @@ pub fn repaint(server: &Server) {
 /// the frames.
 pub fn reshow_for(server: &Server, id: u64) {
     {
-        let mut state = get_server_state(server).write().unwrap();
+        let mut state = get_server_state(server).write();
         let Some(target) = state.mode.placing().map(|p| p.target) else {
             return;
         };
@@ -354,7 +354,7 @@ pub fn busy_message(server: &Server, state: &DeathrunState) -> Option<String> {
 
 /// `#tnew` and `#tmove`: starts placing a button, places it, or cancels.
 pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray: [f32; 3]) {
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     let refusal = match &state.mode {
         TrapMode::Editing(e) => Some(format!(
             "Trap {} is being edited. Type #tedit to finish editing first.",
@@ -378,7 +378,7 @@ pub fn command(server: &Arc<Server>, id: u64, kind: Kind, origin: [f32; 3], ray:
 
 fn start(
     server: &Arc<Server>,
-    mut state: std::sync::RwLockWriteGuard<'_, DeathrunState>,
+    mut state: parking_lot::RwLockWriteGuard<'_, DeathrunState>,
     id: u64,
     kind: Kind,
     origin: [f32; 3],
@@ -513,10 +513,10 @@ fn end(server: &Server, state: &mut DeathrunState) {
 
 /// Cancels placing if `id` is the one doing it (they left or went spectator).
 pub fn cancel_for(server: &Server, id: u64, why: &str) {
-    if !is_placer(&get_server_state(server).read().unwrap(), id) {
+    if !is_placer(&get_server_state(server).read(), id) {
         return;
     }
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     if !is_placer(&state, id) {
         return;
     }
@@ -530,7 +530,7 @@ pub fn cancel_for(server: &Server, id: u64, why: &str) {
 
 /// What `id` is placing, if they are the one placing a button.
 pub fn placing_kind(server: &Server, id: u64) -> Option<Kind> {
-    let state = get_server_state(server).read().unwrap();
+    let state = get_server_state(server).read();
     state
         .mode
         .placing()
@@ -555,10 +555,10 @@ fn follow_locked(server: &Server, state: &mut DeathrunState, target: Target) {
 /// Moves the preview along with the placing player's aim.
 pub fn follow(server: &Server, id: u64, origin: [f32; 3], ray: [f32; 3]) {
     // Checked under the read lock first: every player's position update gets here.
-    if !is_placer(&get_server_state(server).read().unwrap(), id) {
+    if !is_placer(&get_server_state(server).read(), id) {
         return;
     }
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
     if !is_placer(&state, id) {
         return;
     }

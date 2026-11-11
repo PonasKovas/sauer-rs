@@ -21,7 +21,7 @@ pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
     crate::ui::send_warn(ctx.server(), ctx.id(), msg);
     let server = ctx.server().clone();
     let payloads = {
-        let state = get_server_state(&server).read().unwrap();
+        let state = get_server_state(&server).read();
         state
             .map
             .as_ref()
@@ -38,7 +38,7 @@ pub fn reject(ctx: &Context, (min, max): Box3, msg: &str) {
 /// protected area, and reverts it if it pushes the trap being edited over
 /// the budget.
 pub fn geometry_edit(ctx: &Context, bounds: Box3, mut apply: impl FnMut(&mut Map) -> bool) {
-    let mut state = get_server_state(ctx.server()).write().unwrap();
+    let mut state = get_server_state(ctx.server()).write();
     if super::place::covers_preview(&state, bounds) {
         drop(state);
         reject(ctx, bounds, "A trap button is being placed there.");
@@ -94,7 +94,7 @@ fn base_entities(state: &DeathrunState) -> Option<&Vec<ogz_rs::data::Entity>> {
 /// and unlinks traps from base-state entities that were changed or deleted.
 pub fn entity_edit(ctx: &Context, ids: &[usize], mut apply: impl FnMut(&mut Map) -> bool) {
     let server = ctx.server();
-    let mut state = get_server_state(server).write().unwrap();
+    let mut state = get_server_state(server).write();
 
     // Virtual entities (frames, progress bars) are server-drawn and personal.
     // Someone grabbed one: undo it for everyone and keep it out of the map.

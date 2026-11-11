@@ -1,13 +1,14 @@
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use peer::Peer;
 use sauer_proto::{
     PacketDescriptor, PacketSequence,
     data::{GameMode, MasterMode},
     route::{Chan0, Chan1, Chan2, S2C},
 };
-use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
+use std::{collections::HashMap, net::SocketAddr};
 use std::{fmt::Debug, sync::Arc};
 
 mod bans;
@@ -107,7 +108,7 @@ impl Server {
     }
 
     pub fn register_command(&self, name: &str, desc: &str, usage: &str) {
-        self.commands.write().unwrap().push(command::CommandInfo {
+        self.commands.write().push(command::CommandInfo {
             name: name.to_string(),
             desc: desc.to_string(),
             usage: usage.to_string(),
@@ -116,7 +117,7 @@ impl Server {
 
     /// Appends lines to the end of the `#help` output.
     pub fn add_help_lines(&self, lines: impl IntoIterator<Item = CubeString>) {
-        self.help_lines.write().unwrap().extend(lines);
+        self.help_lines.write().extend(lines);
     }
 
     // ── Server Query Responses ────────────────────────────────────────────────
@@ -135,7 +136,7 @@ impl Server {
     // ── Client ID / CN Mapping ────────────────────────────────────────────────
 
     pub fn assign_cn(&self, id: u64) -> Option<u8> {
-        let mut cns = self.cns.write().unwrap();
+        let mut cns = self.cns.write();
 
         // 1. Check if already assigned
         for (cn, slot) in cns.iter().enumerate() {
@@ -158,12 +159,12 @@ impl Server {
     }
 
     pub fn free_cn(&self, cn: u8) {
-        let mut cns = self.cns.write().unwrap();
+        let mut cns = self.cns.write();
         cns[cn as usize] = None;
     }
 
     pub fn get_cn(&self, id: u64) -> Option<u8> {
-        let cns = self.cns.read().unwrap();
+        let cns = self.cns.read();
         cns.iter()
             .position(|&slot| slot == Some(id))
             .map(|i| i as u8)
@@ -173,12 +174,12 @@ impl Server {
     /// reserved one belongs to a fake player (like a plugin's bot) with no
     /// player data, so packets aimed at it are ignored.
     pub fn get_id(&self, cn: u8) -> Option<u64> {
-        let cns = self.cns.read().unwrap();
+        let cns = self.cns.read();
         cns[cn as usize].filter(|&id| id != RESERVED_ID)
     }
 
     pub fn reserve_cn(&self, cn: u8) -> bool {
-        let mut cns = self.cns.write().unwrap();
+        let mut cns = self.cns.write();
         if cns[cn as usize].is_some() {
             return false;
         }

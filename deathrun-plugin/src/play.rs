@@ -3,6 +3,7 @@ use crate::ui;
 use cube_string::IntoCubeStringLossy;
 use sauer_map::Map;
 
+use parking_lot::RwLock;
 use rand::seq::SliceRandom;
 use sauer_proto::data::{PlayerState, Privilege};
 use sauer_proto::{
@@ -16,7 +17,7 @@ use sauer_server::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::time::{Duration, Instant, sleep};
 use tracing::info;
 
@@ -213,17 +214,17 @@ impl DeathrunPlay {
     }
 
     pub fn add_map(&self, name: String, data: &[u8]) -> Result<(), String> {
-        self.maps.write().unwrap().add_map(name, data)
+        self.maps.write().add_map(name, data)
     }
 
     pub fn remove_map(&self, name: &str) {
-        self.maps.write().unwrap().remove_map(name);
+        self.maps.write().remove_map(name);
     }
 }
 
 fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcome_id: Option<u64>) {
     let (map, my_epoch, initial_participants) = {
-        let mut lock = maps.write().unwrap();
+        let mut lock = maps.write();
         if lock.rotation.is_empty() {
             return;
         }
@@ -249,10 +250,10 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         lock.current_map = Some(next_map);
 
         let (_, new_state) = lock.make_active_state();
-        *get_server_state(&server).write().unwrap() = new_state;
+        *get_server_state(&server).write() = new_state;
 
         let state_lock = get_server_state(&server);
-        let state_read = state_lock.read().unwrap();
+        let state_read = state_lock.read();
         let map = state_read.map.as_ref().unwrap();
         (map.clone(), epoch, server.client_ids())
     };
@@ -261,7 +262,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
     let handle = tokio::spawn(async move {
         let ids = initial_participants;
         if ids.is_empty() {
-            let mut lock = maps_clone.write().unwrap();
+            let mut lock = maps_clone.write();
             if lock.round_epoch == my_epoch {
                 lock.round_state = RoundState::NotStarted;
                 server.set_master_mode(MasterMode::Veto);
@@ -271,7 +272,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
         let evil_id = if ids.len() > 1 {
             // Skip players who were spectated for being AFK, unless that's everyone.
-            let afk = maps_clone.read().unwrap().afk_spectated.clone();
+            let afk = maps_clone.read().afk_spectated.clone();
             let active: Vec<u64> = ids.iter().copied().filter(|id| !afk.contains(id)).collect();
             let pool = if active.is_empty() { &ids } else { &active };
             Some(*pool.choose(&mut rand::thread_rng()).unwrap())
@@ -280,7 +281,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         };
 
         {
-            let mut lock = maps_clone.write().unwrap();
+            let mut lock = maps_clone.write();
             if lock.round_epoch != my_epoch {
                 return;
             }
@@ -354,7 +355,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
 
         let current_evil;
         {
-            let mut lock = maps_clone.write().unwrap();
+            let mut lock = maps_clone.write();
             if lock.round_epoch != my_epoch {
                 return;
             }
@@ -384,7 +385,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
                     state.ammo.grenade_launcher = 0;
                 }
             });
-            maps_clone.write().unwrap().spawned_this_round.insert(id);
+            maps_clone.write().spawned_this_round.insert(id);
         }
 
         let evil_name = current_evil
@@ -395,7 +396,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         if let Some(w_id) = welcome_id {
             if server.players.try_get(w_id).is_some() {
                 let (is_solo, map_name) = {
-                    let lock = maps_clone.read().unwrap();
+                    let lock = maps_clone.read();
                     (lock.evil_id.is_none(), lock.current_map.clone())
                 };
                 ui::send_welcome_play(&server, w_id, map_name.as_deref(), is_solo);
@@ -403,7 +404,7 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         }
 
         if end_if_decided_at_start(&server, &maps_clone, my_epoch, current_evil) {
-            let mut lock = maps_clone.write().unwrap();
+            let mut lock = maps_clone.write();
             if lock.round_epoch == my_epoch {
                 lock.round_task = None;
             }
@@ -413,13 +414,13 @@ fn start_round_sequence(server: Arc<Server>, maps: Arc<RwLock<PlayMaps>>, welcom
         // Then broadcast the round state/gamemode to everyone
         ui::broadcast_round_start(&server, evil_name.as_deref());
 
-        let mut lock = maps_clone.write().unwrap();
+        let mut lock = maps_clone.write();
         if lock.round_epoch == my_epoch {
             lock.round_task = None;
         }
     });
 
-    maps.write().unwrap().round_task = Some(handle);
+    maps.write().round_task = Some(handle);
 }
 
 fn check_win_conditions(
@@ -427,7 +428,7 @@ fn check_win_conditions(
     maps: &Arc<RwLock<PlayMaps>>,
     disconnecting_id: Option<u64>,
 ) {
-    let mut lock = maps.write().unwrap();
+    let mut lock = maps.write();
     if lock.round_state != RoundState::Playing {
         return;
     }
@@ -556,7 +557,7 @@ fn end_if_decided_at_start(
     epoch: u64,
     evil: Option<u64>,
 ) -> bool {
-    let mut lock = maps.write().unwrap();
+    let mut lock = maps.write();
     if lock.round_epoch != epoch || lock.round_state != RoundState::Playing {
         return false;
     }
@@ -600,7 +601,7 @@ fn end_if_decided_at_start(
 fn declare_win(
     server: &Arc<Server>,
     maps: &Arc<RwLock<PlayMaps>>,
-    lock: &mut std::sync::RwLockWriteGuard<PlayMaps>,
+    lock: &mut parking_lot::RwLockWriteGuard<PlayMaps>,
     winner_text: &str,
     top_times: &[(String, f32)],
 ) {
@@ -634,7 +635,7 @@ fn send_map_to_client(
     welcome: bool,
 ) -> bool {
     let (map, evil_id) = {
-        let lock = maps.read().unwrap();
+        let lock = maps.read();
         let name = match &lock.current_map {
             Some(n) => n,
             None => return false,
@@ -693,7 +694,7 @@ fn send_map_to_client(
 
         if welcome {
             let (is_solo, map_name) = {
-                let lock = maps_arc.read().unwrap();
+                let lock = maps_arc.read();
                 (lock.evil_id.is_none(), lock.current_map.clone())
             };
             ui::send_welcome_play(&server, target_id, map_name.as_deref(), is_solo);
@@ -710,7 +711,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
     let mut to_spectate = Vec::new();
     let mut to_warn = Vec::new();
     {
-        let mut lock = maps.write().unwrap();
+        let mut lock = maps.write();
         if lock.round_state != RoundState::Playing {
             return;
         }
@@ -762,7 +763,7 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
             ui::warn_msg(&format!("{name} was spectated for being AFK.")),
         );
         server.set_spectator(*id, true);
-        maps.write().unwrap().afk_spectated.insert(*id);
+        maps.write().afk_spectated.insert(*id);
     }
 
     if !to_spectate.is_empty() {
@@ -773,14 +774,14 @@ fn check_afk(server: &Arc<Server>, maps: &Arc<RwLock<PlayMaps>>, timeout: Durati
 impl Plugin for DeathrunPlay {
     async fn init(&self, server: &mut Server) {
         self.notes.install(server);
-        *server.map_name.write().unwrap() = "".lossy_cubestring();
-        *server.game_mode.write().unwrap() = GameMode::TeamPlay;
-        *server.master_mode.write().unwrap() = MasterMode::Veto;
+        *server.map_name.write() = "".lossy_cubestring();
+        *server.game_mode.write() = GameMode::TeamPlay;
+        *server.master_mode.write() = MasterMode::Veto;
         // Rounds set the master mode, so it must not snap back to open.
-        *server.reopen_when_masterless.write().unwrap() = false;
+        *server.reopen_when_masterless.write() = false;
         server.reserve_cn(crate::SERVER_BOT_CN);
 
-        let (_, state) = self.maps.read().unwrap().make_active_state();
+        let (_, state) = self.maps.read().make_active_state();
         server.extra.insert(RwLock::new(state));
         server.extra.insert(Arc::clone(&self.maps));
         server
@@ -823,7 +824,7 @@ impl Plugin for DeathrunPlay {
         );
 
         let (is_first, is_solo_round, is_waiting) = {
-            let lock = maps.read().unwrap();
+            let lock = maps.read();
             let is_first = server.client_count() == 1;
             let is_solo_round = (lock.round_state == RoundState::Playing
                 || lock.round_state == RoundState::MapLoading)
@@ -837,14 +838,14 @@ impl Plugin for DeathrunPlay {
             // Restart or start if needed to ensure all players are included and roles assigned correctly.
             start_round_sequence(Arc::clone(server), Arc::clone(&maps), Some(id));
         } else {
-            let is_playing = maps.read().unwrap().round_state != RoundState::NotStarted;
+            let is_playing = maps.read().round_state != RoundState::NotStarted;
             if is_playing {
                 send_map_to_client(Arc::clone(server), id, &maps, true);
                 server.set_spectator(id, true);
                 server.set_team(id, "good".lossy_cubestring(), SetTeamReason::Forced);
             } else {
                 let (is_solo, map_name) = {
-                    let lock = maps.read().unwrap();
+                    let lock = maps.read();
                     (lock.evil_id.is_none(), lock.current_map.clone())
                 };
                 ui::send_welcome_play(server, id, map_name.as_deref(), is_solo);
@@ -857,11 +858,10 @@ impl Plugin for DeathrunPlay {
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
         maps.write()
-            .unwrap()
             .update_afk_pos(id, [packet.pos.x, packet.pos.y, packet.pos.z]);
 
         let (is_playing, is_good, not_finished, round_start, is_evil) = {
-            let lock = maps.read().unwrap();
+            let lock = maps.read();
             (
                 lock.round_state == RoundState::Playing,
                 lock.evil_id != Some(id),
@@ -878,7 +878,7 @@ impl Plugin for DeathrunPlay {
             let mut edges_to_draw = None;
 
             {
-                let state = crate::map_state::get_server_state(server).read().unwrap();
+                let state = crate::map_state::get_server_state(server).read();
                 let yaw_rad = (packet.dir.yaw as f32).to_radians();
                 let pitch_rad = (packet.dir.pitch as f32).to_radians();
                 let forward = [
@@ -1044,7 +1044,7 @@ impl Plugin for DeathrunPlay {
             };
 
             if clear_highlight {
-                let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+                let mut state_w = crate::map_state::get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN as i32;
@@ -1104,7 +1104,7 @@ impl Plugin for DeathrunPlay {
                             attrs: [7, edge.3, edge.4, color_int, 0],
                         });
                     }
-                    let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+                    let mut state_w = crate::map_state::get_server_state(server).write();
                     if let Some(map) = state_w.map.as_mut() {
                         let up = map.update_virt_ents(id, "highlight", fake_ents);
                         let cn = crate::SERVER_BOT_CN as i32;
@@ -1151,7 +1151,7 @@ impl Plugin for DeathrunPlay {
                 }
             }
             if clear_highlight {
-                let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+                let mut state_w = crate::map_state::get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN as i32;
@@ -1187,7 +1187,6 @@ impl Plugin for DeathrunPlay {
             let mut flag_pos = None;
             if let Some(map_state) = crate::map_state::get_server_state(server)
                 .read()
-                .unwrap()
                 .map
                 .as_ref()
             {
@@ -1215,7 +1214,7 @@ impl Plugin for DeathrunPlay {
                 let time_taken = round_start.map(|t| t.elapsed()).unwrap_or(Duration::ZERO);
                 let mut first_finish = false;
                 {
-                    let mut lock = maps.write().unwrap();
+                    let mut lock = maps.write();
                     if !lock.finished_players.iter().any(|(f_id, _)| *f_id == id) {
                         if lock.finished_players.is_empty() {
                             first_finish = true;
@@ -1255,8 +1254,7 @@ impl Plugin for DeathrunPlay {
 
                     if first_finish {
                         if let Some(pos) = flag_pos {
-                            let mut state =
-                                crate::map_state::get_server_state(server).write().unwrap();
+                            let mut state = crate::map_state::get_server_state(server).write();
                             let mut ent_ids = (None, None);
                             if let Some(map) = state.map.as_mut() {
                                 let new_ent1 = ogz_rs::data::Entity {
@@ -1346,11 +1344,11 @@ impl Plugin for DeathrunPlay {
         let id = ctx.id();
         let server = ctx.server();
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
-        maps.write().unwrap().remove_player_afk(id);
+        maps.write().remove_player_afk(id);
         self.trap_highlights.remove(&id);
         crate::trap::placement::forget_seethrough(server, id);
 
-        let mut state_w = crate::map_state::get_server_state(server).write().unwrap();
+        let mut state_w = crate::map_state::get_server_state(server).write();
         if let Some(map) = state_w.map.as_mut() {
             let up = map.clear_all_virt_ents_for_player(id);
             let cn = crate::SERVER_BOT_CN as i32;
@@ -1376,7 +1374,7 @@ impl Plugin for DeathrunPlay {
         let maps = Arc::clone(server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap());
 
         // Spectate good players when they die
-        let is_evil = maps.read().unwrap().evil_id == Some(victim_id);
+        let is_evil = maps.read().evil_id == Some(victim_id);
         if !is_evil {
             server.set_spectator(victim_id, true);
         }
@@ -1386,7 +1384,7 @@ impl Plugin for DeathrunPlay {
 
     async fn on_spawn(&self, ctx: &mut Context, state: &mut PlayerState) {
         let id = ctx.id();
-        let maps = self.maps.read().unwrap();
+        let maps = self.maps.read();
         let is_evil = maps.evil_id == Some(id);
 
         state.ammo.pistol = 200;
@@ -1405,7 +1403,7 @@ impl Plugin for DeathrunPlay {
         }
 
         // The terrorist can only kill with traps, never by shooting.
-        let actor_is_evil = self.maps.read().unwrap().evil_id == Some(actor_id);
+        let actor_is_evil = self.maps.read().evil_id == Some(actor_id);
         if actor_is_evil && target_id != actor_id {
             ctx.cancel();
         }
@@ -1418,7 +1416,7 @@ impl Plugin for DeathrunPlay {
 
         let mut cancel = false;
         {
-            let mut lock = maps.write().unwrap();
+            let mut lock = maps.write();
             match lock.round_state {
                 RoundState::Playing => {
                     let solo = lock.evil_id.is_none();
@@ -1445,7 +1443,7 @@ impl Plugin for DeathrunPlay {
 
         let is_evil = {
             let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
-            maps.read().unwrap().evil_id == Some(id)
+            maps.read().evil_id == Some(id)
         };
         if !is_evil {
             return;
@@ -1453,7 +1451,7 @@ impl Plugin for DeathrunPlay {
 
         let hit_pt = [packet.to.x, packet.to.y, packet.to.z];
         let trap_idx = {
-            let state = crate::map_state::get_server_state(server).read().unwrap();
+            let state = crate::map_state::get_server_state(server).read();
             if state.mode.editing().is_some() {
                 return;
             }
@@ -1487,7 +1485,7 @@ impl Plugin for DeathrunPlay {
     async fn spectator(&self, ctx: &mut Context, packet: &channel1::SpectatorClient) {
         let server = ctx.server();
         let maps = server.extra.get::<Arc<RwLock<PlayMaps>>>().unwrap();
-        let round_state = maps.read().unwrap().round_state;
+        let round_state = maps.read().round_state;
 
         // Prevent self-unspectating during the game (even for masters to prevent cheating the 1-life limit).
         if round_state == RoundState::Playing || round_state == RoundState::MapLoading {

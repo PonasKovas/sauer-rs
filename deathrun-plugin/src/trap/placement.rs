@@ -317,7 +317,6 @@ pub fn update_seethrough_button(server: &sauer_server::Server, id: u64, target: 
         // solid button, and the spot may now hold something else.
         let still_there = crate::map_state::get_server_state(server)
             .read()
-            .unwrap()
             .traps
             .iter()
             .any(|t| button_key(t) == old);

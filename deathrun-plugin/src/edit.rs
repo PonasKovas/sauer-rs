@@ -6,6 +6,7 @@ use crate::ui;
 use bytes::Bytes;
 use cube_string::{CubeString, IntoCubeStringLossy};
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use sauer_map::Map;
 use sauer_proto::{
     Client, channel0,
@@ -16,7 +17,6 @@ use sauer_server::{
     Server,
     plugin::{Context, Plugin},
 };
-use std::sync::RwLock;
 use tracing::{info, warn};
 
 pub const TRAP_EDIT_PARTICLE_ATTRS: [i32; 5] = [34, 100, 100, 0, 0];
@@ -84,7 +84,7 @@ impl Plugin for DeathrunEdit {
         crate::trap::placement::forget_seethrough(ctx.server(), id);
         crate::trap::place::cancel_for(ctx.server(), id, "the player left");
 
-        let mut state_w = get_server_state(ctx.server()).write().unwrap();
+        let mut state_w = get_server_state(ctx.server()).write();
         if let Some(map) = state_w.map.as_mut() {
             let up = map.clear_all_virt_ents_for_player(id);
             let cn = crate::SERVER_BOT_CN as i32;
@@ -104,8 +104,8 @@ impl Plugin for DeathrunEdit {
 
     async fn init(&self, server: &mut Server) {
         self.notes.install(server);
-        *server.map_name.write().unwrap() = "".lossy_cubestring();
-        *server.game_mode.write().unwrap() = GameMode::CoopEdit;
+        *server.map_name.write() = "".lossy_cubestring();
+        *server.game_mode.write() = GameMode::CoopEdit;
         server.reserve_cn(crate::SERVER_BOT_CN);
         let state = DeathrunState {
             map: Some(Map::default_empty()),
@@ -187,7 +187,7 @@ impl Plugin for DeathrunEdit {
         }
 
         {
-            let state = get_server_state(server).read().unwrap();
+            let state = get_server_state(server).read();
 
             let mut dist = 2048.0;
             if let Some(map) = state.map.as_ref() {
@@ -293,7 +293,7 @@ impl Plugin for DeathrunEdit {
         };
 
         if clear_highlight {
-            let mut state_w = get_server_state(server).write().unwrap();
+            let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.clear_virt_ents(id, "highlight");
                 let cn = crate::SERVER_BOT_CN as i32;
@@ -334,7 +334,7 @@ impl Plugin for DeathrunEdit {
                         attrs: [7, edge.3, edge.4, guard::GEOMETRY_COLOR, 0],
                     });
                 }
-                let mut state_w = get_server_state(server).write().unwrap();
+                let mut state_w = get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.update_virt_ents(id, "highlight", fake_ents);
                     let cn = crate::SERVER_BOT_CN as i32;
@@ -364,7 +364,7 @@ impl Plugin for DeathrunEdit {
                 }
                 hl_state_clone.active = true;
             } else if hl_state_clone.active {
-                let mut state_w = get_server_state(server).write().unwrap();
+                let mut state_w = get_server_state(server).write();
                 if let Some(map) = state_w.map.as_mut() {
                     let up = map.clear_virt_ents(id, "highlight");
                     let cn = crate::SERVER_BOT_CN as i32;
@@ -402,7 +402,7 @@ impl Plugin for DeathrunEdit {
 
         // Frames around entities the trap deletes (red) or creates (green).
         if update_highlight || target_changed {
-            let mut state_w = get_server_state(server).write().unwrap();
+            let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.update_virt_ents(id, "trap_ents", entity_frames);
                 let cn = crate::SERVER_BOT_CN as i32;
@@ -444,7 +444,7 @@ impl Plugin for DeathrunEdit {
 
         // --- WRITE PHASE 2: Update Particle Virt Ents ---
         if clear_particle {
-            let mut state_w = get_server_state(server).write().unwrap();
+            let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.clear_virt_ents(id, "edit_particle");
                 let cn = crate::SERVER_BOT_CN as i32;
@@ -511,7 +511,7 @@ impl Plugin for DeathrunEdit {
             let mut dist_edit = TRAP_EDIT_PARTICLE_MAX_DIST;
 
             {
-                let state_r = get_server_state(server).read().unwrap();
+                let state_r = get_server_state(server).read();
                 if let Some(map) = state_r.map.as_ref() {
                     if let Some(hit) = sauer_map::raycast::raycast_with_filter(
                         map,
@@ -535,7 +535,7 @@ impl Plugin for DeathrunEdit {
                 attrs: TRAP_EDIT_PARTICLE_ATTRS,
             };
 
-            let mut state_w = get_server_state(server).write().unwrap();
+            let mut state_w = get_server_state(server).write();
             if let Some(map) = state_w.map.as_mut() {
                 let up = map.update_virt_ents(id, "edit_particle", vec![fake_ent]);
                 let cn = crate::SERVER_BOT_CN as i32;
@@ -621,7 +621,7 @@ impl Plugin for DeathrunEdit {
         }
 
         let hit_pt = {
-            let state = get_server_state(&server).read().unwrap();
+            let state = get_server_state(&server).read();
             let map = match state.map.as_ref() {
                 None => return,
                 Some(m) => m,
@@ -702,7 +702,7 @@ impl Plugin for DeathrunEdit {
         }
 
         let trap_to_trigger = {
-            let state = crate::map_state::get_server_state(&server).read().unwrap();
+            let state = crate::map_state::get_server_state(&server).read();
             if state.mode.editing().is_some() {
                 return;
             }
@@ -753,7 +753,7 @@ impl Plugin for DeathrunEdit {
         }
 
         if let Some((_, step)) = self.pending_welcome.remove(&id) {
-            let has_map = get_server_state(server).read().unwrap().map.is_some();
+            let has_map = get_server_state(server).read().map.is_some();
             if matches!(step, WelcomeStep::InitialLoad) && has_map {
                 crate::map_state::send_map_to_async(server, id);
                 info!("sent map state to id {id} after welcome");
@@ -793,11 +793,7 @@ impl Plugin for DeathrunEdit {
     async fn map(&self, ctx: &mut Context, data: &Bytes) {
         let id = ctx.id();
 
-        let busy = get_server_state(ctx.server())
-            .read()
-            .unwrap()
-            .mode
-            .busy_reason();
+        let busy = get_server_state(ctx.server()).read().mode.busy_reason();
         if let Some(why) = busy {
             ui::send_warn(
                 ctx.server(),
@@ -907,7 +903,7 @@ impl Plugin for DeathrunEdit {
                     let loaded_traps_len = loaded.traps.len();
 
                     let uploading_map_name = {
-                        let mut s = get_server_state(&server_clone).write().unwrap();
+                        let mut s = get_server_state(&server_clone).write();
                         // Someone started editing or placing while the map was parsed.
                         if let Some(why) = s.mode.busy_reason() {
                             drop(s);
@@ -928,8 +924,8 @@ impl Plugin for DeathrunEdit {
                     };
                     info!("id {id} uploaded a map (world_size={world_size}); state loaded");
 
-                    *server_clone.map_name.write().unwrap() = uploading_map_name.clone();
-                    *server_clone.game_mode.write().unwrap() = GameMode::CoopEdit;
+                    *server_clone.map_name.write() = uploading_map_name.clone();
+                    *server_clone.game_mode.write() = GameMode::CoopEdit;
 
                     server_clone.broadcast_chan1(&sauer_proto::channel1::ServMsg {
                         text: format!(
@@ -1040,7 +1036,6 @@ impl Plugin for DeathrunEdit {
         } else {
             let s = get_server_state(ctx.server())
                 .read()
-                .unwrap()
                 .map
                 .as_ref()
                 .map(|m| m.size)
@@ -1080,10 +1075,8 @@ impl Plugin for DeathrunEdit {
                 ok = false;
             }
         });
-        let covers = crate::trap::place::covers_preview(
-            &get_server_state(ctx.server()).read().unwrap(),
-            (min, max),
-        );
+        let covers =
+            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), (min, max));
         if !ok || covers {
             handle_edit_reject(ctx, min, max);
         }
@@ -1097,10 +1090,8 @@ impl Plugin for DeathrunEdit {
                 ok = false;
             }
         });
-        let covers = crate::trap::place::covers_preview(
-            &get_server_state(ctx.server()).read().unwrap(),
-            (min, max),
-        );
+        let covers =
+            crate::trap::place::covers_preview(&get_server_state(ctx.server()).read(), (min, max));
         if !ok || covers {
             handle_edit_reject(ctx, min, max);
         }
@@ -1110,7 +1101,7 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server().clone();
 
-        if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
+        if *server.game_mode.read() != GameMode::CoopEdit {
             return;
         }
 
@@ -1120,7 +1111,6 @@ impl Plugin for DeathrunEdit {
 
         if let Some(state) = crate::map_state::get_server_state(&server)
             .write()
-            .unwrap()
             .map
             .as_mut()
         {
@@ -1171,7 +1161,7 @@ impl Plugin for DeathrunEdit {
         let id = ctx.id();
         let server = ctx.server();
 
-        let busy = get_server_state(server).read().unwrap().mode.busy_reason();
+        let busy = get_server_state(server).read().mode.busy_reason();
         if let Some(why) = busy {
             ui::send_warn(server, id, &format!("Cannot use newmap while {why}."));
             crate::map_state::send_map_to_async(ctx.server(), id);
@@ -1179,7 +1169,7 @@ impl Plugin for DeathrunEdit {
             return;
         }
         let server = ctx.server();
-        let mut state = get_server_state(server).write().unwrap();
+        let mut state = get_server_state(server).write();
         if packet.size >= 0 {
             let world_size = 1_i32 << packet.size.clamp(10, 16);
             state.map = Some(Map::new_empty(world_size));
@@ -1210,11 +1200,7 @@ impl Plugin for DeathrunEdit {
     async fn map_vote(&self, ctx: &mut Context, packet: &channel1::MapVote) {
         let id = ctx.id();
 
-        let busy = get_server_state(ctx.server())
-            .read()
-            .unwrap()
-            .mode
-            .busy_reason();
+        let busy = get_server_state(ctx.server()).read().mode.busy_reason();
         if let Some(why) = busy {
             ui::send_warn(
                 ctx.server(),
@@ -1232,7 +1218,7 @@ impl Plugin for DeathrunEdit {
         ctx.cancel();
         let server = ctx.server();
 
-        let mut state = get_server_state(server).write().unwrap();
+        let mut state = get_server_state(server).write();
         state.waiting_for_map = true;
         state.uploading_map_name = Some(packet.map_name.clone());
         drop(state);

@@ -41,7 +41,7 @@ where
     Client<T>: sauer_proto::PacketSequence<sauer_proto::route::S2C<sauer_proto::route::Chan1>>,
     T: Clone + sauer_proto::PacketDescriptor + std::fmt::Debug,
 {
-    if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
+    if *server.game_mode.read() != GameMode::CoopEdit {
         return;
     }
     if let Some(cn) = server.get_cn(id) {
@@ -65,7 +65,7 @@ fn reopen_if_masterless(server: &Server) {
         .any(|p| p.privilege >= Privilege::Master);
     if !has_master {
         server.clear_bans();
-        let reopen = *server.reopen_when_masterless.read().unwrap();
+        let reopen = *server.reopen_when_masterless.read();
         if reopen && server.master_mode() != MasterMode::Open {
             server.set_master_mode(MasterMode::Open);
         }
@@ -97,9 +97,9 @@ fn check_hit(server: &Server, target_id: u64, life_sequence: i32) -> bool {
 /// Updates server state for a map change, broadcasts `N_MAPCHANGE` to all clients,
 /// and clears all outstanding votes.
 fn do_map_change(server: &Server, map_name: cube_string::CubeString, mode: GameMode) {
-    *server.map_name.write().unwrap() = map_name.clone();
-    *server.game_mode.write().unwrap() = mode;
-    server.map_votes.write().unwrap().clear();
+    *server.map_name.write() = map_name.clone();
+    *server.game_mode.write() = mode;
+    server.map_votes.write().clear();
     server.broadcast_chan1(&MapChange {
         map_name,
         mode,
@@ -150,7 +150,7 @@ impl<P: Plugin> Plugin for Base<P> {
                 }
 
                 let spawning: Vec<usize> = {
-                    let mut items = server.items.write().unwrap();
+                    let mut items = server.items.write();
                     if items.notgotitems {
                         continue;
                     }
@@ -205,9 +205,9 @@ impl<P: Plugin> Plugin for Base<P> {
                 client_num: cn as i32,
                 protocol: sauer_proto::PROTOCOL_VERSION,
                 session_id,
-                has_password: *server.has_password.read().unwrap(),
-                server_desc: server.server_desc.read().unwrap().clone(),
-                server_auth: server.server_auth.read().unwrap().clone(),
+                has_password: *server.has_password.read(),
+                server_desc: server.server_desc.read().clone(),
+                server_auth: server.server_auth.read().clone(),
             },
         );
     }
@@ -224,12 +224,12 @@ impl<P: Plugin> Plugin for Base<P> {
         let server = ctx.server();
         match request {
             ServerQueryRequest::ServerInfo { ping_id } => {
-                let gamemode = *server.game_mode.read().unwrap() as i32;
-                let mastermode = *server.master_mode.read().unwrap() as i32;
-                let has_password = *server.has_password.read().unwrap();
+                let gamemode = *server.game_mode.read() as i32;
+                let mastermode = *server.master_mode.read() as i32;
+                let has_password = *server.has_password.read();
                 let mm = if has_password { 4 } else { mastermode };
-                let map_name = server.map_name.read().unwrap().clone();
-                let server_desc = server.server_desc.read().unwrap().clone();
+                let map_name = server.map_name.read().clone();
+                let server_desc = server.server_desc.read().clone();
 
                 let resp = ServerQueryResponse::ServerInfo {
                     ping_id: *ping_id,
@@ -278,7 +278,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
                                     let state = p.state.clone().unwrap_or_else(|| {
                                         crate::players::state::make_spawn_state(
-                                            server.game_mode.read().unwrap().is_insta(),
+                                            server.game_mode.read().is_insta(),
                                             0,
                                         )
                                     });
@@ -352,7 +352,7 @@ impl<P: Plugin> Plugin for Base<P> {
                                 let p = e.value();
                                 let state = p.state.clone().unwrap_or_else(|| {
                                     crate::players::state::make_spawn_state(
-                                        server.game_mode.read().unwrap().is_insta(),
+                                        server.game_mode.read().is_insta(),
                                         0,
                                     )
                                 });
@@ -390,8 +390,8 @@ impl<P: Plugin> Plugin for Base<P> {
                         }
                     }
                     ExtInfoRequest::TeamScore => {
-                        let game_mode = *server.game_mode.read().unwrap() as i32;
-                        let scores = if server.game_mode.read().unwrap().has_teams() {
+                        let game_mode = *server.game_mode.read() as i32;
+                        let scores = if server.game_mode.read().has_teams() {
                             Some(Vec::new()) // TODO: actual team scores
                         } else {
                             None
@@ -421,7 +421,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         clear_player(&server.players, id);
 
-        server.map_votes.write().unwrap().remove(&id);
+        server.map_votes.write().remove(&id);
 
         if let Some(cn) = server.get_cn(id) {
             server.broadcast_chan1(&channel1::ClientDisconnected {
@@ -451,7 +451,10 @@ impl<P: Plugin> Plugin for Base<P> {
             .unwrap_or_else(|| "?".to_string());
         info!("{} (cn {}) connected.", packet.name, cn_str);
 
-        if server.peer_addr(id).is_some_and(|a| server.is_banned(a.ip())) {
+        if server
+            .peer_addr(id)
+            .is_some_and(|a| server.is_banned(a.ip()))
+        {
             info!("{} (cn {}) is banned, disconnecting.", packet.name, cn_str);
             server.disconnect_with(id, crate::bans::DISC_IPBAN);
             return;
@@ -678,7 +681,7 @@ impl<P: Plugin> Plugin for Base<P> {
             let cmd = args.get(0).and_then(|s| s.as_str()).unwrap_or("");
 
             if cmd == "#help" {
-                let mut cmds = ctx.server().commands.read().unwrap().clone();
+                let mut cmds = ctx.server().commands.read().clone();
                 cmds.sort_by(|a, b| a.name.cmp(&b.name));
                 let mut lines = vec![crate::ui::header("SERVER COMMANDS")];
                 for c in cmds {
@@ -689,9 +692,9 @@ impl<P: Plugin> Plugin for Base<P> {
                     }
                     lines.push(crate::ui::tip(&usage, &c.desc));
                 }
-                lines.extend(ctx.server().help_lines.read().unwrap().iter().cloned());
+                lines.extend(ctx.server().help_lines.read().iter().cloned());
                 crate::ui::send_banner(ctx.server(), ctx.id(), &lines);
-            } else if !ctx.server().commands.read().unwrap().iter().any(|c| c.name == cmd) {
+            } else if !ctx.server().commands.read().iter().any(|c| c.name == cmd) {
                 crate::ui::send_warn(
                     ctx.server(),
                     id,
@@ -785,7 +788,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
 
-        *server.map_data.write().unwrap() = Some(data.clone());
+        *server.map_data.write() = Some(data.clone());
 
         let name = server.players.get(id).name.clone();
         let cn_str = server
@@ -804,7 +807,7 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
 
-        let map_bytes = server.map_data.read().unwrap().clone();
+        let map_bytes = server.map_data.read().clone();
         let Some(data) = map_bytes else { return };
 
         server.send_chan2(
@@ -858,10 +861,15 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let new = if target != id {
             // Give or take another player's master.
-            if own < Privilege::Master || theirs >= own || (packet.val && theirs != Privilege::None) {
+            if own < Privilege::Master || theirs >= own || (packet.val && theirs != Privilege::None)
+            {
                 return;
             }
-            if packet.val { Privilege::Master } else { Privilege::None }
+            if packet.val {
+                Privilege::Master
+            } else {
+                Privilege::None
+            }
         } else if packet.val {
             // Claim for yourself: admin with the right password, otherwise master.
             let want = if server.check_admin_pass(id, packet.hash.as_bytes()) {
@@ -963,7 +971,7 @@ impl<P: Plugin> Plugin for Base<P> {
     async fn set_team(&self, ctx: &mut Context, packet: &channel1::SetTeamClient) {
         let server = ctx.server();
         if server.get_privilege(ctx.id()) < Privilege::Master
-            || !server.game_mode.read().unwrap().has_teams()
+            || !server.game_mode.read().has_teams()
             || packet.team.as_bytes().is_empty()
         {
             return;
@@ -972,7 +980,14 @@ impl<P: Plugin> Plugin for Base<P> {
             return;
         };
         let stripped = packet.team.strip_colors();
-        let team = CubeString::from_bytes(stripped.as_bytes().iter().take(MAX_TEAM_LEN).copied().collect());
+        let team = CubeString::from_bytes(
+            stripped
+                .as_bytes()
+                .iter()
+                .take(MAX_TEAM_LEN)
+                .copied()
+                .collect(),
+        );
         if server.players.get(target).team != team {
             server.set_team(target, team, SetTeamReason::Forced);
         }
@@ -982,21 +997,16 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
         let privilege = server.get_privilege(id);
-        let prev_map = server.map_name.read().unwrap().clone();
+        let prev_map = server.map_name.read().clone();
 
         match server.master_mode() {
             MasterMode::Open => {
-                server
-                    .map_votes
-                    .write()
-                    .unwrap()
-                    .insert(id, packet.map_name.clone());
+                server.map_votes.write().insert(id, packet.map_name.clone());
 
                 let total_clients = server.client_count();
                 let vote_count = server
                     .map_votes
                     .read()
-                    .unwrap()
                     .values()
                     .filter(|v| **v == packet.map_name)
                     .count();
@@ -1012,9 +1022,9 @@ impl<P: Plugin> Plugin for Base<P> {
             }
         }
 
-        let new_map = server.map_name.read().unwrap().clone();
+        let new_map = server.map_name.read().clone();
         if new_map != prev_map {
-            let mode = *server.game_mode.read().unwrap();
+            let mode = *server.game_mode.read();
             if let Some(plugin) = self.plugin.upgrade() {
                 ctx.cancelled = false;
                 plugin.map_changed(ctx, &new_map, mode).await;
@@ -1071,13 +1081,13 @@ impl<P: Plugin> Plugin for Base<P> {
         let id = ctx.id();
         let server = ctx.server();
 
-        if *server.game_mode.read().unwrap() != GameMode::CoopEdit {
+        if *server.game_mode.read() != GameMode::CoopEdit {
             return;
         }
 
         let idx = packet.ent_id as usize;
         let new_item = {
-            let mut items = server.items.write().unwrap();
+            let mut items = server.items.write();
             match ItemType::try_from(packet.type_) {
                 Ok(item_type) => {
                     if items.list.len() <= idx {
@@ -1121,7 +1131,7 @@ impl<P: Plugin> Plugin for Base<P> {
         }
 
         if new_item {
-            server.items.write().unwrap().list[idx].spawned = true;
+            server.items.write().list[idx].spawned = true;
             server.broadcast_chan1(&ItemSpawn {
                 item_index: idx as i32,
             });
@@ -1130,7 +1140,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
     async fn new_map(&self, ctx: &mut Context, packet: &channel1::NewMap) {
         if packet.size >= 0 {
-            let mut items = ctx.server().items.write().unwrap();
+            let mut items = ctx.server().items.write();
             items.reset();
             items.notgotitems = false;
         }
@@ -1146,7 +1156,7 @@ impl<P: Plugin> Plugin for Base<P> {
             .try_get(id)
             .map_or(false, |p| p.client_state == ClientState::Spectator);
 
-        let mut items = server.items.write().unwrap();
+        let mut items = server.items.write();
         if !items.notgotitems || is_spectator {
             return;
         }
@@ -1186,15 +1196,9 @@ impl<P: Plugin> Plugin for Base<P> {
             }
             let quad_millis = p.quad_millis;
             p.state.as_ref().map_or(false, |s| {
-                server
-                    .items
-                    .read()
-                    .unwrap()
-                    .list
-                    .get(idx)
-                    .map_or(false, |item| {
-                        item.spawned && canpickup(s, quad_millis, item.item_type)
-                    })
+                server.items.read().list.get(idx).map_or(false, |item| {
+                    item.spawned && canpickup(s, quad_millis, item.item_type)
+                })
             })
         };
 
@@ -1211,7 +1215,7 @@ impl<P: Plugin> Plugin for Base<P> {
 
         let num_players = server.client_count();
         let item_type = {
-            let mut items = server.items.write().unwrap();
+            let mut items = server.items.write();
             let item = &mut items.list[idx];
             item.spawned = false;
             item.spawn_time_ms = spawntime(item.item_type, num_players);
@@ -1235,7 +1239,7 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn undo(&self, ctx: &mut Context, packet: &channel1::UndoClient) {
-        if *ctx.server().game_mode.read().unwrap() != GameMode::CoopEdit {
+        if *ctx.server().game_mode.read() != GameMode::CoopEdit {
             return;
         }
         let id = ctx.id();
@@ -1251,7 +1255,7 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn redo(&self, ctx: &mut Context, packet: &channel1::RedoClient) {
-        if *ctx.server().game_mode.read().unwrap() != GameMode::CoopEdit {
+        if *ctx.server().game_mode.read() != GameMode::CoopEdit {
             return;
         }
         let id = ctx.id();
@@ -1267,7 +1271,7 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn copy(&self, ctx: &mut Context, packet: &channel1::CopyClient) {
-        if *ctx.server().game_mode.read().unwrap() != GameMode::CoopEdit {
+        if *ctx.server().game_mode.read() != GameMode::CoopEdit {
             return;
         }
         let id = ctx.id();
@@ -1288,7 +1292,7 @@ impl<P: Plugin> Plugin for Base<P> {
     }
 
     async fn paste(&self, ctx: &mut Context, packet: &channel1::PasteClient) {
-        if *ctx.server().game_mode.read().unwrap() != GameMode::CoopEdit {
+        if *ctx.server().game_mode.read() != GameMode::CoopEdit {
             return;
         }
         let id = ctx.id();

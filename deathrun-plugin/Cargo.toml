@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+parking_lot.workspace = true
 sauer-server.workspace = true
 dashmap.workspace = true
 sauer-proto = { workspace = true, features = ["serde"] }
